@@ -184,12 +184,8 @@ The next conversation request opens a fresh socket and sends the full compacted
 context. Compaction spends time on separate summary and selection calls, and an idle
 socket can still report `Open` after its peer has closed it.
 Reopen starts from durable history, not a socket handle. Auxiliary calls and other
-routes stay on HTTP. Handshake failure before inference selects HTTP for the run.
-A WebSocket `response.failed` with no error details or with `server_error` also
-selects HTTP for the run and retries that exchange once from the full history,
-but only if no output items or deltas were received. An uncertain send, interrupted
-stream, partial output, or standalone error is never replayed automatically. Urd
-retains usage the failed response reports; a provider can omit failed-attempt usage.
+routes stay on HTTP. Handshake failure before inference selects HTTP for the run;
+an uncertain send or interrupted stream is never automatically replayed over HTTP.
 
 Offline managed-session tests exercise a namespaced tool loop, reopening with a
 fresh socket, partial streams, cancellation and stale completions without tool

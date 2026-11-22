@@ -3,17 +3,10 @@ using System.Net.WebSockets;
 
 namespace Urd.Core.Providers;
 
-public enum ProviderDiagnosticTerminalKind {
-  ResponseFailed,
-  StandaloneError
-}
-
 // Safe to persist: no exception messages, URLs, credentials or request content.
 public sealed record ProviderDiagnostic(ProviderRoute Route, Guid ConnectionId, Guid? SessionId, string Transport,
     string Stage, ProviderFailure Failure, int? HttpStatus, string? ExceptionType, string? HttpRequestError,
     string? SocketError, string? WebSocketError, string? WebSocketReceiveFailure) {
-  public ProviderDiagnosticTerminalKind? TerminalKind { get; init; }
-
   internal sealed record Cause(int? HttpStatus, string? ExceptionType, string? HttpRequestError,
       string? SocketError, string? WebSocketError, string? WebSocketReceiveFailure);
 

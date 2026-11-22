@@ -5,8 +5,7 @@ using System.Text.Json;
 namespace Urd.Core.Providers;
 
 // Adapts one Responses WebSocket turn to the SSE stream consumed by the native SDK.
-internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement> completed, Func<string, bool>? acceptId = null,
-    Action? allowHttpFallback = null) : Stream {
+internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement> completed, Func<string, bool>? acceptId = null) : Stream {
   // A completed response can contain the full native output plus response metadata.
   internal const int MaximumMessageBytes = LlmProviderContext.MaximumBytes + 1024 * 1024;
   private readonly byte[] receiveBuffer = new byte[8192];
@@ -14,7 +13,6 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
   private int pendingOffset;
   private string? responseId;
   private bool terminal;
-  private bool sawAnythingBeyondProgress;
   private bool failed;
   private ReceiveFailure? receiveFailure;
   private bool disposed;
@@ -105,15 +103,6 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
         if (type == "response.completed")
           completed(response.Clone());
       }
-      if (allowHttpFallback is not null) {
-        // Unknown events may carry output the SDK doesn't surface. Fail closed for replay.
-        bool progress = type == "response.created" || type == "response.in_progress" && objectId == responseId;
-        bool emptyOutput = !hasResponse || !response.TryGetProperty("output", out JsonElement output) ||
-            output.ValueKind == JsonValueKind.Array && output.GetArrayLength() == 0;
-        if (type == "response.failed" && emptyOutput && !sawAnythingBeyondProgress && IsRetryableFailure(response))
-          allowHttpFallback();
-        sawAnythingBeyondProgress |= !progress || !emptyOutput;
-      }
       terminal = type is "response.completed" or "response.incomplete" or "response.failed" or "error";
       // Reserializing eliminates literal newlines in the data field and produces valid SSE.
       byte[] json = JsonSerializer.SerializeToUtf8Bytes(root);
@@ -138,13 +127,6 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
       throw new ReceiveException(receiveFailure.Value, ProviderDiagnostic.Describe(error, null));
     }
   }
-
-  private static bool IsRetryableFailure(JsonElement response) =>
-      response.TryGetProperty("status", out JsonElement status) && status.ValueKind == JsonValueKind.String &&
-      status.ValueEquals("failed") &&
-      (!response.TryGetProperty("error", out JsonElement error) || error.ValueKind == JsonValueKind.Null ||
-          error.ValueKind == JsonValueKind.Object && error.TryGetProperty("code", out JsonElement code) &&
-          code.ValueKind == JsonValueKind.String && code.ValueEquals("server_error"));
 
   private async ValueTask<ValueWebSocketReceiveResult> ReceiveFrame(CancellationToken cancellationToken) {
     try {

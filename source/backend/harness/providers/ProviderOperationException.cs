@@ -21,7 +21,6 @@ public sealed class ProviderOperationException : Exception {
 
   public ProviderFailure Failure { get; }
   public string? Reason { get; }
-  internal ProviderDiagnosticTerminalKind? TerminalKind { get; private init; }
   internal ProviderDiagnostic.Cause? DiagnosticCause { get; private init; }
 
   internal static ProviderOperationException FromProviderError(Exception error,
@@ -57,15 +56,13 @@ public sealed class ProviderOperationException : Exception {
   }
 
   internal static ProviderOperationException FromProviderStreamError(string? code, string? message,
-      string? param, ProviderCredentials? credentials, ProviderDiagnosticTerminalKind? terminalKind = null) {
+      string? param, ProviderCredentials? credentials) {
     ProviderFailure failure = ProviderFailure.ProviderUnavailable;
     if (IsContextWindowExceededCode(code))
       failure = ProviderFailure.ContextWindowExceeded;
     else if (IsModelImageRejection(code, message))
       failure = ProviderFailure.ImageInputUnsupported;
-    return new(failure, FormatMessage(failure, message, code, param, null, null, null, credentials), null) {
-      TerminalKind = terminalKind
-    };
+    return Create(failure, message, code, param, null, null, credentials);
   }
 
   // Do not treat malformed images, unsupported formats or generic invalid requests as model capability evidence.
@@ -85,6 +82,10 @@ public sealed class ProviderOperationException : Exception {
       IsContextWindowExceededCode(ReadErrorDetails(error).Code);
 
   internal static bool IsContextWindowExceededCode(string? code) => code == "context_length_exceeded";
+
+  private static ProviderOperationException Create(ProviderFailure failure, string? message, string? code,
+      string? param, string? requestId, int? status, ProviderCredentials? credentials) =>
+      new(failure, FormatMessage(failure, message, code, param, requestId, status, null, credentials), null);
 
   private static string FormatMessage(ProviderFailure failure, string? message, string? code, string? param,
       string? requestId, int? status, string? exceptionType, ProviderCredentials? credentials) {

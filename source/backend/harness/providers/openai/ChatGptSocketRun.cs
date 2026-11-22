@@ -19,8 +19,6 @@ internal sealed class ChatGptSocketRun : IDisposable {
   private bool turnOpen;
   private bool disposed;
 
-  internal bool CanFallBackToHttp { get; private set; }
-
   internal static async Task<WebSocket> ConnectAsync(string accessToken, Guid sessionId, CancellationToken ct) {
     var client = new ClientWebSocket();
     var invoker = new HttpMessageInvoker(new SocketsHttpHandler { AllowAutoRedirect = false });
@@ -44,7 +42,6 @@ internal sealed class ChatGptSocketRun : IDisposable {
     ObjectDisposedException.ThrowIf(disposed, this);
     if (turnOpen)
       throw new InvalidOperationException("A socket turn is already open.");
-    CanFallBackToHttp = false;
     ct.ThrowIfCancellationRequested();
     if (httpOnly)
       return null;
@@ -91,13 +88,6 @@ internal sealed class ChatGptSocketRun : IDisposable {
     turnOpen = false;
     if (!accepted || !completed || socket?.State != WebSocketState.Open)
       Reset();
-  }
-
-  internal void LatchHttpOnly() {
-    if (turnOpen)
-      throw new InvalidOperationException("HTTP-only fallback can only be latched after a socket turn ends.");
-    httpOnly = true;
-    Reset();
   }
 
   // Rebuilt history cannot use the old continuation. Preserve any handshake-driven HTTP fallback.
@@ -150,7 +140,7 @@ internal sealed class ChatGptSocketRun : IDisposable {
         var stream = new ResponsesSocketStream(run.socket, response => {
           run.continuation.Complete(response);
           run.completed = true;
-        }, id => run.responseIds.Add(id), () => run.CanFallBackToHttp = true);
+        }, id => run.responseIds.Add(id));
         var content = new StreamContent(stream);
         content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = content, RequestMessage = request };

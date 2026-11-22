@@ -31,14 +31,13 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
     var progress = new InferenceStreamProgress(readStop, readTimeout ?? defaultReadTimeout,
         state.Connection.Route == ProviderRoute.ChatGpt ? sessionId : null) { Transport = state.Connection.Endpoint.Scheme };
     await using var stream = ReadExchangeAsync(state, messages, options, readStop, progress, sessionId, socketRun,
-        next => progress = next, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        cancellationToken).GetAsyncEnumerator(cancellationToken);
     while (true) {
       try {
         if (!await stream.MoveNextAsync().ConfigureAwait(false))
           break;
       } catch (ProviderOperationException failure) when (!cancellationToken.IsCancellationRequested) {
-        Report(state.Connection, sessionId, progress.Transport, progress.Stage, failure.Failure, failure.DiagnosticCause,
-            failure.TerminalKind);
+        Report(state.Connection, sessionId, progress.Transport, progress.Stage, failure.Failure, failure.DiagnosticCause);
         throw;
       }
       yield return stream.Current;
@@ -46,18 +45,17 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
   }
 
   private void Report(ProviderConnection connection, Guid? sessionId, string transport, string stage,
-      ProviderFailure failure, ProviderDiagnostic.Cause? cause, ProviderDiagnosticTerminalKind? terminalKind = null) =>
-      diagnose?.Invoke(new ProviderDiagnostic(connection.Route, connection.Id, sessionId, transport, stage, failure,
+      ProviderFailure failure, ProviderDiagnostic.Cause? cause) =>
+      diagnose?.Invoke(new(connection.Route, connection.Id, sessionId, transport, stage, failure,
           cause?.HttpStatus, cause?.ExceptionType, cause?.HttpRequestError, cause?.SocketError,
-          cause?.WebSocketError, cause?.WebSocketReceiveFailure) { TerminalKind = terminalKind });
+          cause?.WebSocketError, cause?.WebSocketReceiveFailure));
 
   private async IAsyncEnumerable<ChatResponseUpdate> ReadExchangeAsync(ProviderState state,
       IEnumerable<ChatMessage> messages, ChatOptions options, ProviderCancellation readStop,
       InferenceStreamProgress progress, Guid? sessionId, ChatGptSocketRun? socketRun,
-      Action<InferenceStreamProgress> setProgress, [EnumeratorCancellation] CancellationToken cancellationToken) {
+      [EnumeratorCancellation] CancellationToken cancellationToken) {
     HttpClient? turnClient = null;
     bool accepted = false;
-    ProviderCancellation? retryStop = null;
     try {
       IChatClient client;
       IReadOnlyList<ChatMessage> history;
@@ -90,112 +88,71 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
         throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
       }
 
-      while (true) {
-        ProviderOperationException? fallbackFailure = null;
+      using (client) {
+        var guard = new ProviderStreamState(scope, options.Tools, state.Connection.Route == ProviderRoute.ChatGpt,
+            state.Credentials);
+        IAsyncEnumerator<ChatResponseUpdate> stream;
         try {
-          using (client) {
-            var guard = new ProviderStreamState(scope, options.Tools, state.Connection.Route == ProviderRoute.ChatGpt,
-                state.Credentials);
-            IAsyncEnumerator<ChatResponseUpdate> stream;
+          stream = client.GetStreamingResponseAsync(history, wireOptions, progress.Token).GetAsyncEnumerator(progress.Token);
+        } catch (Exception error) when (CanClassify(error, cancellationToken)) {
+          cancellationToken.ThrowIfCancellationRequested();
+          throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
+        }
+        try {
+          while (await MoveNextAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false)) {
+            ChatResponseUpdate nativeUpdate = stream.Current;
+            if (nativeUpdate.RawRepresentation is not null)
+              progress.RecordUpdate();
+            UsageDetails? usage = ProviderTokenUsage.Read(nativeUpdate.RawRepresentation);
+            if (usage is not null) {
+              nativeUpdate.Contents = nativeUpdate.Contents.Where(content => content is not UsageContent).ToList();
+              yield return new ChatResponseUpdate(nativeUpdate.Role, [new UsageContent(usage)]) {
+                ResponseId = nativeUpdate.ResponseId,
+                MessageId = nativeUpdate.MessageId,
+                ModelId = nativeUpdate.ModelId,
+                CreatedAt = nativeUpdate.CreatedAt
+              };
+            }
+
+            BinaryData? toolArgumentDelta = estimate is not null && nativeUpdate.RawRepresentation is StreamingResponseFunctionCallArgumentsDeltaUpdate arguments
+                ? arguments.Delta : null;
+            ChatResponseUpdate? update;
             try {
-              stream = client.GetStreamingResponseAsync(history, wireOptions, progress.Token).GetAsyncEnumerator(progress.Token);
+              update = guard.Accept(nativeUpdate);
             } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-              cancellationToken.ThrowIfCancellationRequested();
               throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
             }
-            try {
-              while (await MoveNextAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false)) {
-                ChatResponseUpdate nativeUpdate = stream.Current;
-                if (nativeUpdate.RawRepresentation is not null)
-                  progress.RecordUpdate();
-                UsageDetails? usage = ProviderTokenUsage.Read(nativeUpdate.RawRepresentation);
-                if (usage is not null) {
-                  nativeUpdate.Contents = nativeUpdate.Contents.Where(content => content is not UsageContent).ToList();
-                  yield return new ChatResponseUpdate(nativeUpdate.Role, [new UsageContent(usage)]) {
-                    ResponseId = nativeUpdate.ResponseId,
-                    MessageId = nativeUpdate.MessageId,
-                    ModelId = nativeUpdate.ModelId,
-                    CreatedAt = nativeUpdate.CreatedAt
-                  };
-                }
-
-                BinaryData? toolArgumentDelta = estimate is not null && nativeUpdate.RawRepresentation is StreamingResponseFunctionCallArgumentsDeltaUpdate arguments
-                    ? arguments.Delta : null;
-                ChatResponseUpdate? update;
-                try {
-                  update = guard.Accept(nativeUpdate);
-                } catch (ProviderOperationException failure) when (turnClient is not null &&
-                    socketRun!.CanFallBackToHttp && failure.Failure == ProviderFailure.ProviderUnavailable &&
-                    failure.TerminalKind == ProviderDiagnosticTerminalKind.ResponseFailed &&
-                    !cancellationToken.IsCancellationRequested && !progress.Token.IsCancellationRequested) {
-                  fallbackFailure = failure;
-                  break;
-                } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-                  throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
-                }
-                if (toolArgumentDelta is not null) {
-                  update ??= new(); // No visible output or tool execution yet.
-                  (update.AdditionalProperties ??= [])[RequestContextEstimate.ToolArgumentDeltaProperty] = toolArgumentDelta;
-                }
-                if (update is not null) yield return update;
-              }
-            } finally {
-              try {
-                await DisposeAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false);
-              } finally {
-                // A timeout starts its own cancellation callbacks; join them before releasing the stream.
-                await readStop.CancelAsync().ConfigureAwait(false);
-              }
+            if (toolArgumentDelta is not null) {
+              update ??= new(); // No visible output or tool execution yet.
+              (update.AdditionalProperties ??= [])[RequestContextEstimate.ToolArgumentDeltaProperty] = toolArgumentDelta;
             }
-            cancellationToken.ThrowIfCancellationRequested();
-            if (fallbackFailure is null) {
-              ChatResponseUpdate final;
-              try {
-                final = guard.Complete();
-              } catch (Exception error) when (CanClassify(error, cancellationToken)) {
-                throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
-              }
-              // Calls and the positive finish are published only after native iteration AND cleanup.
-              accepted = true;
-              yield return final;
-              yield break;
-            }
+            if (update is not null) yield return update;
           }
         } finally {
-          HttpClient? closingClient = turnClient;
-          turnClient = null;
           try {
-            closingClient?.Dispose();
+            await DisposeAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false);
           } finally {
-            if (closingClient is not null)
-              socketRun!.EndTurn(accepted);
+            // A timeout starts its own cancellation callbacks; join them before releasing the stream.
+            await readStop.CancelAsync().ConfigureAwait(false);
           }
         }
         cancellationToken.ThrowIfCancellationRequested();
-        socketRun!.LatchHttpOnly();
-        Report(state.Connection, sessionId, "websocket", "stream-fallback", fallbackFailure.Failure,
-            fallbackFailure.DiagnosticCause, fallbackFailure.TerminalKind);
-        retryStop = new ProviderCancellation(Timeout.InfiniteTimeSpan, cancellationToken);
-        readStop = retryStop;
-        progress = new InferenceStreamProgress(readStop, readTimeout ?? defaultReadTimeout, sessionId) {
-          Transport = state.Connection.Endpoint.Scheme
-        };
-        setProgress(progress);
+        ChatResponseUpdate final;
         try {
-          client = CreateClient(state, options.ModelId!, progress, httpClient);
+          final = guard.Complete();
         } catch (Exception error) when (CanClassify(error, cancellationToken)) {
           throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
         }
+        // Calls and the positive finish are published only after native iteration AND cleanup.
+        accepted = true;
+        yield return final;
       }
     } finally {
-      retryStop?.Dispose();
-      // Preparation can fail after opening a socket but before entering the attempt.
-      if (turnClient is not null) {
-        try {
-          turnClient.Dispose();
-        } finally {
+      try {
+        turnClient?.Dispose();
+      } finally {
+        if (turnClient is not null)
           socketRun!.EndTurn(accepted);
-        }
       }
     }
   }

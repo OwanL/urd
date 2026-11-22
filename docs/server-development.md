@@ -191,9 +191,10 @@ when started. The queue is in memory and is lost on shutdown or revision replace
 current execution does not cancel a separately queued compaction.
 
 For `ask_user`, pass `question`, optional `context`, and `choices` (up to six suggestions;
-an empty array allows a custom answer only). The tool waits and returns exactly the submitted
-answer. Pending questions are live state, scoped to the primary session and announced through
-watched-session changes.
+an empty array allows a custom answer only). The tool returns exactly the submitted answer.
+By default the caller waits; the harness option `background: true` lets it continue and receive
+the answer later. Pending questions are live state, scoped to the primary session and announced
+through watched-session changes.
 Stopping the owning call removes the question; restarting the server does not restore it.
 
 History and descriptor-carrying position windows attach `toolLabels`; full arguments,

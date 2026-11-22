@@ -6,7 +6,6 @@ namespace Urd.Core.Tools;
 internal sealed class AskUserTool(SessionManager sessions) : HarnessTool {
   public override string Name => "ask_user";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
-  internal override bool SupportsBackgroundOption => false;
   public override string Description => "Ask the user one focused question and return their answer verbatim.";
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {

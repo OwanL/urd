@@ -119,16 +119,16 @@ public sealed class ResponsesTerminalDiagnosticsTests {
     Assert.Equal("ask_user", function.GetProperty("name").GetString());
     JsonElement schema = function.GetProperty("parameters");
     JsonElement properties = schema.GetProperty("properties");
-    Assert.Equal(new[] { "choices", "context", "question" },
+    Assert.Equal(new[] { "background", "choices", "context", "question" },
         properties.EnumerateObject().Select(property => property.Name).Order(StringComparer.Ordinal));
     Assert.Equal("string", properties.GetProperty("question").GetProperty("type").GetString());
     Assert.Equal("string", properties.GetProperty("context").GetProperty("type").GetString());
     Assert.Equal("array", properties.GetProperty("choices").GetProperty("type").GetString());
     Assert.Equal("string", properties.GetProperty("choices").GetProperty("items").GetProperty("type").GetString());
+    Assert.Equal("boolean", properties.GetProperty("background").GetProperty("type").GetString());
     Assert.Equal(new[] { "choices", "question" },
         schema.GetProperty("required").EnumerateArray().Select(value => value.GetString()).Order(StringComparer.Ordinal));
     string serializedSchema = schema.GetRawText();
-    Assert.DoesNotContain("\"background\"", serializedSchema, StringComparison.Ordinal);
     Assert.DoesNotContain("\"uniqueItems\"", serializedSchema, StringComparison.Ordinal);
     Assert.DoesNotContain("\"minLength\"", serializedSchema, StringComparison.Ordinal);
     Assert.DoesNotContain("\"maxLength\"", serializedSchema, StringComparison.Ordinal);

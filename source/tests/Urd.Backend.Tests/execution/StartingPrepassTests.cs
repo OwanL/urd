@@ -346,7 +346,7 @@ public sealed class StartingPrepassTests {
     async IAsyncEnumerable<ChatResponseUpdate> HeldTitle([EnumeratorCancellation] CancellationToken token) {
       titleHeld.TrySetResult();
       await titleRelease.Task.WaitAsync(token);
-      await foreach (ChatResponseUpdate update in TextUpdates([PublishedTitle], token)) yield return update;
+      await foreach (ChatResponseUpdate update in TextUpdates([PublishedTitle + "\n"], token)) yield return update;
     }
   }
 
@@ -411,6 +411,34 @@ public sealed class StartingPrepassTests {
       }
       yield return Text(KeepNothing);
     }
+  }
+
+  [Fact]
+  public async Task RejectedTitlesPublishFallbackAndSettleWhenTruncationLandsOnASpace() {
+    const string expectedTitle = "Fix the context estimate"; // 24 scalars; truncation takes the following space.
+    var client = new ScriptedChatClient((request, token) => request.Purpose switch {
+      "conversation" => TextUpdates(["done"], token),
+      "pruning.skills" => TextUpdates([KeepNothing], token),
+      "title" => TextUpdates(["invalid\nmultiline title"], token),
+      _ => throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.")
+    });
+    ProviderManager providers = null!;
+    await using var fixture = new ExecutionFixture(client, Array.Empty<AgentTool>(), store => providers = CreateProviders(store));
+    await ConfigureAuxiliaryModelAsync(fixture, providers);
+
+    Guid execution = await SubmitAndSettleAsync(fixture, expectedTitle + " indicator");
+
+    SessionSnapshot snapshot = await fixture.Session.ReadSnapshotAsync();
+    Assert.Equal(expectedTitle, snapshot.Title);
+    Assert.Null(snapshot.UnsettledExecutionId);
+    Assert.False(snapshot.AdmissionFenced);
+    Assert.Equal("fallback", fixture.Database.ReadRows(
+        $"SELECT state FROM session_prepass_details WHERE run_id = '{execution:D}' AND category = 'title';",
+        row => row.GetString(0)).Single());
+    Assert.Equal([0L, 1L], fixture.Database.ReadRows("""
+        SELECT r.request_index FROM auxiliary_requests r JOIN auxiliary_conversations c ON c.conversation_id = r.conversation_id
+        WHERE c.purpose = 'title' ORDER BY r.request_index;
+        """, row => row.GetInt64(0)));
   }
 
   [Fact]

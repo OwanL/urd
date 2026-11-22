@@ -32,7 +32,7 @@ public sealed class TitleGeneratorTests {
   }
 
   [Fact]
-  public async Task GenerationCorrectsOneTwentySixRuneAnswerAndAcceptsTheCorrectedTitle() {
+  public async Task GenerationCorrectsAnOverlongAnswerAndTrimsSurroundingLineEndings() {
     var mainWaiting = Signal();
     var mainRelease = Signal();
     var main = new ScriptedChatClient(token => Paused(mainWaiting, mainRelease, token));
@@ -65,6 +65,6 @@ public sealed class TitleGeneratorTests {
     }
 
     IAsyncEnumerable<ChatResponseUpdate> Script(CancellationToken token) =>
-        --scriptedCalls == 0 ? TextUpdates([corrected], token) : TextUpdates([tooLong], token);
+        --scriptedCalls == 0 ? TextUpdates([$"\r\n{corrected}\n"], token) : TextUpdates([tooLong], token);
   }
 }

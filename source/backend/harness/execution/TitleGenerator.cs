@@ -31,7 +31,7 @@ internal static class TitleGenerator {
       }
       collapsed.Append(rune.ToString());
     }
-    return collapsed.Length == 0 ? null : LimitScalars(collapsed.ToString(), MaximumCharacters);
+    return collapsed.Length == 0 ? null : LimitScalars(collapsed.ToString(), MaximumCharacters).TrimEnd();
   }
 
   // Keeps the leading Unicode scalars, dropping any partial trailing surrogate pair with them.
@@ -41,10 +41,14 @@ internal static class TitleGenerator {
         : value;
   }
 
-  internal static Task<string> GenerateAsync(ConversationRunner runner, AuxiliaryModelResolution model,
-      string prompt, CancellationToken cancellation) => runner.RunAsync("title", model, [
-        new(ChatRole.System, TitleGuidance.System),
-        new(ChatRole.User, prompt)
-      ], title => IsValid(title) ? null : TitleGuidance.Correction,
-      cancellation);
+  internal static async Task<string> GenerateAsync(ConversationRunner runner, AuxiliaryModelResolution model,
+      string prompt, CancellationToken cancellation) {
+    string answer = await runner.RunAsync("title", model, [
+      new(ChatRole.System, TitleGuidance.System),
+      new(ChatRole.User, prompt)
+    ], title => IsValid(TrimLineEndings(title)) ? null : TitleGuidance.Correction, cancellation);
+    return TrimLineEndings(answer);
+  }
+
+  private static string TrimLineEndings(string answer) => answer.Trim('\r', '\n');
 }

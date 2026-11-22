@@ -7,7 +7,7 @@ import "./prepass-details.css";
 
 // Read-only preparation detail surface. It mounts only while its tooltip is open: the
 // initial read and running polls abort on close, tab-hide or unmount, and accumulated
-// candidate and result pages clear with the surface.
+// kept resources clear with the surface.
 export function PrepassDetailsView({
   client,
   sessionId,
@@ -29,11 +29,11 @@ export function PrepassDetailsView({
   const [details, setDetails] = useState<PrepassDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
-  const candidates = useRef<PrepassResource[]>([]);
   const results = useRef<PrepassResource[]>([]);
-  const offsets = useRef({ candidate: 0, result: 0 });
+  const resultOffset = useRef(0);
   const published = useRef<PrepassDetails | null>(null);
   const loadMore = useRef<(() => void) | null>(null);
+  const scrollport = useRef<HTMLDivElement>(null);
   const running = details !== null && details.state === "running";
 
   useEffect(() => {
@@ -58,14 +58,6 @@ export function PrepassDetailsView({
     let knownRunning = false;
     const controller = new AbortController();
 
-    function append(
-      current: readonly PrepassResource[],
-      page: readonly PrepassResource[],
-    ): PrepassResource[] {
-      const known = new Set(current.map((item) => item.id));
-      return [...current, ...page.filter((item) => !known.has(item.id))];
-    }
-
     async function read() {
       if (inFlight || disposed) return;
       inFlight = true;
@@ -76,16 +68,20 @@ export function PrepassDetailsView({
             boundaryId,
             category,
             historyRevision,
-            candidateOffset: offsets.current.candidate,
-            resultOffset: offsets.current.result,
+            candidateOffset: 0,
+            resultOffset: resultOffset.current,
           },
           controller.signal,
         );
         if (disposed || controller.signal.aborted) return;
-        offsets.current.candidate += next.candidates.length;
-        offsets.current.result += next.results.length;
-        candidates.current = append(candidates.current, next.candidates);
-        results.current = append(results.current, next.results);
+        if (next.results.length > 0) {
+          resultOffset.current += next.results.length;
+          const known = new Set(results.current.map((item) => item.id));
+          results.current = [
+            ...results.current,
+            ...next.results.filter((item) => !known.has(item.id)),
+          ];
+        }
         knownRunning = next.state === "running";
         published.current = next;
         setDetails(next);
@@ -109,15 +105,10 @@ export function PrepassDetailsView({
       }, delay);
     }
 
-    // Scrolling the details surface pulls the next candidate/result page while it is open.
+    // Scrolling the details surface pulls the next page of kept resources while it is open.
     loadMore.current = () => {
-      const current = published.current;
-      if (inFlight || disposed || current === null) return;
-      const moreResults =
-        current.resultCount !== null &&
-        current.resultCount > 0 &&
-        results.current.length < current.resultCount;
-      if (candidates.current.length < current.candidateCount || moreResults) void read();
+      const count = published.current?.resultCount ?? 0;
+      if (resultOffset.current < count) void read();
     };
 
     void read();
@@ -129,7 +120,13 @@ export function PrepassDetailsView({
     };
   }, [hidden, client, sessionId, boundaryId, category, historyRevision]);
 
-  const candidatesList = candidates.current;
+  // A short page that fits inside the tooltip cannot trigger a scroll event.
+  useEffect(() => {
+    const node = scrollport.current;
+    if (details?.results.length && node && node.scrollHeight <= node.clientHeight)
+      loadMore.current?.();
+  }, [details]);
+
   const resultsList = results.current;
   const detailsScroll = (event: Event) => {
     const node = event.currentTarget;
@@ -155,7 +152,7 @@ export function PrepassDetailsView({
       : prepassCostLabel(details.costUsd, details.costIsEstimated, details.finishedAt !== null);
 
   return (
-    <div class="prepass-details" onScroll={detailsScroll}>
+    <div ref={scrollport} class="prepass-details" onScroll={detailsScroll}>
       <MetaSegments model={model} elapsed={elapsed} cost={cost} />
       {summaryError && <p class="prepass-details-error">{summaryError}</p>}
       {error && <p class="prepass-details-error">{error}</p>}
@@ -165,21 +162,6 @@ export function PrepassDetailsView({
       {details === null && error === null && <p class="prepass-details-note">Loading…</p>}
       {details && (
         <>
-          {details.candidateCount > 0 && candidatesList.length > 0 && (
-            <section class="prepass-details-section">
-              <div class="prepass-details-label">Candidates</div>
-              <ul class="prepass-details-list">
-                {candidatesList.map((candidate) => (
-                  <li key={candidate.id} title={candidate.path ?? candidate.id}>
-                    {candidate.label}
-                    {category === "instructions" && candidate.path && (
-                      <span class="prepass-details-path">{candidate.path}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
           {category === "title" ? (
             <div class="prepass-details-row">
               <span class="prepass-details-label">Title</span>
@@ -189,7 +171,7 @@ export function PrepassDetailsView({
             </div>
           ) : resultsList.length > 0 ? (
             <section class="prepass-details-section">
-              <div class="prepass-details-label">Results</div>
+              <div class="prepass-details-label">Kept</div>
               <ul class="prepass-details-list">
                 {resultsList.map((result) => (
                   <li key={result.id} title={result.path ?? result.id}>
@@ -203,14 +185,14 @@ export function PrepassDetailsView({
             </section>
           ) : settled ? (
             <div class="prepass-details-row">
-              <span class="prepass-details-label">Results</span>
+              <span class="prepass-details-label">Kept</span>
               <span class="prepass-details-result">
                 {details.resultCount === 0 ? "None selected" : "—"}
               </span>
             </div>
           ) : (
             <div class="prepass-details-row">
-              <span class="prepass-details-label">Results</span>
+              <span class="prepass-details-label">Kept</span>
               <span class="prepass-details-pending">
                 <PendingArc /> Pending
               </span>

@@ -99,12 +99,29 @@
 .user-question-form textarea {
   flex: 1;
   min-width: 0;
-  min-height: 34px;
-  padding: 5px 8px;
+  min-height: 36px;
+  max-height: min(24dvh, 8rem);
+  padding: 7px 10px;
   border: 1px solid var(--border-subtle);
-  border-radius: 5px;
-  background: transparent;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-input), var(--surface-hover) 55%);
+  line-height: 1.5;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-subtle) transparent;
   resize: vertical;
+}
+
+@supports (field-sizing: content) {
+  .user-question-form textarea {
+    field-sizing: content;
+    resize: none;
+  }
+}
+
+.user-question-form textarea::placeholder {
+  color: var(--text-secondary);
+  opacity: 1;
 }
 
 .user-question-form textarea:focus-visible {

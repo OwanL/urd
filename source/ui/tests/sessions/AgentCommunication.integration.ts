@@ -387,7 +387,7 @@ for (const answer of ["Choose café", '{\r\n  "answer": "Custom 東京 🧭"\r\n
       const args = {
         question: "Which option?",
         context: "Context café",
-        answers: ["Choose café", "Other"],
+        choices: ["Choose café", "Other"],
       };
       f.first.enqueue({
         text: "",
@@ -399,7 +399,9 @@ for (const answer of ["Choose café", '{\r\n  "answer": "Custom 東京 🧭"\r\n
       const question = await f.pending(id);
       assert.deepEqual(question, {
         id: question.id,
-        ...args,
+        question: args.question,
+        context: args.context,
+        answers: args.choices,
         sourceTitle: null,
         background: false,
       });
@@ -417,56 +419,6 @@ for (const answer of ["Choose café", '{\r\n  "answer": "Custom 東京 🧭"\r\n
   );
 }
 
-void test(
-  "background ask_user permits steering before its answer",
-  { timeout: 90_000 },
-  async (t) => {
-    const f = await setup(t);
-    const args = { question: "Background question?", answers: [], background: true };
-    f.first.enqueue({
-      text: "",
-      toolCall: { id: "call-background-user", name: "ask_user", arguments: args },
-    });
-    f.first.enqueue({ text: "Waiting for the answer." });
-    f.first.enqueue({ text: "Steering received." });
-    f.first.enqueue({ text: "Answer received." });
-    const id = await f.create();
-    const execution = await f.submit(id, f.firstConnection, "Ask in the background.");
-    const question = await f.pending(id);
-    assert.deepEqual(question, {
-      id: question.id,
-      question: args.question,
-      context: null,
-      answers: [],
-      sourceTitle: null,
-      background: true,
-    });
-    await f.poll(
-      async () => f.first.calls.length,
-      (count) => count >= 2,
-    );
-    await f.submit(id, f.firstConnection, "Steering before the answer.");
-    await f.poll(
-      async () => f.first.calls.length,
-      (count) => count >= 3,
-    );
-    assert.ok(
-      messages(f.first.calls[2]!.request).some((message) =>
-        text(message).includes("Steering before the answer."),
-      ),
-    );
-    assert.equal((await f.questions(id)).length, 1);
-    const answer = "Background answer";
-    assert.deepEqual(await f.answer(id, question.id, answer), { answer });
-    await f.settle(id, execution);
-    assert.ok(
-      f.first.calls
-        .slice(3)
-        .some(({ request }) => messages(request).some((message) => text(message).includes(answer))),
-    );
-  },
-);
-
 void test("a child ask_user is routed to its primary session", { timeout: 90_000 }, async (t) => {
   const f = await setup(t);
   f.first.enqueue({
@@ -483,7 +435,7 @@ void test("a child ask_user is routed to its primary session", { timeout: 90_000
     toolCall: {
       id: "call-child-user",
       name: "ask_user",
-      arguments: { question: "Child question?", answers: [] },
+      arguments: { question: "Child question?", choices: [] },
     },
   });
   f.second.enqueue({ text: "Child report." });
@@ -511,7 +463,7 @@ void test(
       toolCall: {
         id: "call-stop-user",
         name: "ask_user",
-        arguments: { question: "Stop?", answers: [] },
+        arguments: { question: "Stop?", choices: [] },
       },
     });
     const id = await f.create();

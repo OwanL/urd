@@ -15,6 +15,7 @@ internal abstract class AgentTool {
   // durable claim; an ask with wake false runs in the background because its answer may arrive
   // only opportunistically.
   internal virtual bool ForcesBackground(JsonElement arguments) => false;
+  internal virtual bool SupportsBackgroundOption => true;
 
   public abstract Task<ToolOutput> RunAsync(
     JsonElement arguments, ToolContext context, CancellationToken cancellation);

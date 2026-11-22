@@ -41,10 +41,11 @@ internal sealed class SessionToolExecution {
 
   // The effective background mode is decided before the durable claim: a tool whose arguments
   // force it, such as an ask with wake false, must be claimed as background work directly.
-  private bool ForcesBackground(LlmToolCall call) {
+  private bool RunsInBackground(LlmToolCall call) {
     AgentTool? tool = tools.FirstOrDefault(candidate =>
         string.Equals(candidate.Name, call.Name, StringComparison.Ordinal));
-    return tool is not null && tool.ForcesBackground(call.Arguments);
+    return tool is not null && (tool.ForcesBackground(call.Arguments) || tool.SupportsBackgroundOption &&
+        call.Arguments.TryGetProperty("background", out JsonElement option) && option.ValueKind == JsonValueKind.True);
   }
 
   internal async Task<ExecutionOutcome> RunBatchAsync(Guid requestId, IReadOnlyList<LlmToolCall> calls,
@@ -55,9 +56,7 @@ internal sealed class SessionToolExecution {
       foreach (LlmToolCall call in calls) {
         if (IsStopping)
           break;
-        bool runInBackground = call.Arguments.TryGetProperty("background", out JsonElement option)
-            && option.ValueKind == JsonValueKind.True
-            || ForcesBackground(call);
+        bool runInBackground = RunsInBackground(call);
         if (!await recorder.TryStartToolAsync(requestId, call.CallId, runInBackground)) {
           if (IsStopping)
             break;

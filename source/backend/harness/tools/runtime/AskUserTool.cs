@@ -6,19 +6,18 @@ namespace Urd.Core.Tools;
 internal sealed class AskUserTool(SessionManager sessions) : HarnessTool {
   public override string Name => "ask_user";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
-  public override string Description => "Ask the user one focused question. They can pick a suggested answer or write their own. "
-      + "Returns only their answer. Set background to true when you can keep working before the answer arrives.";
+  internal override bool SupportsBackgroundOption => false;
+  public override string Description => "Ask the user one focused question and return their answer verbatim.";
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {
       "type": "object",
       "properties": {
-        "question": { "type": "string", "minLength": 1, "maxLength": 8000 },
-        "context": { "type": "string", "maxLength": 8000, "description": "Optional context that helps the user decide." },
-        "answers": { "type": "array", "maxItems": 6, "uniqueItems": true,
-          "description": "Short suggested answers. Use an empty array for free text only.",
-          "items": { "type": "string", "minLength": 1, "maxLength": 8000 } }
+        "question": { "type": "string" },
+        "context": { "type": "string", "description": "Optional context that helps the user decide." },
+        "choices": { "type": "array", "items": { "type": "string" },
+          "description": "Up to six distinct suggested answers. Use an empty array for free text only." }
       },
-      "required": ["question", "answers"],
+      "required": ["question", "choices"],
       "additionalProperties": false
     }
     """);
@@ -31,10 +30,10 @@ internal sealed class AskUserTool(SessionManager sessions) : HarnessTool {
     string? explanation = arguments.TryGetProperty("context", out JsonElement supplied) ? supplied.GetString() : null;
     if (explanation?.Length > MaxTextLength)
       throw new ArgumentException($"Context must be at most {MaxTextLength} characters.");
-    JsonElement options = arguments.GetProperty("answers");
-    if (options.GetArrayLength() > 6)
+    JsonElement choices = arguments.GetProperty("choices");
+    if (choices.GetArrayLength() > 6)
       throw new ArgumentException("Supply at most six suggested answers.");
-    string[] answers = options.EnumerateArray().Select(option => ReadRequiredText(option.GetString(), "Answer")).ToArray();
+    string[] answers = choices.EnumerateArray().Select(choice => ReadRequiredText(choice.GetString(), "Answer")).ToArray();
     if (answers.Distinct(StringComparer.Ordinal).Count() != answers.Length)
       throw new ArgumentException("Suggested answers must be distinct.");
 

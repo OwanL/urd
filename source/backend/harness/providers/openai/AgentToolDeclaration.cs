@@ -8,6 +8,8 @@ namespace Urd.Core.Providers;
 // Describes Urd-owned tools at the SDK boundary without exposing SDK invocation.
 internal static class AgentToolDeclaration {
   internal static AIFunctionDeclaration Create(AgentTool tool) {
+    if (!tool.SupportsBackgroundOption)
+      return AIFunctionFactory.CreateDeclaration(tool.Name, tool.Description, tool.ParametersSchema);
     JsonObject schema = JsonNode.Parse(tool.ParametersSchema.GetRawText())!.AsObject();
     JsonObject properties = schema["properties"]?.AsObject() ?? new JsonObject();
     if (schema["properties"] is null)

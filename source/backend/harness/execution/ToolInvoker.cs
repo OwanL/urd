@@ -25,7 +25,7 @@ internal static class ToolInvoker {
       if (offered is null || offered.Description != current.Description
           || offered.JsonSchema.GetRawText() != current.JsonSchema.GetRawText())
         throw new InvalidOperationException($"Tool '{call.Name}' no longer matches its offered definition.");
-      JsonElement arguments = StripBackgroundOption(call.Arguments);
+      JsonElement arguments = tool.SupportsBackgroundOption ? StripBackgroundOption(call.Arguments) : call.Arguments;
       if (tool is HarnessTool harnessTool) {
         HarnessToolContext context = createHarnessContext?.Invoke(call.CallId, background)
             ?? throw new InvalidOperationException("Harness tools require a session execution.");

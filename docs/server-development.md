@@ -190,10 +190,10 @@ has `queued: true` and its execution ID is the operation ID; it becomes a normal
 when started. The queue is in memory and is lost on shutdown or revision replacement. Stopping the
 current execution does not cancel a separately queued compaction.
 
-For `ask_user`, pass `question`, optional `context`, and `answers` (up to six suggestions;
-an empty array allows a custom answer only). The existing `background: true` option lets the
-caller continue while waiting. The tool result is exactly the submitted answer. Pending questions
-are live state, scoped to the primary session and announced through watched-session changes.
+For `ask_user`, pass `question`, optional `context`, and `choices` (up to six suggestions;
+an empty array allows a custom answer only). The tool waits and returns exactly the submitted
+answer. Pending questions are live state, scoped to the primary session and announced through
+watched-session changes.
 Stopping the owning call removes the question; restarting the server does not restore it.
 
 History and descriptor-carrying position windows attach `toolLabels`; full arguments,

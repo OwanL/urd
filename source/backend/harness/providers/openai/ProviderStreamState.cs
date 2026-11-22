@@ -86,9 +86,10 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
         throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
       case StreamingResponseFailedUpdate failed:
         throw StreamFailure(failed.Response?.Error?.Code.ToString(), failed.Response?.Error?.Message,
-            failed.Response?.Error?.Param);
+            failed.Response?.Error?.Param, ProviderDiagnosticTerminalKind.ResponseFailed);
       case StreamingResponseErrorUpdate error:
-        throw StreamFailure(error.Code, error.Message, error.Param);
+        throw StreamFailure(error.Code, error.Message, error.Param,
+            ProviderDiagnosticTerminalKind.StandaloneError);
       case StreamingResponseOutputItemDoneUpdate done:
         ValidateItem(done.Item);
         string encoded = Encode(done.Item);
@@ -231,8 +232,9 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   private static int Add(int total, int count, string reason) =>
       count <= LlmProviderContext.MaximumBytes - total ? total + count : throw Invalid(reason);
   private static string Encode(ResponseItem item) => ModelReaderWriter.Write(item).ToString();
-  private ProviderOperationException StreamFailure(string? code, string? message, string? param) =>
-      ProviderOperationException.FromProviderStreamError(code, message, param, credentials);
+  private ProviderOperationException StreamFailure(string? code, string? message, string? param,
+      ProviderDiagnosticTerminalKind terminalKind) =>
+      ProviderOperationException.FromProviderStreamError(code, message, param, credentials, terminalKind);
 
   private static ProviderOperationException Invalid(string reason, string? identifier = null) {
     if (IsSafeIdentifier(identifier)) reason += $" '{identifier}'";

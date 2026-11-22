@@ -45,7 +45,7 @@ internal sealed class SessionStatus(long historyRevision) {
 
   private static string Read(bool needsAttention, bool admissionFenced, SessionExecutionDriver? execution, ExecutionOutcome? lastOutcome) {
     if (needsAttention)
-      return "needs-attention";
+      return execution?.CanCloseAfterFailure == true ? "faulted-can-close" : "needs-attention";
     if (admissionFenced)
       return "fenced";
     if (execution is not null) {

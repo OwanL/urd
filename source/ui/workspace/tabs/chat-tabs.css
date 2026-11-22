@@ -78,7 +78,8 @@
 
 .tab-status.status-failed,
 .tab-status.status-fenced,
-.tab-status.status-needs-attention {
+.tab-status.status-needs-attention,
+.tab-status.status-faulted-can-close {
   color: var(--text-primary);
 }
 

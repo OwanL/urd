@@ -98,6 +98,8 @@ void test(
       manualCompactionId: null,
       compactionUnavailableReason: "There is no history to compact.",
       admissionFenced: false,
+      requiresRecovery: false,
+      canCloseAfterFailure: false,
       isCompacting: false,
       unsettledExecutionId: null,
       stopRequested: false,

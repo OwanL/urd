@@ -82,8 +82,7 @@ internal sealed class SessionExecution : IDisposable {
     return stopCallbacks;
   }
 
-  // Called by the session only after every request and StopCallbacks have finished
-  // and the execution's result has been saved.
+  // The driver disposes only after all owned work and Stop callbacks have finished.
   public void Dispose() {
     CloseSocket();
     stop.Dispose();

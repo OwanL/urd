@@ -16,8 +16,9 @@ const statusLabels: Record<string, string> = {
   compacting: "Compacting",
   idle: "Idle",
   failed: "Failed",
-  fenced: "Fenced",
-  "needs-attention": "Needs attention",
+  fenced: "New messages blocked",
+  "needs-attention": "Needs recovery",
+  "faulted-can-close": "Run ended without a saved result",
   unavailable: "Session unavailable",
   "updates-paused": "Updates paused",
 };
@@ -162,11 +163,11 @@ export function ChatTabs({
                 : null;
         const indicatorStatus =
           status === "updates-paused" &&
-          ["failed", "fenced", "needs-attention"].includes(knownStatus ?? "")
+          ["failed", "fenced", "needs-attention", "faulted-can-close"].includes(knownStatus ?? "")
             ? knownStatus
             : status;
         const indicator =
-          indicatorStatus === "failed"
+          indicatorStatus === "failed" || indicatorStatus === "faulted-can-close"
             ? "!"
             : indicatorStatus === "fenced"
               ? "⊘"

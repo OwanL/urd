@@ -219,7 +219,7 @@ void test("Continue eligibility requires the core capability, idle session and n
   assert.equal(uncertain.canContinue, false);
 });
 
-void test("active execution steers selection; fencing locks without steering it", () => {
+void test("active execution steers selection; a blocked run locks without steering it", () => {
   const active = deriveChatStatus(
     { ...chat, knownExecutionId: executionId },
     snapshot({ unsettledExecutionId: executionId }),
@@ -240,8 +240,7 @@ void test("active execution steers selection; fencing locks without steering it"
     true,
   );
   assert.equal(fenced.active, false);
-  assert.equal(fenced.admissionFenced, true);
-  assert.equal(fenced.unsettledWhileFenced, true);
+  assert.equal(fenced.executionStatus, "blocked-run");
   assert.equal(fenced.selectionLocked, true);
   assert.equal(fenced.selection, selection);
   assert.equal(fenced.canSend, false);
@@ -273,7 +272,7 @@ void test("uncertain submissions and known executions retain their distinct stat
     true,
     true,
   );
-  assert.equal(settled.executionStatus, "accepted");
+  assert.equal(settled.executionStatus, null);
   assert.equal(settled.canSend, true);
   assert.equal(settled.canResendNotSent, true);
 });
@@ -303,7 +302,50 @@ void test("compaction blocks steering while ordinary active executions remain st
   assert.equal(compacting.canResendNotSent, false);
 });
 
-void test("stopping and explicit stop state take priority over settlement facts", () => {
+void test("a chat that needs recovery shows only the recovery state", () => {
+  const blocked = snapshot({
+    admissionFenced: true,
+    requiresRecovery: true,
+    unsettledExecutionId: executionId,
+    stopRequested: true,
+    lastSettlement: { executionId: otherExecutionId, outcome: "failed" },
+  });
+  const stop: ChatStopState = { executionId, pending: true, error: null };
+  const status = deriveChatStatus(
+    { ...chat, knownExecutionId: executionId },
+    blocked,
+    stop,
+    true,
+    true,
+  );
+  assert.equal(status.executionStatus, "recovery-required");
+  assert.equal(status.active, false);
+  assert.equal(status.canSend, false);
+  assert.equal(status.canContinue, false);
+  assert.equal(status.canResendNotSent, false);
+  assert.equal(
+    deriveChatStatus(chat, { ...blocked, canCloseAfterFailure: true }, stop, true, true)
+      .executionStatus,
+    "recovery-can-close",
+  );
+});
+
+void test("a blocked chat does not infer a recovery failure", () => {
+  const blocked = snapshot({ admissionFenced: true });
+  assert.equal(deriveChatStatus(chat, blocked, undefined, true, true).executionStatus, "blocked");
+  assert.equal(
+    deriveChatStatus(
+      { ...chat, knownExecutionId: executionId },
+      { ...blocked, unsettledExecutionId: executionId, stopRequested: true },
+      undefined,
+      true,
+      true,
+    ).executionStatus,
+    "blocked-run",
+  );
+});
+
+void test("stopping takes priority over settlement facts", () => {
   const stop: ChatStopState = { executionId, pending: true, error: null };
   const stopping = deriveChatStatus(
     chat,
@@ -317,7 +359,6 @@ void test("stopping and explicit stop state take priority over settlement facts"
   );
   assert.equal(stopping.stopId, executionId);
   assert.equal(stopping.executionStatus, "stopping");
-  assert.equal(stopping.settlementStatus, null);
   assert.equal(stopping.canResendNotSent, false);
 
   const stopRequested = deriveChatStatus(
@@ -327,8 +368,7 @@ void test("stopping and explicit stop state take priority over settlement facts"
     true,
     true,
   );
-  assert.equal(stopRequested.showStopRequested, true);
-  assert.equal(stopRequested.settlementStatus, null);
+  assert.equal(stopRequested.executionStatus, "stopping");
   assert.equal(stopRequested.canResendNotSent, false);
 
   const failed = deriveChatStatus(
@@ -338,8 +378,7 @@ void test("stopping and explicit stop state take priority over settlement facts"
     true,
     true,
   );
-  assert.equal(failed.showStopRequested, false);
-  assert.equal(failed.settlementStatus, "failed");
+  assert.equal(failed.executionStatus, "failed");
 
   const cancelled = deriveChatStatus(
     chat,
@@ -348,5 +387,5 @@ void test("stopping and explicit stop state take priority over settlement facts"
     true,
     true,
   );
-  assert.equal(cancelled.settlementStatus, "cancelled");
+  assert.equal(cancelled.executionStatus, "cancelled");
 });

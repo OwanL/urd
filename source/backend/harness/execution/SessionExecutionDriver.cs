@@ -9,6 +9,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   private readonly TaskCompletionSource<SessionExecutionResult> settlement = new(TaskCreationOptions.RunContinuationsAsynchronously);
   private TaskCompletionSource? executionWake;
   private Exception? backgroundToolFailure;
+  private bool savingSettlement;
 
   internal ExecutionIdentity Identity => execution.Identity;
   internal SessionExecutionRecorder Recorder => execution.Recorder;
@@ -21,6 +22,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   internal void SetCompacting(bool value) => execution.IsCompacting = value;
   internal bool IsWaitingForBackgroundTools { get; private set; }
   internal Task<SessionExecutionResult> Settlement => settlement.Task;
+  internal bool CanCloseAfterFailure { get; private set; }
 
   // Caller holds the session lock. The driver joins callbacks before settlement.
   internal Task StopAsync() {
@@ -86,19 +88,28 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
         stopCallbacks = StopAsync();
       }
       Task drained = Task.WhenAll(stopCallbacks, execution.JoinOwnedWorkAsync());
+      bool safeToClose = savingSettlement;
       try {
         await drained;
       } catch (Exception cleanupFailure) {
+        safeToClose = false;
         failure = new AggregateException(failure, drained.Exception ?? cleanupFailure);
       }
       try {
-        execution.CloseSocket();
+        if (safeToClose)
+          execution.Dispose();
+        else
+          execution.CloseSocket();
       } catch (Exception cleanupFailure) {
+        safeToClose = false;
         failure = new AggregateException(failure, cleanupFailure);
       }
       using (await sessionLock.AcquireAsync()) {
+        CanCloseAfterFailure = safeToClose;
         settlement.TrySetException(failure);
         _ = settlement.Task.Exception; // Observed even if nobody is waiting yet.
+        if (safeToClose)
+          session.PublishChange();
       }
     }
   }
@@ -144,8 +155,12 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
               if (next is not null)
                 return next;
             }
-            SessionExecutionResult saved = session.FinishExecution(this, outcome == ExecutionOutcome.Completed && IsStopping
-                ? ExecutionOutcome.Cancelled : outcome, out wakeStart);
+            // Only a failure after successfully joining this run can permit explicit close.
+            savingSettlement = true;
+            SessionExecutionResult saved = session.SaveSettlement(ExecutionId, outcome == ExecutionOutcome.Completed && IsStopping
+                ? ExecutionOutcome.Cancelled : outcome);
+            savingSettlement = false;
+            wakeStart = session.FinishExecution(this, saved);
             settlement.TrySetResult(saved);
           }
         }

@@ -251,17 +251,17 @@ export class WorkspaceCommands {
     const workspace = this.access.read();
     const chat = workspace.chats[id];
     const compaction = this.state.compactions[id];
+    const drainedFault = status === "faulted-can-close";
     return Boolean(
-      (status === "idle" || status === "failed") &&
+      (status === "idle" || status === "failed" || drainedFault) &&
       workspace.tabs.includes(id) &&
       chat &&
       this.access.canPersist() &&
       !chat.pending &&
       !chat.pendingContinuation &&
       !chat.messageEdit &&
-      !chat.knownExecutionId &&
+      (drainedFault || (!chat.knownExecutionId && !this.state.stopping[id])) &&
       !this.state.closing.has(id) &&
-      !this.state.stopping[id] &&
       !this.state.savingSubagentProviders.has(id) &&
       (!compaction || compaction.phase === "settled") &&
       !this.hasPendingInputRemoval(id),
@@ -277,7 +277,7 @@ export class WorkspaceCommands {
     } catch (cause) {
       if (!this.access.read().chats[id]) return;
       if (cause instanceof RequestError && cause.status === 409) {
-        this.reportCloseError(id, "Chat is busy. Wait for its work to finish before closing it.");
+        this.reportCloseError(id, "Chat is still busy or Urd can’t confirm its work has stopped.");
         this.refreshSnapshot();
       } else {
         // Even a 404 can mean the server lacks the close route. Check the session

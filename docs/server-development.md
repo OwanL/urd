@@ -140,7 +140,7 @@ provider calls.
 | Method and path | Request / successful response |
 | --- | --- |
 | POST `/api/sessions` | Empty JSON object `{}` → 201 `{sessionId}`; Location names its snapshot |
-| POST `/api/sessions/{sessionId}/close` | Empty JSON object `{}` → 204 after permanent closure; 404 if absent, 409 if busy. Does not stop an active execution. |
+| POST `/api/sessions/{sessionId}/close` | Empty JSON object `{}` → 204 after permanent closure; 404 if absent, 409 if work is active or cannot be confirmed stopped. Does not stop an active execution. |
 | GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`, optional first-page `latestLlmSelection`) |
 | POST `/api/sessions/{sessionId}/message-submissions` | `UserMessageSubmission` → 200 `UserMessageReceipt`, Accepted **or** Refused |
 | GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null`; 409 if an edit removed the input |
@@ -382,6 +382,12 @@ successful request completion and new LLM/tool work; snapshots include that loca
 not a promise it was saved. Actual tool-result evidence may still be persisted.
 The driver joins cancellation callbacks and LLM/tool cleanup, not the HTTP request.
 A held cleanup remains visibly stopping; callback faults leave fenced/unsettled work.
+
+Snapshot `requiresRecovery` distinguishes a session fault from a temporary admission fence.
+It does not mean cleanup has finished or that the last execution is safe to replay. If a final
+save fails after verified cleanup, `canCloseAfterFailure` and tab status `faulted-can-close`
+allow explicit permanent closure. Only the specific drained run can be deleted without a saved
+outcome; an unowned run or interrupted cleanup is not eligible.
 
 Errors: 400 malformed input/cursor, 413 oversized body/text, 415 non-JSON POST or unsupported charset,
 404 missing session/message/execution, 409 conflicting submission identity, stale content revision or unavailable Stop,

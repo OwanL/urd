@@ -149,8 +149,9 @@ wait for the live connection; drafts remain editable. Intentional background sus
 reported as a connection failure. Initial discovery failure offers an explicit connection retry;
 uncertain commands are never replayed by reconnecting.
 
-The close button and Delete request closure without a dialog. The workspace removes
-its tab, draft and chat record only once closure is confirmed.
+The close button and Delete request permanent closure without a dialog. If a run stopped but its
+final status could not be saved, closure is available only once the server confirms cleanup.
+The workspace removes its tab, draft and chat record only once closure is confirmed.
 The workspace keeps open chats' local state in this browser tab's `sessionStorage`.
 Ordinary draft edits write only that chat's draft record. A full workspace save folds in and then removes stale draft records; a
 newer draft overlay is retained. Command journals synchronously save the complete
@@ -357,9 +358,12 @@ The narrow choice column sizes to its content so Specific model remains fully re
 
 Execution feedback belongs in the scrollable transcript, directly after the latest entries,
 not in a separate footer above the composer. Followers stay at the tail; readers keep their
-position when feedback changes. The Context control reveals **Compact** on hover or keyboard
-focus and starts compaction directly; its descriptive tooltip retains context details and feedback,
-also reachable from More when context indicators overflow. When the server permits it, a request
+position when feedback changes. Show one run status at a time. A recovery fault explains why
+sending is blocked; an ordinary admission block does not imply a failure or require a restart.
+
+The Context control reveals **Compact** on hover or keyboard focus and starts compaction directly;
+its descriptive tooltip retains context details and feedback, also reachable from More when
+context indicators overflow. When the server permits it, a request
 made during work queues until execution and cleanup finish. The control shows queued and running
 states from the session snapshot; an acknowledged queue does not block steering. Hover or focus
 **Queued** to reveal **Cancel**. After compaction starts, use **Stop** instead. The control leaves composer

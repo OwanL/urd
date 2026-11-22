@@ -92,6 +92,21 @@ void test("close does not dispatch with a busy status or unresolved input", asyn
   assert.equal(read().chats[sessionId]?.pending?.original.text, "in-flight");
 });
 
+void test("a faulted chat can close once cleanup is verified even with a recorded execution", async () => {
+  const client = emptyClient();
+  let closed: string | undefined;
+  client.closeSession = async (id) => {
+    closed = id;
+  };
+  const { commands, access, read, forget } = setup(client);
+  access.updateChat(sessionId, (chat) => ({ ...chat, knownExecutionId: otherId }));
+  await commands.close(sessionId, "needs-attention", forget);
+  assert.equal(closed, undefined);
+  await commands.close(sessionId, "faulted-can-close", forget);
+  assert.equal(closed, sessionId);
+  assert.deepEqual(read().chats, {});
+});
+
 void test("409 preserves state and refreshes instead of treating busy as closed", async () => {
   const client = emptyClient();
   client.closeSession = async () => {

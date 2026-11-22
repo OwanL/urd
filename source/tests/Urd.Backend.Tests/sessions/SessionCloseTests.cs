@@ -136,6 +136,38 @@ public sealed class SessionCloseTests {
   }
 
   [Fact]
+  public async Task CanCloseAfterFinalSaveFailsAndOwnedWorkHasDrained() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(Complete);
+    await using var manager = new SessionManager(store, _ => client);
+    PrimarySession session = await manager.CreatePrimaryAsync();
+    Guid other = (await manager.CreatePrimaryAsync()).Id;
+    var statuses = new ConcurrentQueue<string?>();
+    using var subscribed = await session.SubscribeAsync(change => statuses.Enqueue(change.Status), watched: false);
+    database.Execute("""
+      CREATE TRIGGER reject_settlement BEFORE UPDATE OF outcome ON execution_runs
+      WHEN NEW.outcome IS NOT NULL
+      BEGIN SELECT RAISE(ABORT, 'Injected settlement write failure'); END;
+      """);
+    UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "hello", TestLlmSelection.Default));
+    Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
+    try {
+      await Assert.ThrowsAsync<SqliteException>(() => session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout));
+      Assert.True((await session.ReadSnapshotAsync()).CanCloseAfterFailure);
+      Assert.Equal("faulted-can-close", statuses.Last());
+      Assert.Equal(SessionCloseStatus.Closed, await manager.ClosePrimaryAsync(session.Id));
+      Assert.Null(store.Sessions.Read(session.Id));
+      Assert.NotNull(store.Sessions.Read(other));
+      Assert.Empty(StoredExecutions.Read(database));
+    } finally {
+      // Avoid masking a failed assertion with the deliberately faulted driver's shutdown.
+      if (!session.IsClosed)
+        await Assert.ThrowsAsync<AggregateException>(() => manager.ShutdownSessionsAsync());
+    }
+  }
+
+  [Fact]
   public async Task FailedDeletionLeavesCanonicalHandleAndObserversIntactForRetry() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

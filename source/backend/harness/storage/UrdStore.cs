@@ -105,12 +105,12 @@ public sealed class UrdStore : IDisposable {
     sessionImages.RemoveUnreferencedFiles();
   }
 
-  // The manager must have fenced new work and awaited settlement of the owned execution tree.
+  // The manager must have fenced new work and verified cleanup of the owned execution tree.
   internal bool DeletePrimarySession(Guid sessionId, CancellationToken cancellationToken = default) =>
-      DeletePrimarySessionTree(sessionId, cancellationToken) is not null;
+      DeletePrimarySessionTree(sessionId, drainedRun: null, cancellationToken) is not null;
 
-  internal IReadOnlyList<Guid>? DeletePrimarySessionTree(Guid sessionId, CancellationToken cancellationToken = default) =>
-      sessionClosure.DeletePrimary(sessionId, cancellationToken);
+  internal IReadOnlyList<Guid>? DeletePrimarySessionTree(Guid sessionId, Guid? drainedRun, CancellationToken cancellationToken) =>
+      sessionClosure.DeletePrimary(sessionId, drainedRun, cancellationToken);
 
   public bool IsSetupComplete() => database.Read(transaction =>
       database.Scalar<long>(transaction, "SELECT EXISTS(SELECT 1 FROM setup_completion WHERE singleton = 1);") != 0);

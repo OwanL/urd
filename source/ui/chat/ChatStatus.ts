@@ -4,8 +4,18 @@ import { submissionTextError } from "../sessions/inputs/UserMessageSubmission.ts
 import { idleChatSelection, type ChatState } from "./ChatState.ts";
 import type { ChatStopState } from "./ChatCommands.ts";
 
-export type ChatExecutionStatus = "stopping" | "running" | "accepted" | "compacting" | null;
-export type ChatSettlementStatus = "failed" | "cancelled" | null;
+export type ChatExecutionStatus =
+  | "recovery-required"
+  | "recovery-can-close"
+  | "blocked-run"
+  | "blocked"
+  | "stopping"
+  | "running"
+  | "accepted"
+  | "compacting"
+  | "failed"
+  | "cancelled"
+  | null;
 
 export interface ChatStatus {
   active: boolean;
@@ -17,11 +27,7 @@ export interface ChatStatus {
   canContinue: boolean;
   continuationAvailable: boolean;
   canResendNotSent: boolean;
-  admissionFenced: boolean;
-  unsettledWhileFenced: boolean;
   executionStatus: ChatExecutionStatus;
-  showStopRequested: boolean;
-  settlementStatus: ChatSettlementStatus;
   pendingStatus: "sending" | "uncertain" | null;
 }
 
@@ -92,23 +98,6 @@ export function deriveChatStatus(
     !stop &&
     !pendingCommand,
   );
-  const admissionFenced = Boolean(snapshot?.admissionFenced);
-  const unsettledWhileFenced = Boolean(snapshot?.unsettledExecutionId && admissionFenced);
-  const executionStatus: ChatExecutionStatus = active
-    ? snapshot?.stopRequested || stopId
-      ? "stopping"
-      : compacting
-        ? "compacting"
-        : "running"
-    : chat.knownExecutionId
-      ? "accepted"
-      : null;
-  const showStopRequested = !active && Boolean(snapshot?.stopRequested);
-  let settlementStatus: ChatSettlementStatus = null;
-  if (!active && !chat.knownExecutionId && !stopId && !snapshot?.stopRequested) {
-    if (snapshot?.lastSettlement?.outcome === "failed") settlementStatus = "failed";
-    else if (snapshot?.lastSettlement?.outcome === "cancelled") settlementStatus = "cancelled";
-  }
 
   return {
     active,
@@ -118,13 +107,25 @@ export function deriveChatStatus(
     textError,
     canSend,
     canResendNotSent,
-    admissionFenced,
-    unsettledWhileFenced,
-    executionStatus,
-    showStopRequested,
-    settlementStatus,
+    executionStatus: executionStatus(snapshot, chat.knownExecutionId, stopId),
     pendingStatus: chat.pending?.status ?? null,
     canContinue,
     continuationAvailable,
   };
+}
+
+function executionStatus(
+  snapshot: SessionSnapshot | null,
+  knownExecutionId: string | null,
+  stopId: string | undefined,
+): ChatExecutionStatus {
+  if (snapshot?.requiresRecovery)
+    return snapshot.canCloseAfterFailure ? "recovery-can-close" : "recovery-required";
+  if (snapshot?.admissionFenced) return snapshot.unsettledExecutionId ? "blocked-run" : "blocked";
+  if (stopId || snapshot?.stopRequested) return "stopping";
+  if (snapshot?.unsettledExecutionId) return snapshot.isCompacting ? "compacting" : "running";
+  const settlement = snapshot?.lastSettlement;
+  if (knownExecutionId && knownExecutionId !== settlement?.executionId) return "accepted";
+  const outcome = settlement?.outcome;
+  return outcome === "failed" || outcome === "cancelled" ? outcome : null;
 }

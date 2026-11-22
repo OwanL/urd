@@ -36,6 +36,8 @@ export interface SessionSnapshot {
   readonly workingDirectory: string | null;
   readonly canChangeWorkingDirectory: boolean;
   readonly admissionFenced: boolean;
+  readonly requiresRecovery?: boolean;
+  readonly canCloseAfterFailure?: boolean;
   readonly canContinue: boolean;
   readonly canCompact?: boolean;
   readonly queuedCompactionId?: string | null;

@@ -251,7 +251,9 @@ public sealed class SessionSubscriptionTests {
     Assert.True(fenceStatuses.SequenceEqual(new string?[] { "fenced" })
         || fenceStatuses.SequenceEqual(new string?[] { "idle", "fenced" }));
     Assert.All(fenceChanges, change => Assert.NotNull(change.Status));
-    Assert.True((await fixture.Session.ReadSnapshotAsync()).AdmissionFenced);
+    SessionSnapshot snapshot = await fixture.Session.ReadSnapshotAsync();
+    Assert.True(snapshot.AdmissionFenced);
+    Assert.False(snapshot.RequiresRecovery);
   }
 
   [Fact]
@@ -277,10 +279,13 @@ public sealed class SessionSubscriptionTests {
     Assert.Equal(19, Assert.IsType<SqliteException>(failure.GetBaseException()).SqliteErrorCode);
     SessionSnapshot snapshot = await session.ReadSnapshotAsync();
     Assert.True(snapshot.AdmissionFenced);
+    Assert.True(snapshot.RequiresRecovery);
+    Assert.True(snapshot.StopRequested);
     Assert.Equal(executionId, snapshot.UnsettledExecutionId);
     Assert.Null(snapshot.LastSettlement);
     SessionChange[] notifications = changes.ToArray();
-    Assert.Equal("needs-attention", notifications.Last(change => change.Status is not null).Status);
+    Assert.Contains(notifications, change => change.Status == "needs-attention");
+    Assert.Equal("faulted-can-close", notifications.Last(change => change.Status is not null).Status);
     Assert.Null(notifications[^1].Status);
     Assert.Equal(notifications[^2].Version, notifications[^1].Version);
   }
@@ -305,7 +310,10 @@ public sealed class SessionSubscriptionTests {
         () => session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value).WaitAsync(TestTimeout));
 
     Assert.Equal("needs-attention", changes.Last().Status);
-    Assert.True((await session.ReadSnapshotAsync()).AdmissionFenced);
+    SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+    Assert.True(snapshot.AdmissionFenced);
+    Assert.False(snapshot.CanCloseAfterFailure);
+    Assert.Equal(SessionCloseStatus.Busy, await manager.ClosePrimaryAsync(session.Id));
   }
 
   private static string[] StatusTransitions(IEnumerable<SessionChange> changes) {

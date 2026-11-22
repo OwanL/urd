@@ -83,16 +83,19 @@ public abstract class SessionBase {
     cancellation.ThrowIfCancellationRequested();
     if (closed)
       return (SessionCloseStatus.NotFound, null);
-    if (!CanStartWork || CurrentExecution is not null)
+    Guid? drainedRun = CurrentExecution is { CanCloseAfterFailure: true } driver ? driver.ExecutionId : null;
+    if (messageEditing.IsEditing || (drainedRun is null && (!CanStartWork || CurrentExecution is not null)))
       return (SessionCloseStatus.Busy, null);
 
     SessionSnapshot snapshot = ReadCurrentSnapshot();
-    if (snapshot.UnsettledExecutionId is not null || snapshot.AdmissionFenced || snapshot.StopRequested)
+    if (drainedRun is null
+        ? snapshot.UnsettledExecutionId is not null || snapshot.AdmissionFenced || snapshot.StopRequested
+        : snapshot.UnsettledExecutionId is { } unsettled && unsettled != drainedRun)
       return (SessionCloseStatus.Busy, null);
 
-    // The session gate serializes deletion with admission, edit, and settlement. Don't tear down
-    // live resources on a failed delete: the saved session would otherwise be left unusable.
-    IReadOnlyList<Guid>? deletedSessions = store.DeletePrimarySessionTree(Id, CancellationToken.None);
+    // The gate serializes deletion with admission. Only the specific run whose driver verified
+    // cleanup can be deleted without a saved outcome. The store checks the entire tree.
+    IReadOnlyList<Guid>? deletedSessions = store.DeletePrimarySessionTree(Id, drainedRun, CancellationToken.None);
     if (deletedSessions is null)
       return (SessionCloseStatus.NotFound, null);
 
@@ -168,6 +171,8 @@ public abstract class SessionBase {
         && CurrentExecution is { IsStopping: false } && snapshot.UnsettledExecutionId == CurrentExecution.ExecutionId;
     string? compactionReason = CompactionUnavailableReason(snapshot);
     return snapshot with {
+      RequiresRecovery = needsAttention,
+      CanCloseAfterFailure = CurrentExecution?.CanCloseAfterFailure == true,
       IsCompacting = CurrentExecution?.IsCompacting == true,
       QueuedCompactionId = manualCompaction.QueuedId,
       ManualCompactionId = CurrentExecution is { IsManualCompaction: true } manual ? manual.ExecutionId : null,
@@ -266,23 +271,21 @@ public abstract class SessionBase {
       ManualCompactionRequest? compaction = null, LlmRequest? firstRequest = null, string? compactionSkipReason = null) =>
       activeExecution.Register(executionId, selection, compaction, firstRequest, compactionSkipReason);
 
-  // Caller holds the session lock. Save before releasing resources and publishing; only then may
-  // the driver complete its settlement task. An ordinary settlement also admits a queued waking
-  // ask, so authorization cannot be stranded by a settlement that never presented it.
-  internal SessionExecutionResult FinishExecution(SessionExecutionDriver execution, ExecutionOutcome outcome,
-      out TaskCompletionSource? wakeStart) {
-    SessionExecutionResult saved = store.Executions.TryFinish(Id, execution.ExecutionId, outcome)
+  // Caller holds the session lock. Save before releasing resources or publishing settlement.
+  internal SessionExecutionResult SaveSettlement(Guid executionId, ExecutionOutcome outcome) =>
+      store.Executions.TryFinish(Id, executionId, outcome)
         ?? throw new InvalidOperationException("The current execution could not be settled.");
 
+  // Caller holds the session lock. A completed run may admit a queued waking ask.
+  internal TaskCompletionSource? FinishExecution(SessionExecutionDriver execution, SessionExecutionResult saved) {
     Questions.FinishExecution();
     execution.Release();
     activeExecution.Clear();
     status.Settled(saved);
     PublishChange();
-    wakeStart = saved.Outcome == ExecutionOutcome.Completed ? Questions.StartPendingQuestionRun() : null;
+    TaskCompletionSource? wakeStart = saved.Outcome == ExecutionOutcome.Completed ? Questions.StartPendingQuestionRun() : null;
     // Stop cancels the current execution, not an independently accepted queued compaction.
-    wakeStart ??= manualCompaction.StartQueued();
-    return saved;
+    return wakeStart ?? manualCompaction.StartQueued();
   }
 
   private bool IsCurrentExecution(Guid executionId) => activeExecution.IsCurrent(executionId);

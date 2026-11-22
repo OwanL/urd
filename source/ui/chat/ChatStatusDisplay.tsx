@@ -1,12 +1,19 @@
 import type { ChatExecutionStatus, ChatStatus } from "./ChatStatus.ts";
 
 const executionLabels: Record<Exclude<ChatExecutionStatus, null>, string> = {
+  "recovery-required":
+    "Urd couldn’t safely finish this chat’s last operation. New messages are blocked. Restart Urd once your other chats are idle.",
+  "recovery-can-close":
+    "The run ended, but Urd couldn’t save its final status. Restart Urd to keep this chat, or close it to delete it permanently.",
+  "blocked-run": "The last run hasn’t finished. New messages are blocked.",
+  blocked: "This chat can’t accept new messages right now.",
   stopping: "Stopping…",
   running: "Running…",
-  accepted: "Accepted; awaiting session update.",
+  accepted: "Request accepted. Waiting for a status update…",
   compacting: "Compacting…",
+  failed: "Run failed.",
+  cancelled: "Cancelled.",
 };
-const settlementLabels = { failed: "Execution failed.", cancelled: "Cancelled." };
 
 interface ChatStatusDisplayProps {
   error: string | null | undefined;
@@ -16,16 +23,7 @@ interface ChatStatusDisplayProps {
   readError: string | null;
   onRefresh(): void;
   provisioning: string | null;
-  state: Pick<
-    ChatStatus,
-    | "admissionFenced"
-    | "unsettledWhileFenced"
-    | "executionStatus"
-    | "showStopRequested"
-    | "settlementStatus"
-    | "pendingStatus"
-    | "textError"
-  >;
+  state: Pick<ChatStatus, "executionStatus" | "pendingStatus" | "textError">;
   settlementError: string | null | undefined;
   continuationStatus: "sending" | "uncertain" | null;
   editStatus: {
@@ -67,6 +65,14 @@ export function ChatStatusDisplay({
   onCheckEdit,
   onRetryEdit,
 }: ChatStatusDisplayProps) {
+  const status = state.executionStatus;
+  const canCheckStatus = status === "blocked" || status === "blocked-run";
+  const statusClass =
+    status === "running"
+      ? "chat-running-announcement"
+      : status === "recovery-required" || status === "recovery-can-close" || status === "failed"
+        ? "inline-error"
+        : undefined;
   return (
     <div class="chat-status" aria-live="polite">
       {error && <span class="inline-error">{error} </span>}
@@ -77,21 +83,14 @@ export function ChatStatusDisplay({
       )}
       {readError && <button onClick={onRefresh}>Refresh</button>}
       {provisioning && <span>{provisioning} </span>}
-      {state.admissionFenced && <span>Session admission is fenced. </span>}
-      {state.unsettledWhileFenced && <span>Unsettled execution. </span>}
-      {state.executionStatus && (
-        <span class={state.executionStatus === "running" ? "chat-running-announcement" : undefined}>
-          {executionLabels[state.executionStatus]}{" "}
+      {status && (
+        <span class={statusClass}>
+          {status === "failed"
+            ? settlementError || executionLabels.failed
+            : executionLabels[status]}{" "}
         </span>
       )}
-      {state.showStopRequested && <span>Stop requested. </span>}
-      {state.settlementStatus && (
-        <span class={state.settlementStatus === "failed" ? "inline-error" : undefined}>
-          {state.settlementStatus === "failed"
-            ? settlementError || settlementLabels.failed
-            : settlementLabels.cancelled}{" "}
-        </span>
-      )}
+      {canCheckStatus && !readError && <button onClick={onRefresh}>Check status</button>}
       {state.pendingStatus && (
         <span>
           {state.pendingStatus === "sending"

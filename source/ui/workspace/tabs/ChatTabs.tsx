@@ -3,9 +3,8 @@ import { useLayoutEffect, useState } from "preact/hooks";
 import type { SubagentLink } from "../../chat/subagents/SubagentNavigation.ts";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
-import { Tooltip } from "../../controls/Tooltip.tsx";
 import { isBusySessionStatus } from "../SessionActivity.ts";
-import { SubagentMenu } from "./SubagentMenu.tsx";
+import { SubagentMenu, useSubagentMenu } from "./SubagentMenu.tsx";
 import { moveTab } from "./TabOrder.ts";
 import { useTabDrag } from "./useTabDrag.ts";
 import "./chat-tabs.css";
@@ -58,6 +57,15 @@ export function ChatTabs({
     reorder(id, beforeId);
     focusTab(id);
   });
+
+  const subagents = useSubagentMenu();
+  const { target, close: closeMenu } = subagents;
+  const dragging = drag.draggedId !== null;
+  const menuTab = target && tabs.find((tab) => tab.id === target.rootId);
+  const menuUnavailable = !!target && !isBusySessionStatus(menuTab?.status);
+  useLayoutEffect(() => {
+    if (dragging || menuUnavailable) closeMenu();
+  }, [dragging, menuUnavailable, closeMenu]);
 
   function focusTab(id: string) {
     requestAnimationFrame(() => {
@@ -149,6 +157,10 @@ export function ChatTabs({
     >
       {tabs.map(({ id, title, status, knownStatus, closeAvailable, closing }) => {
         const busy = isBusySessionStatus(status);
+        const canShowAgents = busy && !!loadSubagents && !!onOpenSubagent;
+        const shortcuts = ["Alt+Shift+ArrowLeft Alt+Shift+ArrowRight"]; // gitleaks:allow -- public keyboard shortcuts, not a credential
+        if (closeAvailable) shortcuts.push("Delete");
+        if (canShowAgents) shortcuts.push("Shift+F10");
         const pausedBusy = status === "updates-paused" && isBusySessionStatus(knownStatus);
         const completed = unread.has(id) && id !== activeId && status === "idle";
         const lastKnownLabel = knownStatus ? (statusLabels[knownStatus] ?? knownStatus) : null;
@@ -184,100 +196,82 @@ export function ChatTabs({
             key={id}
             data-tab-id={id}
             class={`chat-tab ${id === activeId ? "is-active" : ""} ${drag.draggedId === id ? "is-dragging" : ""} ${completed ? "has-unread" : ""}`}
-          >
-            <Tooltip
-              disabled={drag.draggedId !== null}
-              placement="below"
-              content={
-                <>
-                  {title}
-                  {statusLabel && <span class="tooltip-detail">{statusLabel}</span>}
-                  <span class="tooltip-detail">
-                    Move tab <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>← / →</kbd>
-                  </span>
-                </>
-              }
-            >
-              <button
-                id={`tab-${id}`}
-                role="tab"
-                aria-label={`${title}${statusLabel ? `, ${statusLabel}` : ""}`}
-                aria-selected={id === activeId}
-                aria-busy={closing}
-                aria-controls="chat-view"
-                aria-keyshortcuts={
-                  closeAvailable
-                    ? "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight Delete"
-                    : "Alt+Shift+ArrowLeft Alt+Shift+ArrowRight" // gitleaks:allow -- public keyboard shortcuts, not a credential
-                }
-                tabIndex={id === activeId ? 0 : -1}
-                onPointerDown={(event) => drag.start(event, id)}
-                onDragStart={(event) => event.preventDefault()}
-                onClick={() => onOpen(id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Delete" && !event.repeat && !drag.draggedId) {
-                    event.preventDefault();
-                    if (closeAvailable) void closeTab(id);
+            onPointerEnter={
+              canShowAgents && !dragging
+                ? (event) => {
+                    const tab =
+                      event.currentTarget.querySelector<HTMLButtonElement>('[role="tab"]');
+                    if (tab) subagents.hover(id, tab, event);
                   }
-                }}
-              >
-                <span class="tab-title">{title}</span>
-                {indicator && (
-                  <span
-                    class={`tab-status status-${indicatorStatus}`}
-                    role="img"
-                    aria-label={statusLabel ?? status}
-                  >
-                    {indicator}
-                  </span>
-                )}
-              </button>
-            </Tooltip>
-            {busy && loadSubagents && onOpenSubagent && (
-              <SubagentMenu
-                rootId={id}
-                title={title}
-                busy={busy}
-                dragging={drag.draggedId !== null}
-                load={loadSubagents}
-                onOpen={onOpenSubagent}
-              />
-            )}
+                : undefined
+            }
+            onPointerLeave={canShowAgents ? subagents.leave : undefined}
+          >
+            <button
+              type="button"
+              id={`tab-${id}`}
+              role="tab"
+              aria-label={`${title}${statusLabel ? `, ${statusLabel}` : ""}`}
+              aria-selected={id === activeId}
+              aria-busy={closing}
+              aria-controls="chat-view"
+              aria-haspopup={canShowAgents ? "dialog" : undefined}
+              aria-keyshortcuts={shortcuts.join(" ")}
+              tabIndex={id === activeId ? 0 : -1}
+              onPointerDown={(event) => {
+                if (event.button === 0) closeMenu();
+                drag.start(event, id);
+              }}
+              onDragStart={(event) => event.preventDefault()}
+              onClick={() => onOpen(id)}
+              onContextMenu={
+                canShowAgents && !dragging
+                  ? (event) => {
+                      event.preventDefault();
+                      subagents.open(id, event.currentTarget);
+                    }
+                  : undefined
+              }
+              onKeyDown={(event) => {
+                if (dragging) return;
+                if (
+                  canShowAgents &&
+                  (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
+                ) {
+                  event.preventDefault();
+                  if (!event.repeat) subagents.open(id, event.currentTarget);
+                } else if (event.key === "Delete" && !event.repeat) {
+                  event.preventDefault();
+                  if (closeAvailable) void closeTab(id);
+                }
+              }}
+            >
+              <span class="tab-title">{title}</span>
+              {indicator && (
+                <span
+                  class={`tab-status status-${indicatorStatus}`}
+                  role="img"
+                  aria-label={statusLabel ?? status}
+                >
+                  {indicator}
+                </span>
+              )}
+            </button>
             <div class="tab-end-slot">
               {busy ? (
-                <Tooltip
-                  placement="below"
-                  content={
-                    <>
-                      {title}
-                      {statusLabel && <span class="tooltip-detail">{statusLabel}</span>}
-                    </>
-                  }
-                >
-                  <span class="tab-activity-slot" role="img" aria-label={statusLabel ?? status}>
-                    <span class="tab-activity-dot" />
-                  </span>
-                </Tooltip>
+                <span class="tab-activity-slot" role="img" aria-label={statusLabel ?? status}>
+                  <span class="tab-activity-dot" />
+                </span>
               ) : pausedBusy ? null : (
                 <>
                   {completed && (
-                    <Tooltip
-                      placement="below"
-                      content={
-                        <>
-                          {title}
-                          <span class="tooltip-detail">Completed</span>
-                        </>
-                      }
+                    <span
+                      class="tab-activity-slot tab-completion-marker"
+                      role="img"
+                      aria-label="Completed"
                     >
-                      <span
-                        class="tab-activity-slot tab-completion-marker"
-                        role="img"
-                        aria-label="Completed"
-                      >
-                        <Icon name="check" />
-                      </span>
-                    </Tooltip>
+                      <Icon name="check" />
+                    </span>
                   )}
                   <IconButton
                     icon="close"
@@ -304,6 +298,18 @@ export function ChatTabs({
           </div>
         );
       })}
+      {target && menuTab && !menuUnavailable && !dragging && loadSubagents && onOpenSubagent && (
+        <SubagentMenu
+          key={target.rootId}
+          target={target}
+          title={menuTab.title}
+          load={loadSubagents}
+          onOpen={onOpenSubagent}
+          onStay={subagents.stay}
+          onLeave={subagents.leave}
+          onClose={closeMenu}
+        />
+      )}
       <span class="tab-order-announcement" aria-live="polite" aria-atomic="true">
         {announcement}
       </span>

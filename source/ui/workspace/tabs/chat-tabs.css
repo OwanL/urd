@@ -13,7 +13,7 @@
   position: relative;
   display: flex;
   align-items: center;
-  flex: 0 0 min(180px, 100%);
+  flex: 0 0 max-content;
   min-width: 0;
   max-width: 100%;
   border: 1px solid transparent;
@@ -32,16 +32,11 @@
   border-color: #424242;
 }
 
-.chat-tab > .tooltip-anchor:first-child {
-  flex: 1;
-  min-width: 0;
-}
-
 .chat-tab [role="tab"] {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
   gap: 5px;
-  width: 100%;
   min-width: 0;
   padding: 5px 4px 5px 10px;
   border: 0;
@@ -56,10 +51,7 @@
 
 .tab-title {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
+  overflow-wrap: anywhere;
 }
 
 .tab-status {
@@ -91,7 +83,8 @@
   margin-right: 2px;
 }
 
-.tab-end-slot > .tooltip-anchor {
+.tab-end-slot > .tooltip-anchor,
+.tab-completion-marker {
   position: absolute;
   inset: 0;
   justify-content: center;
@@ -130,7 +123,7 @@
   transition: opacity 100ms ease-out;
 }
 
-.chat-tab.has-unread .tab-end-slot > .tooltip-anchor:last-child {
+.chat-tab.has-unread .tab-end-slot > .tooltip-anchor {
   pointer-events: none;
 }
 
@@ -145,8 +138,8 @@
   pointer-events: none;
 }
 
-.chat-tab.has-unread:hover .tab-end-slot > .tooltip-anchor:last-child,
-.chat-tab.has-unread:focus-within .tab-end-slot > .tooltip-anchor:last-child {
+.chat-tab.has-unread:hover .tab-end-slot > .tooltip-anchor,
+.chat-tab.has-unread:focus-within .tab-end-slot > .tooltip-anchor {
   pointer-events: auto;
 }
 

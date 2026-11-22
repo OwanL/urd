@@ -7,6 +7,9 @@ namespace Urd.Core.Providers;
 public sealed record ProviderDiagnostic(ProviderRoute Route, Guid ConnectionId, Guid? SessionId, string Transport,
     string Stage, ProviderFailure Failure, int? HttpStatus, string? ExceptionType, string? HttpRequestError,
     string? SocketError, string? WebSocketError, string? WebSocketReceiveFailure) {
+  public ProviderStreamTerminal? WireTerminal { get; init; }
+  public ProviderStreamTerminalKind? SdkTerminal { get; init; }
+
   internal sealed record Cause(int? HttpStatus, string? ExceptionType, string? HttpRequestError,
       string? SocketError, string? WebSocketError, string? WebSocketReceiveFailure);
 

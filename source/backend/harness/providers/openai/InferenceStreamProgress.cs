@@ -10,6 +10,8 @@ internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpa
 
   internal CancellationToken Token => stop.Token;
   internal string Transport { get; set; } = "https";
+  internal ProviderStreamTerminal? WireTerminal { get; set; }
+  internal ProviderStreamTerminalKind? SdkTerminal { get; set; }
   internal string Stage => (receivedHeaders, receivedUpdate) switch {
     (_, true) => "stream",
     (true, false) => "first-stream-event",

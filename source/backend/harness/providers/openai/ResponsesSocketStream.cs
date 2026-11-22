@@ -5,7 +5,8 @@ using System.Text.Json;
 namespace Urd.Core.Providers;
 
 // Adapts one Responses WebSocket turn to the SSE stream consumed by the native SDK.
-internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement> completed, Func<string, bool>? acceptId = null) : Stream {
+internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement> completed, Func<string, bool>? acceptId = null,
+    Action<ProviderStreamTerminal>? observeTerminal = null) : Stream {
   // A completed response can contain the full native output plus response metadata.
   internal const int MaximumMessageBytes = LlmProviderContext.MaximumBytes + 1024 * 1024;
   private readonly byte[] receiveBuffer = new byte[8192];
@@ -78,6 +79,15 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
       string? type = typeValue.GetString();
       if (string.IsNullOrEmpty(type) || type.Any(character => char.IsControl(character) || char.IsWhiteSpace(character)))
         throw new IOException();
+      if (observeTerminal is not null) {
+        try {
+          var observation = ResponsesTerminalObservation.Read(root, responseId, type);
+          if (observation is not null)
+            observeTerminal(observation);
+        } catch (Exception) {
+          // Diagnostics must not change the stream's behavior.
+        }
+      }
       bool hasResponse = root.TryGetProperty("response", out JsonElement response);
       if (hasResponse && response.ValueKind != JsonValueKind.Object)
         throw new IOException();

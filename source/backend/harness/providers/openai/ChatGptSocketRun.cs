@@ -38,7 +38,7 @@ internal sealed class ChatGptSocketRun : IDisposable {
 
   internal async Task<HttpClient?> OpenTurnAsync(ProviderState state, Guid sessionId,
       Func<string, Guid, CancellationToken, Task<WebSocket>> connect, CancellationToken ct,
-      Action<Exception>? handshakeFailed = null) {
+      Action<Exception>? handshakeFailed = null, Action<ProviderStreamTerminal>? observeTerminal = null) {
     ObjectDisposedException.ThrowIf(disposed, this);
     if (turnOpen)
       throw new InvalidOperationException("A socket turn is already open.");
@@ -79,7 +79,7 @@ internal sealed class ChatGptSocketRun : IDisposable {
     }
     completed = false;
     turnOpen = true;
-    return new HttpClient(new TurnHandler(this), disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan };
+    return new HttpClient(new TurnHandler(this, observeTerminal), disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan };
   }
 
   internal void EndTurn(bool accepted) {
@@ -122,7 +122,7 @@ internal sealed class ChatGptSocketRun : IDisposable {
     }
   }
 
-  private sealed class TurnHandler(ChatGptSocketRun run) : HttpMessageHandler {
+  private sealed class TurnHandler(ChatGptSocketRun run, Action<ProviderStreamTerminal>? observeTerminal) : HttpMessageHandler {
     private int sent;
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
@@ -140,7 +140,7 @@ internal sealed class ChatGptSocketRun : IDisposable {
         var stream = new ResponsesSocketStream(run.socket, response => {
           run.continuation.Complete(response);
           run.completed = true;
-        }, id => run.responseIds.Add(id));
+        }, id => run.responseIds.Add(id), observeTerminal);
         var content = new StreamContent(stream);
         content.Headers.ContentType = new MediaTypeHeaderValue("text/event-stream");
         return new HttpResponseMessage(HttpStatusCode.OK) { Content = content, RequestMessage = request };

@@ -189,7 +189,10 @@ an uncertain send or interrupted stream is never automatically replayed over HTT
 
 Offline managed-session tests exercise a namespaced tool loop, reopening with a
 fresh socket, partial streams, cancellation and stale completions without tool
-replay. A live two-turn `gpt-6-luna` check through the .NET adapter used one
+replay. A scripted socket check also shows that the SDK can project a standalone
+`error` but drop its nested code and message. Failure logs compare the wire and
+SDK terminal kinds, with bounded status and error categories from the wire. They
+do not save provider messages or response IDs. A live two-turn `gpt-6-luna` check through the .NET adapter used one
 handshake and no HTTP requests: the first turn sent full input; the second sent
 the confirmed response ID and only the new user message. Both answers completed
 and matched the expected text. The plan endpoint's ID-less `codex.response.metadata`

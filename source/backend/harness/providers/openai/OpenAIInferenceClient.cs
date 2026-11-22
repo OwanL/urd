@@ -37,7 +37,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
         if (!await stream.MoveNextAsync().ConfigureAwait(false))
           break;
       } catch (ProviderOperationException failure) when (!cancellationToken.IsCancellationRequested) {
-        Report(state.Connection, sessionId, progress.Transport, progress.Stage, failure.Failure, failure.DiagnosticCause);
+        Report(state.Connection, sessionId, progress.Transport, progress.Stage, failure.Failure, failure.DiagnosticCause, progress);
         throw;
       }
       yield return stream.Current;
@@ -45,10 +45,13 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
   }
 
   private void Report(ProviderConnection connection, Guid? sessionId, string transport, string stage,
-      ProviderFailure failure, ProviderDiagnostic.Cause? cause) =>
+      ProviderFailure failure, ProviderDiagnostic.Cause? cause, InferenceStreamProgress? progress = null) =>
       diagnose?.Invoke(new(connection.Route, connection.Id, sessionId, transport, stage, failure,
           cause?.HttpStatus, cause?.ExceptionType, cause?.HttpRequestError, cause?.SocketError,
-          cause?.WebSocketError, cause?.WebSocketReceiveFailure));
+          cause?.WebSocketError, cause?.WebSocketReceiveFailure) {
+        WireTerminal = progress?.WireTerminal,
+        SdkTerminal = progress?.SdkTerminal
+      });
 
   private async IAsyncEnumerable<ChatResponseUpdate> ReadExchangeAsync(ProviderState state,
       IEnumerable<ChatMessage> messages, ChatOptions options, ProviderCancellation readStop,
@@ -77,7 +80,8 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
             && state.Connection.Endpoint == openAIEndpoint) {
           turnClient = await socketRun.OpenTurnAsync(state, id, connectSocket, cancellationToken,
               diagnose is null ? null : error => Report(state.Connection, sessionId, "websocket", "handshake-fallback",
-                  ProviderFailure.ProviderUnavailable, ProviderDiagnostic.Describe(error, null))).ConfigureAwait(false);
+                  ProviderFailure.ProviderUnavailable, ProviderDiagnostic.Describe(error, null)),
+              diagnose is null ? null : terminal => progress.WireTerminal = terminal).ConfigureAwait(false);
           if (turnClient is not null)
             progress.Transport = "websocket";
         }
@@ -101,6 +105,16 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
         try {
           while (await MoveNextAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false)) {
             ChatResponseUpdate nativeUpdate = stream.Current;
+            if (diagnose is not null) {
+              ProviderStreamTerminalKind? terminal = nativeUpdate.RawRepresentation switch {
+                StreamingResponseCompletedUpdate => ProviderStreamTerminalKind.Completed,
+                StreamingResponseIncompleteUpdate => ProviderStreamTerminalKind.Incomplete,
+                StreamingResponseFailedUpdate => ProviderStreamTerminalKind.ResponseFailed,
+                StreamingResponseErrorUpdate => ProviderStreamTerminalKind.StandaloneError,
+                _ => null
+              };
+              if (terminal is not null) progress.SdkTerminal = terminal;
+            }
             if (nativeUpdate.RawRepresentation is not null)
               progress.RecordUpdate();
             UsageDetails? usage = ProviderTokenUsage.Read(nativeUpdate.RawRepresentation);

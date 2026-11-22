@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
@@ -118,6 +120,71 @@ public sealed class OpenAIInferenceClientTests {
     Assert.Contains("private-token", error.Message); // Provider text is retained; credential redaction has separate coverage.
     Assert.Null(error.InnerException);
     Assert.Single(handler.Requests);
+  }
+
+  [Fact]
+  public async Task ConnectionFailureReportsNoHttpResponseAndSafeCause() {
+    using var http = new HttpClient(new DroppedConnection());
+    List<ProviderDiagnostic> diagnostics = [];
+    var inference = new OpenAIInferenceClient(http, diagnose: diagnostics.Add);
+    ProviderState state = State();
+    var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
+      await foreach (var _ in inference.GetStreamingResponseAsync(state, History(), Options(), default))
+        Assert.Fail("Unexpected model response.");
+    });
+
+    Assert.Equal("ProviderUnavailable: No HTTP response received from the provider.", error.Message);
+    Assert.Null(error.InnerException);
+    var diagnostic = Assert.Single(diagnostics);
+    Assert.Equal("https", diagnostic.Transport);
+    Assert.Equal("response-headers", diagnostic.Stage);
+    Assert.Null(diagnostic.HttpStatus);
+    Assert.Equal("ConnectionError", diagnostic.HttpRequestError);
+    Assert.Equal("ConnectionReset", diagnostic.SocketError);
+    Assert.DoesNotContain("fixture-secret", JsonSerializer.Serialize(diagnostic), StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public async Task WebSocketHandshakeFailureRecordsFallbackAndHttpRejectionSeparately() {
+    var state = new ProviderState(new(Guid.NewGuid(), "ChatGPT", ProviderRoute.ChatGpt, LlmApi.OpenAIResponses,
+        new Uri("https://api.openai.com/v1/"), AuthenticationMethod.OAuth),
+        1, 1, null, new(null, "fixture-token", null, null, null, []), false, null);
+    using var run = new ChatGptSocketRun();
+    var options = Options();
+    Guid session = Guid.NewGuid();
+    options.AdditionalProperties = new() {
+      [OpenAIInferenceClient.SessionIdProperty] = session,
+      [ChatGptSocketRun.PropertyName] = run
+    };
+    using var handler = new ScriptedOpenAIHandler("{}", "application/json", HttpStatusCode.ServiceUnavailable);
+    using var http = new HttpClient(handler);
+    List<ProviderDiagnostic> diagnostics = [];
+    var inference = new OpenAIInferenceClient(http, connectSocket: (_, _, _) =>
+        Task.FromException<WebSocket>(new WebSocketException(WebSocketError.NotAWebSocket)), diagnose: diagnostics.Add);
+    await Assert.ThrowsAsync<ProviderOperationException>(async () => {
+      await foreach (var _ in inference.GetStreamingResponseAsync(state, History(), options, default))
+        Assert.Fail("Unexpected model response.");
+    });
+
+    Assert.Collection(diagnostics,
+        fallback => {
+          Assert.Equal(session, fallback.SessionId);
+          Assert.Equal("websocket", fallback.Transport);
+          Assert.Equal("handshake-fallback", fallback.Stage);
+          Assert.Equal("NotAWebSocket", fallback.WebSocketError);
+        },
+        rejection => {
+          Assert.Equal(session, rejection.SessionId);
+          Assert.Equal("https", rejection.Transport);
+          Assert.Equal(503, rejection.HttpStatus);
+        });
+    Assert.Single(handler.Requests);
+  }
+
+  private sealed class DroppedConnection : HttpMessageHandler {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+        Task.FromException<HttpResponseMessage>(new HttpRequestException(HttpRequestError.ConnectionError, "fixture-secret",
+            new SocketException((int)SocketError.ConnectionReset)));
   }
 
   private static async Task Rejected(string wire, ProviderFailure failure, ProviderState? state = null,

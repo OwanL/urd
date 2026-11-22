@@ -77,8 +77,17 @@ for example:
 {"event":"urd-ready","origin":"http://127.0.0.1:56123"}
 ```
 
-Use the actual printed origin, not this example or a guessed port. Diagnostics go to
-stderr. Invalid arguments exit with code `2`; startup/run failures exit with code `1`.
+Use the actual printed origin, not this example or a guessed port. Startup and framework
+messages go to stderr (`server.log` when started through the Windows launcher). Invalid
+arguments exit with code `2`; startup/run failures exit with code `1`.
+
+The server writes failed HTTP requests and model streaming failures to `errors.jsonl` in
+its data directory. It keeps one previous file, `errors.previous.jsonl`, with each file
+capped at 1 MiB. Provider entries distinguish HTTP from WebSocket, include the request
+stage, and record an HTTP status only if one was received. If available, they include
+safe exception categories such as DNS failure or connection reset. The log does not
+contain request bodies, chat text, headers, URLs, or provider exception messages. It
+cannot see requests that never reach Urd, including browser-side connection failures.
 Ctrl+C requests graceful shutdown. The run returns successfully only after its HTTP
 and Core shutdown operations both finish; it has no forced cleanup timeout.
 

@@ -16,7 +16,8 @@ namespace Urd.Core.Providers;
 
 // One streaming exchange. The manager owns credentials, cancellation and the borrowed transport.
 internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? readTimeout = null,
-    Func<string, Guid, CancellationToken, Task<WebSocket>>? connectSocket = null) {
+    Func<string, Guid, CancellationToken, Task<WebSocket>>? connectSocket = null,
+    Action<ProviderDiagnostic>? diagnose = null) {
   internal const string SessionIdProperty = "urd.conversation.session-id";
   private static readonly TimeSpan defaultReadTimeout = TimeSpan.FromMinutes(2);
   private static readonly Uri openAIEndpoint = new("https://api.openai.com/v1/");
@@ -27,11 +28,35 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
     using var readStop = new ProviderCancellation(Timeout.InfiniteTimeSpan, cancellationToken);
     Guid? sessionId = TakeSessionId(ref options);
     ChatGptSocketRun? socketRun = TakeSocketRun(ref options);
+    var progress = new InferenceStreamProgress(readStop, readTimeout ?? defaultReadTimeout,
+        state.Connection.Route == ProviderRoute.ChatGpt ? sessionId : null) { Transport = state.Connection.Endpoint.Scheme };
+    await using var stream = ReadExchangeAsync(state, messages, options, readStop, progress, sessionId, socketRun,
+        cancellationToken).GetAsyncEnumerator(cancellationToken);
+    while (true) {
+      try {
+        if (!await stream.MoveNextAsync().ConfigureAwait(false))
+          break;
+      } catch (ProviderOperationException failure) when (!cancellationToken.IsCancellationRequested) {
+        Report(state.Connection, sessionId, progress.Transport, progress.Stage, failure.Failure, failure.DiagnosticCause);
+        throw;
+      }
+      yield return stream.Current;
+    }
+  }
+
+  private void Report(ProviderConnection connection, Guid? sessionId, string transport, string stage,
+      ProviderFailure failure, ProviderDiagnostic.Cause? cause) =>
+      diagnose?.Invoke(new(connection.Route, connection.Id, sessionId, transport, stage, failure,
+          cause?.HttpStatus, cause?.ExceptionType, cause?.HttpRequestError, cause?.SocketError,
+          cause?.WebSocketError, cause?.WebSocketReceiveFailure));
+
+  private async IAsyncEnumerable<ChatResponseUpdate> ReadExchangeAsync(ProviderState state,
+      IEnumerable<ChatMessage> messages, ChatOptions options, ProviderCancellation readStop,
+      InferenceStreamProgress progress, Guid? sessionId, ChatGptSocketRun? socketRun,
+      [EnumeratorCancellation] CancellationToken cancellationToken) {
     HttpClient? turnClient = null;
     bool accepted = false;
     try {
-      var progress = new InferenceStreamProgress(readStop, readTimeout ?? defaultReadTimeout,
-          state.Connection.Route == ProviderRoute.ChatGpt ? sessionId : null);
       IChatClient client;
       IReadOnlyList<ChatMessage> history;
       ChatOptions wireOptions;
@@ -49,9 +74,13 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
           history = history.Select(ForChatGpt).ToArray();
         if (connectSocket is not null && socketRun is not null && sessionId is Guid id && state.Connection.Route == ProviderRoute.ChatGpt
             && state.Connection.Api == LlmApi.OpenAIResponses && state.Connection.Authentication == AuthenticationMethod.OAuth
-            && state.Connection.Endpoint == openAIEndpoint)
-          turnClient = await socketRun.OpenTurnAsync(state, id, connectSocket,
-              cancellationToken).ConfigureAwait(false);
+            && state.Connection.Endpoint == openAIEndpoint) {
+          turnClient = await socketRun.OpenTurnAsync(state, id, connectSocket, cancellationToken,
+              diagnose is null ? null : error => Report(state.Connection, sessionId, "websocket", "handshake-fallback",
+                  ProviderFailure.ProviderUnavailable, ProviderDiagnostic.Describe(error, null))).ConfigureAwait(false);
+          if (turnClient is not null)
+            progress.Transport = "websocket";
+        }
         client = CreateClient(state, options.ModelId!, progress, turnClient ?? httpClient);
         if (estimate is not null && input is not null)
           estimate.Prepare(ContextEstimateInput(history, input, scope), options);

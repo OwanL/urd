@@ -21,6 +21,7 @@ public sealed class ProviderOperationException : Exception {
 
   public ProviderFailure Failure { get; }
   public string? Reason { get; }
+  internal ProviderDiagnostic.Cause? DiagnosticCause { get; private init; }
 
   internal static ProviderOperationException FromProviderError(Exception error,
       bool discovery = false, bool contextWindow = false, ProviderCredentials? credentials = null) {
@@ -37,13 +38,21 @@ public sealed class ProviderOperationException : Exception {
       _ => ProviderFailure.InvalidProviderResponse
     };
 
+    int? status = details?.Status is >= 100 and <= 599 ? details.Status : null;
+    var cause = ProviderDiagnostic.Describe(error, status);
+    if (details is not null && status is null)
+      return new(failure, "No HTTP response received from the provider.") { DiagnosticCause = cause };
+
     if (details is not null)
-      return Create(failure, details.Message, details.Code, details.Param, details.RequestId, details.Status, credentials);
+      return new(failure, FormatMessage(failure, details.Message, details.Code, details.Param, details.RequestId,
+          status, null, credentials), null) { DiagnosticCause = cause };
 
     if (error is ResponsesSocketStream.ReceiveException receiveError)
-      return new(failure, receiveError.Message);
+      return new(failure, receiveError.Message) { DiagnosticCause = cause };
 
-    return new(failure, FormatMessage(failure, null, null, null, null, null, error.GetType().Name, credentials), null);
+    return new(failure, FormatMessage(failure, null, null, null, null, null, error.GetType().Name, credentials), null) {
+      DiagnosticCause = cause
+    };
   }
 
   internal static ProviderOperationException FromProviderStreamError(string? code, string? message,

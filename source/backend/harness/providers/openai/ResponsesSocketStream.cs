@@ -19,12 +19,13 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
 
   internal enum ReceiveFailure { PeerClosed, TransportRead, InvalidEvent }
 
-  internal sealed class ReceiveException(ReceiveFailure failure) : IOException(failure switch {
+  internal sealed class ReceiveException(ReceiveFailure failure, ProviderDiagnostic.Cause? transportCause = null) : IOException(failure switch {
     ReceiveFailure.PeerClosed => "Responses WebSocket peer closed the connection.",
     ReceiveFailure.TransportRead => "Responses WebSocket transport read failed.",
     _ => "Invalid or unexpected Responses WebSocket stream event."
   }) {
     internal ReceiveFailure Failure { get; } = failure;
+    internal ProviderDiagnostic.Cause? TransportCause { get; } = transportCause;
   }
 
   public override bool CanRead => !disposed;
@@ -123,7 +124,7 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
       failed = true;
       // Provider payloads and close descriptions must not escape through exceptions.
       receiveFailure = ReceiveFailure.InvalidEvent;
-      throw new ReceiveException(receiveFailure.Value);
+      throw new ReceiveException(receiveFailure.Value, ProviderDiagnostic.Describe(error, null));
     }
   }
 
@@ -131,7 +132,7 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
     try {
       return await socket.ReceiveAsync(receiveBuffer.AsMemory(), cancellationToken).ConfigureAwait(false);
     } catch (Exception error) when (error is WebSocketException or IOException or InvalidOperationException or ArgumentException) {
-      throw new ReceiveException(ReceiveFailure.TransportRead);
+      throw new ReceiveException(ReceiveFailure.TransportRead, ProviderDiagnostic.Describe(error, null));
     }
   }
 

@@ -37,7 +37,8 @@ internal sealed class ChatGptSocketRun : IDisposable {
   }
 
   internal async Task<HttpClient?> OpenTurnAsync(ProviderState state, Guid sessionId,
-      Func<string, Guid, CancellationToken, Task<WebSocket>> connect, CancellationToken ct) {
+      Func<string, Guid, CancellationToken, Task<WebSocket>> connect, CancellationToken ct,
+      Action<Exception>? handshakeFailed = null) {
     ObjectDisposedException.ThrowIf(disposed, this);
     if (turnOpen)
       throw new InvalidOperationException("A socket turn is already open.");
@@ -66,11 +67,12 @@ internal sealed class ChatGptSocketRun : IDisposable {
         if (socket.State != WebSocketState.Open)
           throw new WebSocketException();
         scope = nextScope;
-      } catch (Exception) {
+      } catch (Exception failure) {
         Reset();
         if (connecting is not null && !obtained)
           _ = DisposeLateSocketAsync(connecting);
         ct.ThrowIfCancellationRequested();
+        handshakeFailed?.Invoke(failure);
         httpOnly = true;
         return null;
       }
@@ -126,7 +128,7 @@ internal sealed class ChatGptSocketRun : IDisposable {
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) {
       if (Interlocked.Exchange(ref sent, 1) != 0 || !run.turnOpen || run.socket?.State != WebSocketState.Open) {
         run.Reset();
-        throw new HttpRequestException("Responses WebSocket turn is unavailable.");
+        throw new HttpRequestException("Responses WebSocket turn is unavailable.", new WebSocketException(WebSocketError.InvalidState));
       }
       try {
         if (request.Content is null)
@@ -145,9 +147,9 @@ internal sealed class ChatGptSocketRun : IDisposable {
       } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
         run.Reset();
         throw;
-      } catch (Exception) {
+      } catch (Exception failure) {
         run.Reset();
-        throw new HttpRequestException("Responses WebSocket request failed.");
+        throw new HttpRequestException("Responses WebSocket request failed.", failure);
       }
     }
   }

@@ -9,6 +9,12 @@ internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpa
   private bool receivedUpdate;
 
   internal CancellationToken Token => stop.Token;
+  internal string Transport { get; set; } = "https";
+  internal string Stage => (receivedHeaders, receivedUpdate) switch {
+    (_, true) => "stream",
+    (true, false) => "first-stream-event",
+    _ => "response-headers"
+  };
 
   internal void BeginRead() => stop.SetDeadline(timeout);
   internal void EndRead() => stop.SetDeadline(Timeout.InfiniteTimeSpan);

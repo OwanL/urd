@@ -28,13 +28,15 @@ public sealed class ProviderManager : IDisposable {
   private Task? shutdown;
   private bool stopping, disposed;
 
-  public ProviderManager(UrdStore store, Func<Uri> callbackUri, ModelPriceCatalog? prices = null)
+  public ProviderManager(UrdStore store, Func<Uri> callbackUri, ModelPriceCatalog? prices = null,
+      Action<ProviderDiagnostic>? diagnose = null)
       : this(store, callbackUri, new SocketsHttpHandler { AllowAutoRedirect = false }, prices: prices,
-          connectSocket: ChatGptSocketRun.ConnectAsync) { }
+          connectSocket: ChatGptSocketRun.ConnectAsync, diagnose: diagnose) { }
 
   // The manager owns this handler; test transports cannot fall back to real network access.
   internal ProviderManager(UrdStore store, Func<Uri> callbackUri, HttpMessageHandler handler, Uri? issuer = null,
-      ModelPriceCatalog? prices = null, Func<string, Guid, CancellationToken, Task<WebSocket>>? connectSocket = null) {
+      ModelPriceCatalog? prices = null, Func<string, Guid, CancellationToken, Task<WebSocket>>? connectSocket = null,
+      Action<ProviderDiagnostic>? diagnose = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(callbackUri);
     ArgumentNullException.ThrowIfNull(handler);
@@ -46,7 +48,7 @@ public sealed class ProviderManager : IDisposable {
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
     modelProbe = new(client, usage, prices);
-    requests = new(gate, storage, modelSettings, new(client, connectSocket: connectSocket), GetCredentialsAsync,
+    requests = new(gate, storage, modelSettings, new(client, connectSocket: connectSocket, diagnose: diagnose), GetCredentialsAsync,
         ThrowIfStopping, EnsureAvailable, RequireCurrentGrant);
     signIns = new(storage, authentication, gate, callbackUri, id => requests.Cancel(id));
   }

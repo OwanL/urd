@@ -88,6 +88,7 @@ internal static class Program {
     // Keep the file, not a stale PID. The OS releases exclusive ownership when this handle/process exits.
     var directoryLock = new FileStream(Path.Combine(options.DataRoot, "urd.lock"),
         FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+    var errorLog = new ServerErrorLog(options.DataRoot);
     UrdStore? store = null;
     IChatClient? client = null;
     SessionManager? manager = null;
@@ -109,7 +110,8 @@ internal static class Program {
           ?? throw new InvalidOperationException("The server is not ready."), "/auth/callback");
       if (createClient is null && createProviders is null)
         prices = ModelPriceCatalog.Open(options.DataRoot);
-      providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri, prices);
+      providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri, prices,
+          diagnostic => errorLog.Write("provider-failure", diagnostic));
       var preferences = new PreferenceManager(store);
       if (warmInstructions && store.IsSetupComplete() && preferences.Read().WorkingDirectory is { } defaultDirectory)
         store.WarmInstructionResources(defaultDirectory);
@@ -132,7 +134,7 @@ internal static class Program {
       manager.SessionClosed += markdown.CloseSession;
       var lanAccess = new LanAccess();
       app = CreateApplication([IPAddress.Loopback], options.Port, manager, providers, eventHub, markdown, preferences, store,
-          () => Volatile.Read(ref servedOrigin), lanAccess);
+          () => Volatile.Read(ref servedOrigin), lanAccess, errorLog, lan: false);
       app.MapSessionBrowserSignInRoutes(manager, playwrightSupported);
       app.MapLanHosting(() => lanHosting, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -148,7 +150,7 @@ internal static class Program {
         try {
           browserPause = manager.PausePlaywrightForLan();
           lanApp = CreateApplication(available, origin.Port, manager, providers, eventHub, markdown,
-              preferences, store, () => Volatile.Read(ref servedOrigin), lanAccess);
+              preferences, store, () => Volatile.Read(ref servedOrigin), lanAccess, errorLog, lan: true);
           await lanApp.StartAsync(stopping);
           return new LanListener(lanApp, browserPause);
         } catch {
@@ -216,7 +218,8 @@ internal static class Program {
 
   private static WebApplication CreateApplication(IReadOnlyList<IPAddress> addresses, int port, SessionManager manager,
       ProviderManager providers, SessionEventHub eventHub, MessageMarkdownService? markdown,
-      PreferenceManager preferences, UrdStore store, Func<Uri?> servedOrigin, LanAccess lanAccess) {
+      PreferenceManager preferences, UrdStore store, Func<Uri?> servedOrigin, LanAccess lanAccess,
+      ServerErrorLog errorLog, bool lan) {
     // No default appsettings/environment/URL providers: Kestrel configuration can otherwise add listeners.
     WebApplicationBuilder builder = WebApplication.CreateEmptyBuilder(new WebApplicationOptions {
       ApplicationName = typeof(Program).Assembly.GetName().Name,
@@ -248,6 +251,7 @@ internal static class Program {
           bool asset = context.Context.Request.Path.StartsWithSegments("/assets");
           context.Context.Response.Headers.CacheControl = asset ? "public, max-age=31536000, immutable" : "no-store";
           context.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    app.Use(next => new HttpErrorLogging(next, errorLog, lan).InvokeAsync);
         }
       });
     }

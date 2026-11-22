@@ -15,7 +15,7 @@ internal static class SystemEnvironment {
     if (workingDirectory is not null)
       lines.Add($"Working directory: {workingDirectory}");
     lines.Add($"Operating system: {operatingSystem}");
-    lines.Add($"Time: {localTime.ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture)} ({zoneId}) as of context creation");
+    lines.Add($"Time: {localTime.ToString("yyyy-MM-dd HH:mm zzz", CultureInfo.InvariantCulture)} ({zoneId}) as of session creation");
     return string.Join("\n", lines);
   }
 

@@ -99,8 +99,9 @@ instead of Send, without adding a user message. Continue journals its exact oper
 reload checks receipts, and an
 uncertain result offers explicit check/retry without clearing a newer draft. Stop cancels the
 active run and its pending steering; there is no after-run queue. The composer keeps its model
-and reasoning pickers, Stop and Send/Continue visible on one row at every width. Stop is disabled
-when idle. More options holds session details; these never crowd or wrap the toolbar.
+and reasoning pickers and Send/Continue visible on one row at every width. Stop appears only
+while work is active and is disabled while stopping. More options holds session details; these
+never crowd or wrap the toolbar.
 Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
 rows, on-demand input/output inspection and Markdown rendering. The history API supports
 anchored pages. Closing an idle chat from its tab permanently deletes its backend session;
@@ -137,8 +138,9 @@ navigation and Delete-to-close remain available.
 The composer shows compact context used/limit and accumulated agent working time (idle gaps excluded).
 Context is the latest request's reported input + output tokens, or an estimate immediately after
 compaction; pending input and in-flight output are excluded. Missing usage/limits display `?`.
-Working time survives reload and history edits; interrupted runs have unknown duration, displayed
-as a lower bound rather than counting host downtime. Only the visible working chat ticks locally.
+Working time appears before cost and context on the right once work starts. It survives reload and
+history edits; interrupted runs have unknown duration, displayed as a lower bound rather than
+counting host downtime. Only the visible working chat ticks locally.
 Busy tabs replace Close with a pulsing activity dot and ignore Delete. A background completion
 gets a checkmark until opened; hovering or focusing a completed tab reveals Close. Disconnected updates
 do not create false completion markers or add tab icons. Completion markers last for this page lifetime.

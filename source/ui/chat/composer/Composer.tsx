@@ -271,15 +271,17 @@ export function Composer({
               )}
             </div>
           )}
-          <IconButton
-            icon="stop"
-            label="Stop"
-            hint={stopping ? "Stopping…" : "Stop"}
-            class="composer-stop"
-            disabled={!working || stopping}
-            aria-busy={stopping}
-            onClick={onStop}
-          />
+          {working ? (
+            <IconButton
+              icon="stop"
+              label="Stop"
+              hint={stopping ? "Stopping…" : "Stop"}
+              class="composer-stop"
+              disabled={stopping}
+              aria-busy={stopping}
+              onClick={onStop}
+            />
+          ) : null}
           <IconButton
             icon="send"
             label={submission.label}

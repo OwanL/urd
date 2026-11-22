@@ -96,6 +96,7 @@
 }
 .session-context-indicator {
   display: inline-grid;
+  place-items: center;
 }
 .session-context-value,
 .session-context-action,

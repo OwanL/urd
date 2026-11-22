@@ -80,14 +80,42 @@ export function SessionIndicators({
   const contextAccessibleLabel = `Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
   const incomplete = workingTime?.hasUnknownDuration || (fenced && Boolean(startedAt));
-  const duration = workingTime
-    ? formatWorkingTime(
-        workingMilliseconds(fenced ? { ...workingTime, startedAt: null } : workingTime, now),
-      )
-    : null;
+  const duration =
+    workingTime && (startedAt || workingTime.completedMilliseconds > 0 || incomplete)
+      ? formatWorkingTime(
+          workingMilliseconds(fenced ? { ...workingTime, startedAt: null } : workingTime, now),
+        )
+      : null;
 
   return (
     <div class="session-indicators">
+      {duration !== null ? (
+        <div class="session-indicator-item">
+          <span class="session-indicator-name" aria-hidden="true">
+            Time
+          </span>
+          <Tooltip
+            content={
+              <>
+                Agent working time
+                <span class="tooltip-detail">Idle time excluded.</span>
+                {incomplete && (
+                  <span class="tooltip-detail">Interrupted work has unknown duration.</span>
+                )}
+              </>
+            }
+          >
+            <button
+              type="button"
+              class="session-indicator"
+              aria-label={`Agent working time: ${duration}${incomplete ? ", incomplete" : ""}`}
+            >
+              {incomplete ? "≥" : ""}
+              {duration}
+            </button>
+          </Tooltip>
+        </div>
+      ) : null}
       <div class="session-indicator-item">
         <span class="session-indicator-name" aria-hidden="true">
           Cost
@@ -152,33 +180,6 @@ export function SessionIndicators({
           </button>
         </Tooltip>
       </div>
-      {duration !== null && (
-        <div class="session-indicator-item">
-          <span class="session-indicator-name" aria-hidden="true">
-            Time
-          </span>
-          <Tooltip
-            content={
-              <>
-                Agent working time
-                <span class="tooltip-detail">Idle time excluded.</span>
-                {incomplete && (
-                  <span class="tooltip-detail">Interrupted work has unknown duration.</span>
-                )}
-              </>
-            }
-          >
-            <button
-              type="button"
-              class="session-indicator"
-              aria-label={`Agent working time: ${duration}${incomplete ? ", incomplete" : ""}`}
-            >
-              {incomplete ? "≥" : ""}
-              {duration}
-            </button>
-          </Tooltip>
-        </div>
-      )}
     </div>
   );
 }

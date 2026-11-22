@@ -2,20 +2,21 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Urd.Core.Preferences;
 using Urd.Core.Sessions;
+using Urd.Core.Storage;
 using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
 // Exposes simple application preferences through the local browser API.
 internal static class PreferencesRoutes {
-  internal static void MapPreferences(this IEndpointRouteBuilder app, PreferenceManager preferences, SessionManager sessions) {
+  internal static void MapPreferences(this IEndpointRouteBuilder app, PreferenceManager preferences, SessionManager sessions, UrdStore store) {
     RouteGroupBuilder routes = app.MapGroup("/api/preferences");
     routes.AddEndpointFilter<JsonRequestFilter>();
     routes.AddEndpointFilter(HandleRequestAsync);
     routes.MapGet("", (Delegate)(() => Results.Ok(preferences.Read())));
     routes.MapGet("/resources", (Delegate)(async (HttpContext http) =>
         Results.Ok(await sessions.ReadStartingResourcesAsync(http.RequestAborted))));
-    routes.MapPost("/working-directory", (Delegate)((HttpContext http) => SetWorkingDirectoryAsync(http, preferences)));
+    routes.MapPost("/working-directory", (Delegate)((HttpContext http) => SetWorkingDirectoryAsync(http, preferences, store)));
     routes.MapPost("/compaction-trigger",
         (Delegate)((HttpContext http) => SetCompactionTriggerTokenCountAsync(http, preferences)));
     routes.MapPost("/model-choice", (Delegate)((HttpContext http) => SetModelChoiceAsync(http, preferences)));
@@ -24,12 +25,14 @@ internal static class PreferencesRoutes {
     routes.MapPost("/protected-resources", (Delegate)((HttpContext http) => SetProtectedItemsAsync(http, preferences)));
   }
 
-  private static async Task<IResult> SetWorkingDirectoryAsync(HttpContext http, PreferenceManager preferences) {
+  private static async Task<IResult> SetWorkingDirectoryAsync(HttpContext http, PreferenceManager preferences, UrdStore store) {
     WorkingDirectoryRequest? body = await http.Request.ReadFromJsonAsync<WorkingDirectoryRequest>(http.RequestAborted);
     if (body is null)
       return Results.BadRequest();
 
     preferences.SetWorkingDirectory(body.WorkingDirectory);
+    if (body.WorkingDirectory is not null)
+      store.WarmInstructionResources();
     return Results.Ok(preferences.Read());
   }
 

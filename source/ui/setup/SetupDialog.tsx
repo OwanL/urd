@@ -17,29 +17,34 @@ import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
 import { credentialState, signInPending } from "../providers/settings/ProviderConnectionStatus.ts";
 import { useProviderSettings } from "../providers/settings/useProviderSettings.ts";
 import { SetupModels } from "./SetupModels.tsx";
+import {
+  missingSetupStep,
+  nextSetupStep,
+  setupSteps,
+  type SetupStatus,
+  type SetupStep,
+} from "./SetupSteps.ts";
 import { SourceIgnorePicker } from "./SourceIgnorePicker.tsx";
 import { WorkingDirectorySetting } from "../settings/WorkingDirectorySetting.tsx";
 import "../settings/settings.css";
 import "./setup.css";
 
-interface SetupStatus {
-  required: boolean;
-  providerConfigured: boolean;
-  bucketsConfigured: boolean;
-  workingDirectoryConfigured: boolean;
-}
-
 export type SetupState = "checking" | "required" | "complete";
 
 const endpoint = new URL("/api/setup", window.location.href);
 const buckets = ["small", "medium", "large"] as const;
-const titles = [
-  "Set up a provider",
-  "Assign models",
-  "Default working directory",
-  "Instructions",
-  "Skills",
-];
+const titles = {
+  directory: "Default working directory",
+  provider: "Set up a provider",
+  models: "Assign models",
+  instructions: "Instructions",
+  skills: "Skills",
+};
+const missingMessage = {
+  directory: "Choose an existing working directory to continue.",
+  provider: "No provider with available models.",
+  models: "Add a model to each bucket to continue.",
+};
 
 // Fresh profiles configure Urd in a modal over the inert workspace.
 export function SetupDialog({
@@ -133,9 +138,8 @@ function SetupModal({
 }
 
 function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void }) {
-  const [step, setStep] = useState(() =>
-    !status.providerConfigured ? 0 : !status.bucketsConfigured ? 1 : 2,
-  );
+  const [step, setStep] = useState<SetupStep>(() => missingSetupStep(status) ?? "instructions");
+  const index = setupSteps.indexOf(step);
   const [validated, setValidated] = useState(status);
   const [editModels, setEditModels] = useState(status.bucketsConfigured);
   const [busy, setBusy] = useState(false);
@@ -151,7 +155,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
     providerClient,
     true,
     models.providersChanged,
-    step === 0,
+    step === "provider",
     models.providerReady,
     preferences.refresh,
     false, // The model step owns the offer during onboarding.
@@ -172,7 +176,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
     const credential = credentialState(connection, providers.credentials[connection.id]);
     return credential === "connected" || credential === "noAuthentication";
   });
-  const awaitingModels = step === 0 && connectedProvider && !readyProvider;
+  const awaitingModels = step === "provider" && connectedProvider && !readyProvider;
   const { retry: discoverModels, loading, refreshing } = models;
   const retryDelay = useRef(2000);
   useEffect(() => {
@@ -204,34 +208,13 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
         connection.authentication !== "none" && !!providers.errors[`credentials:${connection.id}`],
     );
   // The server validates each step again; this only avoids offering an action that must fail.
-  const canContinue = [
-    readyProvider && !providers.uncertain && !providers.errors.connections,
-    buckets.every((bucket) => preferences.preferences?.modelChoices[bucket].length),
-    validated.workingDirectoryConfigured,
-    true,
-    true,
-  ][step];
-  const suggestionsSaved = useCallback(async () => {
-    setError(null);
-    try {
-      const current = await requestJson<SetupStatus>(endpoint, "GET");
-      setValidated(current);
-      if (!current.required) {
-        onComplete();
-      } else if (!current.providerConfigured) {
-        setStep(0);
-        setError("No provider with available models.");
-      } else if (current.bucketsConfigured) {
-        setStep(2);
-      } else {
-        setEditModels(true);
-        setError("Add a model to each bucket to continue.");
-      }
-    } catch {
-      setEditModels(true);
-      setError("Setup status could not be loaded. Try again.");
-    }
-  }, [onComplete]);
+  const canContinue = {
+    directory: validated.workingDirectoryConfigured,
+    provider: readyProvider && !providers.uncertain && !providers.errors.connections,
+    models: buckets.every((bucket) => preferences.preferences?.modelChoices[bucket].length),
+    instructions: true,
+    skills: true,
+  }[step];
   const next = async () => {
     if (busy) return;
     setBusy(true);
@@ -243,27 +226,17 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
         onComplete();
         return;
       }
-      if (!current.providerConfigured) {
-        setStep(0);
-        setError("No provider with available models.");
-        return;
-      }
-      if (step === 1 && !current.bucketsConfigured) {
-        setError("Add a model to each bucket to continue.");
-        return;
-      }
-      if (
-        step >= 2 &&
-        (!current.providerConfigured ||
-          !current.bucketsConfigured ||
-          !current.workingDirectoryConfigured)
-      ) {
-        setStep(!current.providerConfigured ? 0 : !current.bucketsConfigured ? 1 : 2);
-        setError("Complete each setup step before continuing.");
-        return;
-      }
-      if (step < 4) {
-        setStep(step + 1);
+      const following = nextSetupStep(step, current);
+      if (following) {
+        if (
+          following !== "instructions" &&
+          following !== "skills" &&
+          setupSteps.indexOf(following) <= index
+        ) {
+          if (following === "models") setEditModels(true);
+          setError(missingMessage[following]);
+        }
+        setStep(following);
         return;
       }
       const result = await requestJson<SetupStatus>(
@@ -278,7 +251,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
       onComplete();
     } catch {
       setError(
-        step === 4
+        step === "skills"
           ? "Setup could not be confirmed. Try again."
           : "Setup status could not be loaded. Try again.",
       );
@@ -287,9 +260,9 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
     }
   };
   return (
-    <SetupModal title={titles[step]!} progress={`${step + 1} of 5`}>
+    <SetupModal title={titles[step]} progress={`${index + 1} of ${setupSteps.length}`}>
       <div class="setup-content">
-        {step === 0 && (
+        {step === "provider" && (
           <ProviderSettings
             state={providers}
             search=""
@@ -307,7 +280,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
             {models.error ? "Could not load models." : "No models available yet."} Retrying…
           </p>
         )}
-        {step === 0 && providerReadFailed && !canContinue && (
+        {step === "provider" && providerReadFailed && !canContinue && (
           <button
             type="button"
             disabled={providers.reading}
@@ -316,18 +289,18 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
             Retry provider status
           </button>
         )}
-        {step === 1 && (
+        {step === "models" && (
           <SetupModels
             client={providerClient}
             state={preferences}
             catalogLoading={models.loading || models.refreshing}
             editing={editModels}
             onEdit={() => setEditModels(true)}
-            onSaved={suggestionsSaved}
+            onSaved={next}
             onBusyChange={setSuggestionsBusy}
           />
         )}
-        {step === 2 && (
+        {step === "directory" && (
           <div class="general-settings">
             <WorkingDirectorySetting
               state={preferences}
@@ -344,10 +317,10 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
             />
           </div>
         )}
-        {step === 3 && (
+        {step === "instructions" && (
           <SourceIgnorePicker key="instructions" kind="instructions" onBusyChange={setPickerBusy} />
         )}
-        {step === 4 && (
+        {step === "skills" && (
           <SourceIgnorePicker key="skills" kind="skills" onBusyChange={setPickerBusy} />
         )}
       </div>
@@ -357,19 +330,19 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
         </p>
       )}
       <footer class="setup-actions">
-        {step > 0 && (
+        {index > 0 && (
           <button
             type="button"
             disabled={busy || pickerBusy || suggestionsBusy}
             onClick={() => {
               setError(null);
-              setStep(step - 1);
+              setStep(setupSteps[index - 1]!);
             }}
           >
             Back
           </button>
         )}
-        {step >= 3 && (
+        {(step === "instructions" || step === "skills") && (
           <button type="button" disabled={busy || pickerBusy} onClick={() => void next()}>
             Skip
           </button>
@@ -387,7 +360,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
           }
           onClick={() => void next()}
         >
-          {busy ? "Checking…" : step === 4 ? "Finish" : "Next"}
+          {busy ? "Checking…" : step === "skills" ? "Finish" : "Next"}
         </button>
       </footer>
     </SetupModal>

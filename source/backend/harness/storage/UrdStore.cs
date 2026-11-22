@@ -13,8 +13,6 @@ public sealed class UrdStore : IDisposable {
   private readonly SessionImageCleanup sessionImages;
   private readonly SessionClosureStorage sessionClosure;
   private readonly InstructionResourceCatalog instructionCatalog;
-  private readonly CancellationTokenSource instructionWarmStop = new();
-  private Task? instructionWarm;
   private int disposed;
 
   private UrdStore(SqliteConnection connection, string databasePath) {
@@ -152,27 +150,16 @@ public sealed class UrdStore : IDisposable {
 
   public PromptCacheSummary ReadPromptCache(Guid sessionId) => Usage.ReadPromptCache(sessionId);
 
-  // Host startup opts in; ordinary stores and test fixtures never initiate a broad scan.
-  public void WarmInstructionResources(string directory) {
-    ArgumentException.ThrowIfNullOrWhiteSpace(directory);
-    if (instructionWarm is not null)
-      throw new InvalidOperationException("Instruction resource warming has already started.");
-    instructionWarm = Task.Run(async () => {
-      try {
-        await instructionCatalog.FindPathsAsync(directory, instructionWarmStop.Token);
-      } catch (Exception) {
-        // A later consumer retries and observes any failure; warming is best effort.
-      }
-    }, CancellationToken.None);
+  // Use only the saved choice, never the drive-root fallback shown in the folder picker.
+  public void WarmInstructionResources() {
+    if (Preferences.Read().WorkingDirectory is { } directory)
+      instructionCatalog.Warm(directory);
   }
 
   public void Dispose() {
     if (Interlocked.Exchange(ref disposed, 1) != 0)
       return;
-    instructionWarmStop.Cancel();
     instructionCatalog.DisposeAsync().AsTask().GetAwaiter().GetResult();
-    instructionWarm?.GetAwaiter().GetResult();
-    instructionWarmStop.Dispose();
     MarkdownImageImports.Dispose();
     database.Dispose();
   }

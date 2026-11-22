@@ -192,7 +192,7 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
     preferences.SetWorkingDirectory(directory);
     // Without a model selector pruning cannot run, so only protected instructions reach the session.
     preferences.SetProtectedItems(ProtectedResourceCategory.Instructions, [instruction]);
-    store.WarmInstructionResources(directory);
+    store.WarmInstructionResources();
     using var client = new ScriptedChatClient(Complete);
     await using var manager = new SessionManager(store, _ => client);
     var picker = await manager.ReadStartingResourcesAsync();

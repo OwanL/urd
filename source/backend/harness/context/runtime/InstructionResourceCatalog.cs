@@ -26,6 +26,18 @@ internal sealed class InstructionResourceCatalog : IAsyncDisposable {
     this.watch = watch ?? InstructionResourceCatalogWatch.TryOpen;
   }
 
+  internal void Warm(string directory) {
+    directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
+    lock (gate) {
+      ObjectDisposedException.ThrowIf(shutdown is not null, this);
+      if (InstructionResourceCatalogWatch.Entry(directory) != FileAttributes.Directory)
+        return;
+      Root root = CoveringRoot(directory) ?? AddRoot(directory);
+      if (root.Work is null && (!root.Ready || root.Lost || root.Watch is null))
+        StartReconcile(root);
+    }
+  }
+
   internal async Task<InstructionResourceCatalogResult> FindPathsAsync(string directory, CancellationToken cancellation) {
     directory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directory));
     Root? completed = null;

@@ -11,11 +11,13 @@ changes arrive through a bounded server-sent event stream; the browser then read
 snapshot/history metadata and loads message text on demand.
 
 For a new profile, a setup dialog opens over the inert workspace, which does not open or create
-chats until setup completes. Setup connects a provider, assigns the three model buckets, chooses a
-working directory and previews instructions and skills. ChatGPT sign-in opens a tab from the provider
-choice; the successful callback closes it. Model discovery runs automatically. Accepting suggestions
-for all three buckets advances to the working directory. Missing assignments and manual choices open
-the editor. Source previews update automatically, and nested location choices override their parents. Changes are saved as you go; refresh resumes at the first unmet page. The dialog cannot be dismissed early. After
+chats until setup completes. Setup starts with the default working directory. Saving it starts indexing
+instructions and skills in the background while the user connects a provider and assigns models.
+ChatGPT sign-in opens a tab from the provider choice; the successful callback closes it. Model discovery
+runs automatically. Accepting suggestions for all three buckets advances straight to Instructions.
+Missing assignments and manual choices open the editor. Instructions and Skills update automatically
+if the scan is still running. Changes are saved as you go; refresh opens the first unmet requirement,
+or Instructions if the required settings are already saved. The dialog cannot be dismissed early. After
 completion it stays closed while the workspace and Settings remain available for later provider,
 bucket and directory recovery.
 

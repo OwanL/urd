@@ -19,6 +19,31 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
   }
 
   [Fact]
+  public async Task WarmStartsWithoutWaitingAndConsumersReuseTheScan() {
+    string path = Write("AGENTS.md");
+    var entered = Signal();
+    var release = Signal();
+    int scans = 0;
+    var watch = new ManualWatch();
+    await using var catalog = new InstructionResourceCatalog(Database, async (directory, _, cancellation) => {
+      Interlocked.Increment(ref scans);
+      entered.TrySetResult();
+      await release.Task.WaitAsync(cancellation);
+      return [path];
+    }, watch.Open);
+
+    catalog.Warm(Project);
+    await entered.Task.WaitAsync(deadline);
+    catalog.Warm(Project);
+    Task<InstructionResourceCatalogResult> result = catalog.FindPathsAsync(Project, CancellationToken.None);
+    Assert.False(result.IsCompleted);
+    release.SetResult();
+    Assert.Equal([path], (await result.WaitAsync(deadline)).Paths);
+    catalog.Warm(Project);
+    Assert.Equal(1, scans);
+  }
+
+  [Fact]
   public async Task CoveredCwdsShareWorkAndKeepSiblingPathsOut() {
     string child = Write("area/.hidden/AGENTS.md");
     string sibling = Write("area-other/.hidden/AGENTS.md");

@@ -53,6 +53,30 @@ public sealed class PreferencesRoutesTests {
   }
 
   [Fact]
+  public async Task SavingWorkingDirectoryWarmsCatalogDuringIncompleteSetup() {
+    using var database = new TemporaryDatabase();
+    string directory = Path.Combine(Path.GetDirectoryName(database.Path)!, "warm-project");
+    Directory.CreateDirectory(directory);
+    await File.WriteAllTextAsync(Path.Combine(directory, "AGENTS.md"), "guidance");
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    string index = database.Path + ".instructions.sqlite";
+
+    using (HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/preferences/working-directory", JsonBody("{\"workingDirectory\":\"relative\"}")))
+      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    Assert.False(File.Exists(index));
+
+    using (HttpResponseMessage saved = await RequestAsync(server.Client, HttpMethod.Post,
+        "/api/preferences/working-directory", JsonBody(JsonSerializer.Serialize(new { workingDirectory = directory }))))
+      Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    while (!File.Exists(index))
+      await Task.Delay(25, timeout.Token);
+  }
+
+  [Fact]
   public async Task CompactionTriggerPreferenceValidatesInputAndReturnsFullPreferences() {
     using var database = new TemporaryDatabase();
     string dataDirectory = Path.GetDirectoryName(database.Path)!;

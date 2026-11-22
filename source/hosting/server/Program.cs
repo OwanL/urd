@@ -113,8 +113,8 @@ internal static class Program {
       providers = createProviders?.Invoke(store, CallbackUri) ?? new ProviderManager(store, CallbackUri, prices,
           diagnostic => errorLog.Write("provider-failure", diagnostic));
       var preferences = new PreferenceManager(store);
-      if (warmInstructions && store.IsSetupComplete() && preferences.Read().WorkingDirectory is { } defaultDirectory)
-        store.WarmInstructionResources(defaultDirectory);
+      if (warmInstructions)
+        store.WarmInstructionResources();
       AgentToolSettings? tools = OperatingSystem.IsWindows() || options.GitBashPath is not null
           ? new AgentToolSettings(options.GitBashPath,
               Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
@@ -264,7 +264,7 @@ internal static class Program {
     if (markdown is not null)
       app.MapMarkdown(manager, eventHub, markdown);
     app.MapProviders(providers, preferences);
-    app.MapPreferences(preferences, manager);
+    app.MapPreferences(preferences, manager, store);
     app.MapSetup(store);
     app.MapUsage(store);
     return app;

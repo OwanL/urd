@@ -134,9 +134,12 @@ internal static class ProviderRoutes {
       return Results.BadRequest();
     try {
       ProviderSignIn result = await providers.CompleteSignInAsync(state[0]!, http.Request.GetEncodedUrl());
-      return Results.Text(result.Status == ProviderSignInStatus.Completed
-          ? "Sign-in completed. You can close this page."
-          : "Sign-in did not complete. Check its status through Urd.");
+      if (result.Status != ProviderSignInStatus.Completed)
+        return Results.Text("Sign-in did not complete. Check its status through Urd.");
+      return Results.Content("""
+          <!doctype html><html lang="en"><meta charset="utf-8"><title>Urd sign-in</title>
+          <p>Sign-in completed. You can close this page.</p><script>window.close()</script></html>
+          """, "text/html; charset=utf-8");
     } catch (ProviderOperationException) {
       return Results.BadRequest();
     } catch (InvalidOperationException) when (IsApplicationStopping(http)) {

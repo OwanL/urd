@@ -30,7 +30,7 @@ export function useModelOptions(client: ProviderClient): ModelOptionsState {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     setError(null);
-    const result = await catalog.refresh();
+    const result = await catalog.refresh(true);
     if (!catalog.isCurrent(result.revision)) return [];
     setHasProviders(result.hasProviders);
     if (result.options !== null && result.providers !== null) {

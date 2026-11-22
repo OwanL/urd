@@ -2,6 +2,7 @@ import "./provider-connection-detail.css";
 import { useState } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import { signInPending } from "./ProviderConnectionStatus.ts";
+import { authorizationLink } from "./ProviderSignInTab.ts";
 import { ProviderApiKeyForm } from "./ProviderApiKeyForm.tsx";
 import { ProviderModelCatalog } from "./ProviderModelCatalog.tsx";
 import { ProviderConnectionConfirmation } from "./ProviderConnectionConfirmation.tsx";
@@ -96,16 +97,18 @@ export function ProviderConnectionDetail({
           )}
           {pendingSignIn ? (
             <div class="provider-settings-actions">
-              {signIn.status === "pending" && authorizationLink(signIn.authorizationUrl) && (
-                <a
-                  class="provider-settings-action"
-                  href={authorizationLink(signIn.authorizationUrl)!}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Continue in browser ↗
-                </a>
-              )}
+              {state.blockedSignIns[connection.id] &&
+                signIn.status === "pending" &&
+                authorizationLink(signIn.authorizationUrl) && (
+                  <a
+                    class="provider-settings-action"
+                    href={authorizationLink(signIn.authorizationUrl)!}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Continue in browser ↗
+                  </a>
+                )}
               <button
                 type="button"
                 disabled={disabled}
@@ -139,15 +142,17 @@ export function ProviderConnectionDetail({
       {connection.authentication === "apiKey" && !hasCredentials && showDisconnect && disconnect}
       {needsModels && (
         <div class="provider-settings-auth">
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => {
-              void actions.refreshModels(connection);
-            }}
-          >
-            Load models
-          </button>
+          {!inSetup && (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => {
+                void actions.refreshModels(connection);
+              }}
+            >
+              Load models
+            </button>
+          )}
           {state.errors[`models:${connection.id}`] && (
             <p class="provider-settings-error">{state.errors[`models:${connection.id}`]}</p>
           )}
@@ -167,7 +172,12 @@ export function ProviderConnectionDetail({
                 <ConnectionForm state={state} connection={connection} disabled={disabled} />
               </details>
             )}
-            <ProviderModelCatalog state={state} connection={connection} disabled={disabled} />
+            <ProviderModelCatalog
+              state={state}
+              connection={connection}
+              disabled={disabled}
+              inSetup={inSetup}
+            />
             {(credential?.accountLabel || credential?.expiresAt || pendingSignIn) && (
               <div class="provider-settings-group provider-settings-secondary">
                 {credential?.accountLabel && <p>Account: {credential.accountLabel}</p>}
@@ -201,14 +211,4 @@ export function ProviderConnectionDetail({
 function displayDate(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
-}
-
-function authorizationLink(value: string | null): string | undefined {
-  if (!value) return undefined;
-  try {
-    const url = new URL(value);
-    return url.protocol === "https:" && !url.username && !url.password ? url.href : undefined;
-  } catch {
-    return undefined;
-  }
 }

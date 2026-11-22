@@ -83,9 +83,17 @@ void test("automatic discovery skips signed-out providers without losing cached 
     ).map(({ key }) => key),
     [`${firstConnection.id}/found`, `${signedOut.id}/cached`],
   );
+  const automatic = await models.refresh(true);
+  assert.equal(automatic.error, null);
+  assert.deepEqual(discoveryIds, [firstConnection.id, firstConnection.id]);
   const manual = await models.refresh();
   assert.equal((manual.error as Error).message, "authenticationRequired");
-  assert.deepEqual(discoveryIds, [firstConnection.id, firstConnection.id, signedOut.id]);
+  assert.deepEqual(discoveryIds, [
+    firstConnection.id,
+    firstConnection.id,
+    firstConnection.id,
+    signedOut.id,
+  ]);
 });
 
 void test("credential failures remain visible and stale discovery does not post", async () => {

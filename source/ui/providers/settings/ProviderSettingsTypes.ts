@@ -102,6 +102,7 @@ export interface ProviderSettingsSnapshot {
   readonly modelSettings: Readonly<Record<string, readonly ModelSettings[]>>;
   readonly modelDrafts: Readonly<Record<string, readonly ModelSettings[]>>;
   readonly signIns: Readonly<Record<string, ProviderSignIn>>;
+  readonly blockedSignIns: Readonly<Record<string, boolean>>;
   readonly drafts: Readonly<Record<string, ConnectionDraft>>;
   readonly add: AddDraft;
   readonly apiKey: string;

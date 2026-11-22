@@ -91,7 +91,7 @@ void test("explicit ChatGPT creation starts one sign-in and retains its authoriz
   await state.createAndSignIn();
   assert.equal(starts, 1);
   assert.equal(state.snapshot.signIns.one?.authorizationUrl, pending.authorizationUrl);
-  state.setActivity(false, false);
+  state.dispose();
 });
 
 void test("ordinary creation does not start sign-in", async () => {
@@ -232,6 +232,13 @@ void test("polling is visible-only, non-overlapping, terminal-bounded, and rerea
   await flush();
   await state.beginSignIn(connection);
   assert.equal(statusReads, 1);
+  state.setActivity(true, false);
+  context.mock.timers.tick(20000);
+  await flush();
+  assert.equal(statusReads, 1);
+  state.setActivity(true, true);
+  await flush();
+  assert.equal(statusReads, 2);
   context.mock.timers.tick(2000);
   await flush();
   assert.equal(statusReads, 2);

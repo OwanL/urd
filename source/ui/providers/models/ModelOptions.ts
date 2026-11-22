@@ -103,13 +103,13 @@ export class ModelOptions {
     return this.discoverProviders(providers, revision, signal, true);
   }
 
-  async refresh(): Promise<ModelCatalogRead> {
+  async refresh(automatic = false): Promise<ModelCatalogRead> {
     const revision = ++this.revision;
     let providers: readonly ProviderConnection[] | null = null;
     try {
       providers = await this.client.list();
       if (!this.isCurrent(revision)) return canceledRead(revision);
-      const result = await this.discoverProviders(providers, revision);
+      const result = await this.discoverProviders(providers, revision, undefined, automatic);
       if (!this.isCurrent(revision)) return canceledRead(revision);
       return {
         ...result,

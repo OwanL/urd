@@ -14,6 +14,7 @@ import { credentialCommands } from "./ProviderCredentialCommands.ts";
 import { modelCommands, type ModelSettingsEdit } from "./ProviderModelCommands.ts";
 import { commandFailureNotice, type RunProviderCommand } from "./ProviderSettingsCommand.ts";
 import { readProviderSettings } from "./ProviderSettingsReadCycle.ts";
+import { authorizationLink, reserveSignInTab } from "./ProviderSignInTab.ts";
 import type {
   AddDraft,
   ConnectionDraft,
@@ -47,6 +48,7 @@ export class ProviderSettingsController {
     modelSettings: {},
     modelDrafts: {},
     signIns: {},
+    blockedSignIns: {},
     drafts: {},
     add: {
       route: "chatGpt",
@@ -63,10 +65,13 @@ export class ProviderSettingsController {
   private setupVisible = false;
   private setupView = 0;
   private signInIntent = 0;
+  private openingTab = false;
+  private readonly reservations = new Set<Window>();
   private newConnectionId: string | null = null;
   private bucketRequest: BucketSetupRequest | null = null;
   private readonly setupSignIns = new Map<string, SetupContext>();
   private uncertainModelConnectionId: string | null = null;
+  private disposed = false;
   private active = false;
   private visible = false;
   private readAbort: AbortController | null = null;
@@ -114,22 +119,33 @@ export class ProviderSettingsController {
   setActivity(active: boolean, visible: boolean, providersTab = active): void {
     const wasReadable = this.canRead;
     const wasSetupVisible = this.setupVisible;
-    if (this.visible && !visible) this.signInIntent++;
+    if (this.visible && !visible && !this.openingTab && this.reservations.size === 0)
+      this.signInIntent++;
     this.active = active;
     this.visible = visible;
     this.setupVisible = active && providersTab;
     if (wasSetupVisible && !this.setupVisible) this.leaveSetupView();
     if (!active) this.patch({ apiKey: "", confirmation: null });
     if (!this.canRead) this.stopReads();
-    else if (!wasReadable) void this.read();
+    if (this.canRead && !wasReadable) void this.read();
   }
 
   private get canRead(): boolean {
-    return this.active && this.visible && this.snapshot.pending === null;
+    return !this.disposed && this.active && this.visible && this.snapshot.pending === null;
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.stopReads();
+    for (const tab of this.reservations) this.closeReservation(tab);
+    this.setupSignIns.clear();
+    this.clearBucketRequest();
   }
 
   private get canMutate(): boolean {
-    return this.active && this.snapshot.pending === null && !this.snapshot.uncertain;
+    return (
+      !this.disposed && this.active && this.snapshot.pending === null && !this.snapshot.uncertain
+    );
   }
 
   private patch(update: Partial<ProviderSettingsSnapshot>): void {
@@ -357,6 +373,7 @@ export class ProviderSettingsController {
       this.snapshot.add.route !== "chatGpt"
     )
       return;
+    const tab = this.reserveTab();
     const existingIds = new Set(this.snapshot.connections.map(({ id }) => id));
     const intent = this.signInIntent;
     let signIn: Promise<void> | undefined;
@@ -368,7 +385,7 @@ export class ProviderSettingsController {
         connection.authentication !== "oAuth" ||
         !this.canMutate ||
         !this.setupVisible ||
-        !this.visible ||
+        (!this.visible && !tab) ||
         this.setupView !== view ||
         this.signInIntent !== intent ||
         this.snapshot.selectedId !== connection.id ||
@@ -380,8 +397,9 @@ export class ProviderSettingsController {
         saved.authentication !== connection.authentication
       )
         return;
-      signIn = this.beginSignIn(connection, true);
+      signIn = this.startSignIn(connection, true, tab);
     });
+    if (!signIn) this.closeReservation(tab);
     await signIn;
   }
 
@@ -424,7 +442,9 @@ export class ProviderSettingsController {
     if (this.newConnectionId === id) this.newConnectionId = null;
     if (this.bucketRequest?.connection.id === id) this.skipBucketSuggestions();
     const signIn = this.snapshot.signIns[id];
-    if (signIn) this.setupSignIns.delete(signIn.id);
+    if (signIn) {
+      this.setupSignIns.delete(signIn.id);
+    }
     this.patch(forgetConnectionStatus(this.snapshot, id));
   }
 
@@ -437,16 +457,78 @@ export class ProviderSettingsController {
   }
 
   beginSignIn(connection: ProviderConnection, setup = false): Promise<void> {
+    if (
+      !this.canMutate ||
+      Object.values(this.snapshot.signIns).some(
+        (item) => item.connectionId === connection.id && signInPending(item),
+      )
+    )
+      return Promise.resolve();
+    return this.startSignIn(connection, setup, this.reserveTab());
+  }
+
+  private async startSignIn(
+    connection: ProviderConnection,
+    setup: boolean,
+    tab: Window | null,
+  ): Promise<void> {
     const view = this.setupView;
-    return this.credentialCommands.beginSignIn(
-      connection,
-      setup ? (id) => this.setupSignIns.set(id, { connection, view }) : undefined,
-    );
+    let started = false;
+    try {
+      await this.credentialCommands.beginSignIn(
+        connection,
+        setup
+          ? (id) => {
+              if (!this.disposed) this.setupSignIns.set(id, { connection, view });
+            }
+          : undefined,
+        (signIn) => {
+          started = true;
+          if (this.disposed) {
+            this.closeReservation(tab);
+            return;
+          }
+          const url = authorizationLink(signIn.authorizationUrl);
+          let blocked = !tab;
+          if (tab && signInPending(signIn) && url && this.reservations.has(tab)) {
+            try {
+              tab.location.href = url;
+              this.reservations.delete(tab);
+            } catch {
+              blocked = true;
+              this.closeReservation(tab);
+            }
+          } else this.closeReservation(tab);
+          this.patch({
+            blockedSignIns: { ...this.snapshot.blockedSignIns, [connection.id]: blocked },
+          });
+        },
+      );
+    } finally {
+      if (!started) this.closeReservation(tab);
+    }
+  }
+
+  private reserveTab(): Window | null {
+    this.openingTab = true;
+    try {
+      const tab = reserveSignInTab();
+      if (tab) this.reservations.add(tab);
+      return tab;
+    } finally {
+      this.openingTab = false;
+    }
+  }
+
+  private closeReservation(tab: Window | null): void {
+    if (tab && this.reservations.delete(tab)) tab.close();
   }
 
   cancelSignIn(signIn: ProviderSignIn): Promise<void> {
     if (this.newConnectionId === signIn.connectionId) this.newConnectionId = null;
-    return this.credentialCommands.cancelSignIn(signIn, (id) => this.setupSignIns.delete(id));
+    return this.credentialCommands.cancelSignIn(signIn, (id) => {
+      this.setupSignIns.delete(id);
+    });
   }
 
   saveModelSettings(settings: ModelSettings): Promise<void> {

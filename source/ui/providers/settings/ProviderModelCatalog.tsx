@@ -9,10 +9,12 @@ export function ProviderModelCatalog({
   state,
   connection,
   disabled,
+  inSetup = false,
 }: {
   state: ProviderSettingsState;
   connection: ProviderConnection;
   disabled: boolean;
+  inSetup?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const catalog = state.catalogs[connection.id];
@@ -24,15 +26,17 @@ export function ProviderModelCatalog({
     <div class="provider-settings-group">
       <div class="provider-settings-group-heading">
         <h4>Models</h4>
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => {
-            void state.actions.refreshModels(connection);
-          }}
-        >
-          Refresh models
-        </button>
+        {!inSetup && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              void state.actions.refreshModels(connection);
+            }}
+          >
+            Refresh models
+          </button>
+        )}
       </div>
       {state.errors[`models:${connection.id}`] && (
         <p class="provider-settings-error">{state.errors[`models:${connection.id}`]}</p>

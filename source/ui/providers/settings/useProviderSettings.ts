@@ -28,6 +28,7 @@ export function useProviderSettings(
   const [, render] = useState(0);
 
   useLayoutEffect(() => controller.subscribe(() => render((version) => version + 1)), [controller]);
+  useLayoutEffect(() => () => controller.dispose(), [controller]);
   useLayoutEffect(() => {
     const update = () =>
       controller.setActivity(active, document.visibilityState === "visible", providersTab);

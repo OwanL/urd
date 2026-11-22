@@ -38,6 +38,7 @@ export function credentialCommands(
   async function beginSignIn(
     connection: ProviderConnection,
     trackSetup?: (id: string) => void,
+    started?: (signIn: ProviderSignIn) => void,
   ): Promise<void> {
     const { credentials, signIns } = snapshot();
     const initialSignIn = trackSetup && !credentials[connection.id]?.hasCredentials;
@@ -47,13 +48,21 @@ export function credentialCommands(
       )
     )
       return;
-    await command("beginSignIn", () => client.beginSignIn(connection.id), storeSignIn, {
-      afterSuccess: (signIn) => {
-        if (!initialSignIn || !signInPending(signIn)) return false;
-        trackSetup(signIn.id);
-        return true; // Discovery waits for successful authentication.
+    await command(
+      "beginSignIn",
+      () => client.beginSignIn(connection.id),
+      (signIn) => {
+        storeSignIn(signIn);
+        started?.(signIn);
       },
-    });
+      {
+        afterSuccess: (signIn) => {
+          if (!initialSignIn || !signInPending(signIn)) return false;
+          trackSetup(signIn.id);
+          return true; // Discovery waits for successful authentication.
+        },
+      },
+    );
   }
 
   async function cancelSignIn(

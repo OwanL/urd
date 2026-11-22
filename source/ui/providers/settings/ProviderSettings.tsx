@@ -234,7 +234,7 @@ export function ProviderSettings({
                   state={state}
                   connection={connection}
                   disabled={!canEdit}
-                  inSetup={!!presentation.setup}
+                  inSetup={onboarding || !!presentation.setup}
                 />
               )}
               {!onboarding && presentation.setup && setup === "complete" && !reviewingBuckets && (

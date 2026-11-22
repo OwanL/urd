@@ -92,6 +92,38 @@ public sealed class ProviderRoutesTests {
   }
 
   [Fact]
+  public async Task OAuthCallbackClosesPageOnlyAfterSuccessfulSignIn() {
+    using var database = new TemporaryDatabase();
+    using var identity = new FakeOpenAIIdentity();
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
+        onReady: origin => identity.CallbackUri = new Uri(origin, "/auth/callback"),
+        createProviders: (store, callbackUri) =>
+            new ProviderManager(store, callbackUri, identity, FakeOpenAIIdentity.Issuer));
+    await server.WaitForReadyAsync();
+    ProviderConnection connection = await PostAsync<ProviderConnection>(server.Client, "/api/providers/chatgpt",
+        new { name = "ChatGPT" }, HttpStatusCode.Created);
+
+    ProviderSignIn success = await PostAsync<ProviderSignIn>(server.Client,
+        PathFor(connection, "/sign-in"));
+    string successCallback = await identity.AuthorizeAsync(success.AuthorizationUrl!);
+    using (HttpResponseMessage completed = await SendAsync(server.Client, HttpMethod.Get,
+        new Uri(successCallback).PathAndQuery)) {
+      Assert.Equal("text/html", completed.Content.Headers.ContentType?.MediaType);
+      Assert.Contains("window.close()", await completed.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+    }
+
+    identity.Fault = "wrong-key";
+    ProviderSignIn failed = await PostAsync<ProviderSignIn>(server.Client,
+        PathFor(connection, "/sign-in"));
+    string failedCallback = await identity.AuthorizeAsync(failed.AuthorizationUrl!);
+    using (HttpResponseMessage rejected = await SendAsync(server.Client, HttpMethod.Get,
+        new Uri(failedCallback).PathAndQuery)) {
+      string content = await rejected.Content.ReadAsStringAsync();
+      Assert.DoesNotContain("window.close()", content, StringComparison.Ordinal);
+    }
+  }
+
+  [Fact]
   public async Task BucketSuggestionsRequireExplicitUnchangedConfirmation() {
     using var database = new TemporaryDatabase();
     var handler = new ScriptedOpenAIHandler("""

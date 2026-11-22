@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildSourceTree, filenameKey, isWithin, pathKey } from "../../setup/sourceTree.ts";
+import {
+  buildSourceTree,
+  filenameKey,
+  isWithin,
+  pathKey,
+  setSourceIgnored,
+  sourceSelection,
+} from "../../setup/sourceTree.ts";
 
 void test("groups sources and counts descendants without prefix collisions", () => {
   const roots = buildSourceTree(
@@ -38,6 +45,47 @@ void test("filesystem roots include descendants and retain absolute child paths"
   assert.equal(drive[0]?.children[0]?.path, "C:/repo");
   const unc = buildSourceTree(["\\\\server\\share\\dir\\AGENTS.md"], "\\\\server\\share\\");
   assert.equal(unc[0]?.children[0]?.path, "\\\\server\\share/dir");
+});
+
+void test("refines an inherited subtree and reports partial parents", () => {
+  const tree = buildSourceTree(["/repo/a/one.md", "/repo/a/two.md", "/repo/b/three.md"], "/repo");
+  const root = tree[0]!;
+  const a = root.children[0]!;
+  const one = a.children[0]!;
+  const rules = setSourceIgnored({ paths: ["/repo", "/elsewhere"], includes: [] }, one, false);
+  assert.deepEqual(rules, { paths: ["/repo", "/elsewhere"], includes: ["/repo/a/one.md"] });
+  assert.equal(sourceSelection(root, rules, []), "partial");
+  assert.equal(sourceSelection(a, rules, []), "partial");
+  assert.equal(sourceSelection(one, rules, []), "none");
+  assert.deepEqual(setSourceIgnored(rules, a, true), {
+    paths: ["/repo", "/elsewhere"],
+    includes: [],
+  });
+  assert.deepEqual(setSourceIgnored(rules, a, false), {
+    paths: ["/repo", "/elsewhere"],
+    includes: ["/repo/a"],
+  });
+});
+
+void test("filename rules contribute to selection without changing location rules", () => {
+  const tree = buildSourceTree(["/repo/AGENTS.md", "/repo/CLAUDE.md"], "/repo");
+  const rules = { paths: ["/repo"], includes: ["/repo/CLAUDE.md"] };
+  assert.equal(sourceSelection(tree[0]!, rules, ["CLAUDE.md"]), "partial");
+  assert.equal(sourceSelection(tree[0]!.children[1]!, rules, ["CLAUDE.md"]), "all");
+});
+
+void test("nested and missing exceptions affect parents and survive unrelated changes", () => {
+  const root = buildSourceTree(["/repo/a/one.md", "/repo/b/two.md"], "/repo")[0]!;
+  const rules = { paths: ["/repo", "/repo/missing/deeper"], includes: ["/repo/missing"] };
+  assert.equal(sourceSelection(root, rules, []), "partial");
+  assert.equal(sourceSelection(root.children[0]!, rules, []), "all");
+  const missing = { name: "missing", path: "/repo/missing", children: [], count: 0, file: false };
+  assert.equal(sourceSelection(missing, rules, []), "partial");
+  assert.deepEqual(setSourceIgnored(rules, missing, false), {
+    paths: ["/repo"],
+    includes: ["/repo/missing"],
+  });
+  assert.deepEqual(setSourceIgnored(rules, root, false), { paths: [], includes: [] });
 });
 
 void test("external roots retain their identity rather than collapsing into relative paths", () => {

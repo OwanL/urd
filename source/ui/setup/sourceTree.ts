@@ -29,6 +29,70 @@ export function isWithin(path: string, parent: string): boolean {
   );
 }
 
+export type Selection = "none" | "partial" | "all";
+
+export interface LocationRules {
+  paths: string[];
+  includes: string[];
+}
+
+function locationIgnored(path: string, rules: LocationRules): boolean {
+  let longest = -1;
+  let ignored = false;
+  for (const [entries, value] of [
+    [rules.paths, true],
+    [rules.includes, false],
+  ] as const) {
+    for (const entry of entries) {
+      const length = pathKey(entry).length;
+      if (length >= longest && isWithin(path, entry)) {
+        longest = length;
+        ignored = value;
+      }
+    }
+  }
+  return ignored;
+}
+
+// Filename rules remain independent of location exceptions.
+export function sourceSelection(
+  node: SourceNode,
+  rules: LocationRules,
+  filenames: string[],
+): Selection {
+  const ignored = locationIgnored(node.path, rules);
+  if (node.file)
+    return ignored || filenames.some((name) => filenameKey(name) === filenameKey(node.name))
+      ? "all"
+      : "none";
+  const exceptions = [...rules.paths, ...rules.includes].some(
+    (path) =>
+      pathKey(path) !== pathKey(node.path) &&
+      isWithin(path, node.path) &&
+      locationIgnored(path, rules) !== ignored,
+  );
+  if (exceptions) return "partial";
+  if (ignored) return "all";
+  const children = node.children.map((child) => sourceSelection(child, rules, filenames));
+  if (children.length && children.every((child) => child === "all")) return "all";
+  if (children.some((child) => child !== "none")) return "partial";
+  return "none";
+}
+
+export function setSourceIgnored(
+  rules: LocationRules,
+  node: SourceNode,
+  ignored: boolean,
+): LocationRules {
+  const remaining = {
+    paths: rules.paths.filter((path) => !isWithin(path, node.path)),
+    includes: rules.includes.filter((path) => !isWithin(path, node.path)),
+  };
+  if (locationIgnored(node.path, remaining) !== ignored)
+    (ignored ? remaining.paths : remaining.includes).push(node.path);
+  return remaining;
+}
+
 export function buildSourceTree(paths: string[], workingDirectory: string): SourceNode[] {
   const roots: SourceNode[] = [];
   const nodes = new Map<string, SourceNode>();

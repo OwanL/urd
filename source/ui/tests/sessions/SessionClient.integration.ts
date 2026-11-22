@@ -140,7 +140,7 @@ void test(
     model.enqueue({ text: "Hello from Urd.", usage: { inputTokens: 12_300, outputTokens: 456 } });
     const receipt = await request(client.submitMessage(id, submission));
     assert.equal(receipt.sessionId, id);
-    assert.deepEqual(receipt.submission, submission);
+    assert.deepEqual(receipt.submission, { ...submission, imageIds: null });
     assert.equal(receipt.acceptance, "accepted");
     assert.equal(receipt.refusalReason, null);
     assert.ok(receipt.executionId);

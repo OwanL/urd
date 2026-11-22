@@ -26,11 +26,14 @@ export class ModelOptions {
   private revision = 0;
   private readonly client: Pick<
     ProviderClient,
-    "list" | "getModels" | "getModelSettings" | "refreshModels"
+    "list" | "getModels" | "getModelSettings" | "refreshModels" | "getCredentials"
   >;
 
   constructor(
-    client: Pick<ProviderClient, "list" | "getModels" | "getModelSettings" | "refreshModels">,
+    client: Pick<
+      ProviderClient,
+      "list" | "getModels" | "getModelSettings" | "refreshModels" | "getCredentials"
+    >,
   ) {
     this.client = client;
   }
@@ -97,7 +100,7 @@ export class ModelOptions {
     revision: number,
     signal?: AbortSignal,
   ): Promise<ModelCatalogRead> {
-    return this.discoverProviders(providers, revision, signal);
+    return this.discoverProviders(providers, revision, signal, true);
   }
 
   async refresh(): Promise<ModelCatalogRead> {
@@ -131,12 +134,26 @@ export class ModelOptions {
     providers: readonly ProviderConnection[],
     revision: number,
     signal?: AbortSignal,
+    automatic = false,
   ): Promise<ModelCatalogRead> {
     if (!this.isCurrent(revision)) return canceledRead(revision);
     let firstError: unknown | null = null;
     const results = await Promise.all(
       providers.map(async (provider) => {
         try {
+          if (automatic) {
+            const status = await this.client.getCredentials(provider.id, signal);
+            if (
+              !this.isCurrent(revision) ||
+              signal?.aborted ||
+              status.isDisconnecting ||
+              (provider.authentication !== "none" &&
+                (!status.hasCredentials ||
+                  status.requiresSignIn ||
+                  status.planAccessGranted === false))
+            )
+              return { provider, options: [], succeeded: false };
+          }
           const [catalog, settings] = await Promise.all([
             this.client.refreshModels(provider.id),
             this.client.getModelSettings(provider.id, signal),

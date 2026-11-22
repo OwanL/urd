@@ -5,6 +5,7 @@ import { replaceProviderOptions } from "../../../providers/models/useModelOption
 import type { ProviderConnection } from "../../../providers/ProviderConnection.ts";
 import type { ProviderModelCatalog } from "../../../providers/ProviderModels.ts";
 import type { ModelSettings } from "../../../providers/ModelSettings.ts";
+import type { ProviderCredentialStatus } from "../../../providers/ProviderCredentials.ts";
 
 const firstConnection: ProviderConnection = {
   id: "10000000-0000-0000-0000-000000000001",
@@ -38,9 +39,117 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+void test("automatic discovery skips signed-out providers without losing cached options", async () => {
+  const signedOut: ProviderConnection = {
+    ...secondConnection,
+    route: "chatGpt",
+    authentication: "oAuth",
+  };
+  const discoveryIds: string[] = [];
+  const credentialIds: string[] = [];
+  const models = new ModelOptions({
+    list: async () => [firstConnection, signedOut],
+    getModels: async (id) => catalog(id, "cached", "Cached"),
+    getModelSettings: async () => [],
+    getCredentials: async (id) => {
+      credentialIds.push(id);
+      return {
+        connectionId: id,
+        hasCredentials: id !== signedOut.id,
+        requiresSignIn: id === signedOut.id,
+        accountLabel: null,
+        expiresAt: null,
+        planAccessGranted: null,
+        isDisconnecting: false,
+      };
+    },
+    refreshModels: async (id) => {
+      discoveryIds.push(id);
+      if (id === signedOut.id) throw new Error("authenticationRequired");
+      return catalog(id, "found", "Found");
+    },
+  });
+  const cached = await models.readCached(new AbortController().signal);
+  const discovered = await models.discover(cached.providersToRefresh, cached.revision);
+  assert.deepEqual(credentialIds, [firstConnection.id, signedOut.id]);
+  assert.deepEqual(discoveryIds, [firstConnection.id]);
+  assert.equal(discovered.error, null);
+  assert.deepEqual(
+    replaceProviderOptions(
+      cached.options!,
+      discovered.options!,
+      cached.providers!,
+      discovered.successfulProviderIds,
+    ).map(({ key }) => key),
+    [`${firstConnection.id}/found`, `${signedOut.id}/cached`],
+  );
+  const manual = await models.refresh();
+  assert.equal((manual.error as Error).message, "authenticationRequired");
+  assert.deepEqual(discoveryIds, [firstConnection.id, firstConnection.id, signedOut.id]);
+});
+
+void test("credential failures remain visible and stale discovery does not post", async () => {
+  const credentials = deferred<ProviderCredentialStatus>();
+  const started = deferred<void>();
+  const models = new ModelOptions({
+    list: async () => [firstConnection],
+    getModels: async (id) => catalog(id, "cached", "Cached"),
+    getModelSettings: async () => [],
+    getCredentials: async () => {
+      throw new Error("credentials failed");
+    },
+    refreshModels: async () => {
+      throw new Error("unexpected refresh");
+    },
+  });
+  const cached = await models.readCached(new AbortController().signal);
+  const result = await models.discover(cached.providersToRefresh, cached.revision);
+  assert.equal((result.error as Error).message, "credentials failed");
+
+  const stale = new ModelOptions({
+    list: async () => [firstConnection],
+    getModels: async (id) => catalog(id, "cached", "Cached"),
+    getModelSettings: async () => [],
+    getCredentials: async () => {
+      started.resolve();
+      return credentials.promise;
+    },
+    refreshModels: async () => {
+      throw new Error("unexpected refresh");
+    },
+  });
+  const staleCached = await stale.readCached(new AbortController().signal);
+  const pending = stale.discover(staleCached.providersToRefresh, staleCached.revision);
+  await started.promise;
+  stale.invalidate();
+  credentials.resolve({
+    connectionId: firstConnection.id,
+    hasCredentials: true,
+    requiresSignIn: false,
+    accountLabel: null,
+    expiresAt: null,
+    planAccessGranted: null,
+    isDisconnecting: false,
+  });
+  assert.equal((await pending).options, null);
+});
+
 void test("cached reads publish options and discover only providers without a refreshed catalog", async () => {
   const discoveryIds: string[] = [];
+  const credentialIds: string[] = [];
   const models = new ModelOptions({
+    getCredentials: async (id) => {
+      credentialIds.push(id);
+      return {
+        connectionId: id,
+        hasCredentials: true,
+        requiresSignIn: false,
+        accountLabel: null,
+        expiresAt: null,
+        planAccessGranted: null,
+        isDisconnecting: false,
+      };
+    },
     list: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) =>
       catalog(
@@ -79,6 +188,7 @@ void test("cached reads publish options and discover only providers without a re
     new AbortController().signal,
   );
   assert.deepEqual(discoveryIds, [secondConnection.id]);
+  assert.deepEqual(credentialIds, [secondConnection.id]);
   assert.deepEqual(
     missingOnly.options?.map(({ key }) => key),
     [`${secondConnection.id}/discovered`],
@@ -101,6 +211,15 @@ void test("cached reads publish options and discover only providers without a re
 
 void test("cached read failures preserve successful providers and mark failed providers for discovery", async () => {
   const models = new ModelOptions({
+    getCredentials: async (id) => ({
+      connectionId: id,
+      hasCredentials: true,
+      requiresSignIn: false,
+      accountLabel: null,
+      expiresAt: null,
+      planAccessGranted: null,
+      isDisconnecting: false,
+    }),
     list: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) => {
       if (connectionId === secondConnection.id) throw new Error("cached read failed");
@@ -125,6 +244,15 @@ void test("cached read failures preserve successful providers and mark failed pr
 
 void test("discovery failures do not discard options from successful providers", async () => {
   const models = new ModelOptions({
+    getCredentials: async (id) => ({
+      connectionId: id,
+      hasCredentials: true,
+      requiresSignIn: false,
+      accountLabel: null,
+      expiresAt: null,
+      planAccessGranted: null,
+      isDisconnecting: false,
+    }),
     list: async () => [firstConnection, secondConnection],
     getModels: async () => catalog(firstConnection.id, "cached", "Cached model"),
     getModelSettings: async () => [],
@@ -147,6 +275,15 @@ void test("discovery failures do not discard options from successful providers",
 void test("empty provider lists are known and do not attempt discovery", async () => {
   let discoveries = 0;
   const models = new ModelOptions({
+    getCredentials: async (id) => ({
+      connectionId: id,
+      hasCredentials: true,
+      requiresSignIn: false,
+      accountLabel: null,
+      expiresAt: null,
+      planAccessGranted: null,
+      isDisconnecting: false,
+    }),
     list: async () => [],
     getModels: async () => {
       throw new Error("unexpected cache read");
@@ -171,6 +308,15 @@ void test("empty provider lists are known and do not attempt discovery", async (
 void test("provider changes can rediscover every provider", async () => {
   const discoveryIds: string[] = [];
   const models = new ModelOptions({
+    getCredentials: async (id) => ({
+      connectionId: id,
+      hasCredentials: true,
+      requiresSignIn: false,
+      accountLabel: null,
+      expiresAt: null,
+      planAccessGranted: null,
+      isDisconnecting: false,
+    }),
     list: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) => catalog(connectionId, "cached", "Cached", "refreshed"),
     getModelSettings: async () => [],
@@ -193,6 +339,15 @@ void test("provider changes prevent an older manual refresh from publishing over
   const discoveryStarted = deferred<void>();
   let listCalls = 0;
   const models = new ModelOptions({
+    getCredentials: async (id) => ({
+      connectionId: id,
+      hasCredentials: true,
+      requiresSignIn: false,
+      accountLabel: null,
+      expiresAt: null,
+      planAccessGranted: null,
+      isDisconnecting: false,
+    }),
     list: async () => [listCalls++ === 0 ? firstConnection : currentConnection],
     getModels: async () => catalog(currentConnection.id, "cached", "Cached model"),
     getModelSettings: async () => [],
@@ -235,6 +390,15 @@ void test("configured metadata is matched by connection and model without infere
   ]);
   let records = settings;
   const models = new ModelOptions({
+    getCredentials: async (id) => ({
+      connectionId: id,
+      hasCredentials: true,
+      requiresSignIn: false,
+      accountLabel: null,
+      expiresAt: null,
+      planAccessGranted: null,
+      isDisconnecting: false,
+    }),
     list: async () => [connection],
     getModels: async () => ({
       connectionId: connection.id,

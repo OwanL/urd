@@ -1,6 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
-import { IconButton } from "../../controls/IconButton.tsx";
 import type { UserQuestion } from "../../sessions/inputs/UserQuestion.ts";
 
 interface QuestionPromptProps {
@@ -94,6 +93,9 @@ export function QuestionPrompt({
           <textarea
             ref={field}
             aria-label="Custom answer"
+            aria-keyshortcuts="Enter"
+            enterkeyhint="send"
+            title="Enter to send · Shift+Enter for a new line"
             placeholder="Custom answer"
             rows={1}
             maxLength={8000}
@@ -117,7 +119,6 @@ export function QuestionPrompt({
               }
             }}
           />
-          <IconButton type="submit" icon="send" label="Submit answer" disabled={!canSubmit} />
         </form>
       )}
     </>

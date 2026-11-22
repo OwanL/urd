@@ -13,10 +13,12 @@ internal sealed class StartingContextBuilder {
 
   private readonly ToolCatalog toolCatalog;
   private readonly InstructionResourceDiscovery? instructionDiscovery;
+  private readonly TimeProvider timeProvider;
 
-  internal StartingContextBuilder(ToolCatalog toolCatalog, InstructionResourceDiscovery? instructionDiscovery = null) {
+  internal StartingContextBuilder(ToolCatalog toolCatalog, InstructionResourceDiscovery? instructionDiscovery = null, TimeProvider? timeProvider = null) {
     this.toolCatalog = toolCatalog ?? throw new ArgumentNullException(nameof(toolCatalog));
     this.instructionDiscovery = instructionDiscovery;
+    this.timeProvider = timeProvider ?? TimeProvider.System;
   }
 
   internal StartingContext Create(StartingContextInput input, CancellationToken cancellation) {
@@ -119,7 +121,7 @@ internal sealed class StartingContextBuilder {
     return context with { BoundaryId = boundaryId };
   }
 
-  private static StartingContext Compose(
+  private StartingContext Compose(
       StartingContextInput input,
       IReadOnlyList<AIFunctionDeclaration> tools,
       CancellationToken cancellation,
@@ -135,8 +137,7 @@ internal sealed class StartingContextBuilder {
       new(ChatRole.System, SharedAgentGuidance.Text),
       new(ChatRole.System, sessionGuidance)
     };
-    if (input.WorkingDirectory is { } directory)
-      instructions.Add(new(ChatRole.System, $"Working directory: {directory}"));
+    instructions.Add(new(ChatRole.System, SystemEnvironment.Describe(input.WorkingDirectory, timeProvider.GetUtcNow(), timeProvider.LocalTimeZone)));
     if (skills is not null && SelectedSkillsContext.Compose(skills) is { } selectedSkills)
       instructions.Add(new(ChatRole.System, selectedSkills));
     foreach (DiscoveredInstructionDocument document in documents ?? []) {

@@ -28,14 +28,29 @@ public sealed class StartingContextBuilderTests {
     Assert.Contains("Help the user directly", primaryGuidance, StringComparison.Ordinal);
     Assert.Contains("# Default working guidance", primaryGuidance, StringComparison.Ordinal);
     Assert.Contains("Ask before materially expanding scope.", primaryGuidance, StringComparison.Ordinal);
-    Assert.Equal($"Working directory: {workingDirectory}", primary.Instructions[2].Text);
+    Assert.StartsWith($"Working directory: {workingDirectory}\n", primary.Instructions[2].Text, StringComparison.Ordinal);
 
-    Assert.Equal(2, subagent.Instructions.Count);
+    Assert.Equal(3, subagent.Instructions.Count);
+    Assert.StartsWith("Operating system:", subagent.Instructions[2].Text, StringComparison.Ordinal);
     string subagentGuidance = subagent.Instructions[1].Text;
     Assert.Contains("Stay within its scope", subagentGuidance, StringComparison.Ordinal);
     Assert.Contains("Start with a plain-language outcome sentence", subagentGuidance, StringComparison.Ordinal);
     Assert.DoesNotContain(subagent.Instructions, message => message.Text.StartsWith("Working directory:", StringComparison.Ordinal));
     Assert.All(primary.Instructions.Concat(subagent.Instructions), message => Assert.Equal(ChatRole.System, message.Role));
+  }
+
+  [Fact]
+  public void EnvironmentIncludesDirectoryOperatingSystemAndLocalSnapshotTime() {
+    var now = new DateTimeOffset(2026, 11, 22, 21, 58, 0, TimeSpan.Zero);
+    var zone = TimeZoneInfo.CreateCustomTimeZone("Test/Zone", TimeSpan.FromHours(13), "Test", "Test");
+    var manager = new StartingContextBuilder(new ToolCatalog([]), timeProvider: new FixedTimeProvider(now, zone));
+
+    StartingContext context = manager.Create(new(SessionKind.Primary, ModelFamily.Other, "C:\\workspace\\urd"), default);
+    string environment = context.Instructions[2].Text;
+
+    Assert.Contains("Working directory: C:\\workspace\\urd\n", environment, StringComparison.Ordinal);
+    Assert.Contains("Operating system: ", environment, StringComparison.Ordinal);
+    Assert.Contains("Time: 2026-11-23 10:58 +13:00 (Test/Zone) as of context creation", environment, StringComparison.Ordinal);
   }
 
   [Fact]
@@ -102,6 +117,11 @@ public sealed class StartingContextBuilderTests {
 
   private static string InstructionText(StartingContext context) =>
       string.Join("\n", context.Instructions.Select(message => message.Text));
+
+  private sealed class FixedTimeProvider(DateTimeOffset now, TimeZoneInfo zone) : TimeProvider {
+    public override DateTimeOffset GetUtcNow() => now;
+    public override TimeZoneInfo LocalTimeZone => zone;
+  }
 
   private sealed class TestTool(string name) : AgentTool {
     public override string Name => name;

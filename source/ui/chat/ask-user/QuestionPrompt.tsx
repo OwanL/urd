@@ -22,10 +22,16 @@ export function QuestionPrompt({
   const customButton = useRef<HTMLButtonElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const focusEditor = useRef(false);
+  const composing = useRef(false);
   const editorId = useId();
   const hasChoices = question.answers.length > 0;
   const context = question.context?.trim();
   const showEditor = !hasChoices || editing;
+  const canSubmit = !disabled && Boolean(draft.trim());
+
+  function submitDraft() {
+    if (canSubmit) onAnswer(draft);
+  }
 
   useLayoutEffect(() => {
     if (editing && focusEditor.current) field.current?.focus({ preventScroll: true });
@@ -82,7 +88,7 @@ export function QuestionPrompt({
           class="user-question-form"
           onSubmit={(event) => {
             event.preventDefault();
-            onAnswer(draft);
+            submitDraft();
           }}
         >
           <textarea
@@ -93,19 +99,25 @@ export function QuestionPrompt({
             maxLength={8000}
             value={draft}
             onInput={(event) => onDraft(event.currentTarget.value)}
+            onCompositionStart={() => {
+              composing.current = true;
+            }}
+            onCompositionEnd={() => {
+              composing.current = false;
+            }}
             onKeyDown={(event) => {
-              if (event.key !== "Escape" || event.isComposing || !hasChoices) return;
-              event.stopPropagation();
-              setEditing(false);
-              customButton.current?.focus({ preventScroll: true });
+              if (event.isComposing || event.keyCode === 229 || composing.current) return;
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                submitDraft();
+              } else if (event.key === "Escape" && hasChoices) {
+                event.stopPropagation();
+                setEditing(false);
+                customButton.current?.focus({ preventScroll: true });
+              }
             }}
           />
-          <IconButton
-            type="submit"
-            icon="send"
-            label="Submit answer"
-            disabled={disabled || !draft.trim()}
-          />
+          <IconButton type="submit" icon="send" label="Submit answer" disabled={!canSubmit} />
         </form>
       )}
     </>

@@ -18,6 +18,8 @@ export function useBucketSuggestions(
   client: ProviderClient,
   refreshPreferences: () => Promise<void> | undefined,
   enabled: boolean,
+  onSaved: () => Promise<void>,
+  onBusyChange: (busy: boolean) => void,
 ) {
   const [setup, setSetup] = useState<BucketSetup | null>(loading);
   const [attempt, setAttempt] = useState(0);
@@ -69,14 +71,31 @@ export function useBucketSuggestions(
     const proposal = setup.proposal;
     const current = request.current;
     setSetup({ phase: "saving", proposal });
-    void saveBucketSuggestions(
-      () => client.confirmBucketSuggestions(proposal),
-      refreshPreferences,
-      (result) => {
-        if (current && !current.signal.aborted) setSetup(result);
-      },
-    );
-  }, [setup, client, refreshPreferences]);
+    onBusyChange(true);
+    void (async () => {
+      try {
+        let saved = false;
+        await saveBucketSuggestions(
+          () => client.confirmBucketSuggestions(proposal),
+          refreshPreferences,
+          (result) => {
+            if (!current || current.signal.aborted) return;
+            if (result.phase === "finished" && !result.error) saved = true;
+            else setSetup(result);
+          },
+        );
+        if (saved && current && !current.signal.aborted) {
+          await onSaved();
+          if (!current.signal.aborted)
+            setSetup({ phase: "finished", message: "Model buckets saved." });
+        }
+      } catch {
+        if (current && !current.signal.aborted) setSetup(unavailable);
+      } finally {
+        onBusyChange(false);
+      }
+    })();
+  }, [setup, client, refreshPreferences, onSaved, onBusyChange]);
 
   const retry = useCallback(() => setAttempt((value) => value + 1), []);
 

@@ -11,20 +11,31 @@ export function SetupModels({
   catalogLoading,
   editing,
   onEdit,
+  onSaved,
+  onBusyChange,
 }: {
   client: ProviderClient;
   state: PreferencesState;
   catalogLoading: boolean;
   editing: boolean;
   onEdit(): void;
+  onSaved(): Promise<void>;
+  onBusyChange(busy: boolean): void;
 }) {
   const choices = state.preferences?.modelChoices;
+  const suggestions = useBucketSuggestions(
+    client,
+    state.refresh,
+    !editing && !!choices && !catalogLoading,
+    onSaved,
+    onBusyChange,
+  );
+  const setup = suggestions.setup;
   const preview =
     !editing &&
     !!choices &&
-    !(choices.small.length && choices.medium.length && choices.large.length);
-  const suggestions = useBucketSuggestions(client, state.refresh, preview && !catalogLoading);
-  const setup = suggestions.setup;
+    (setup?.phase === "saving" ||
+      !(choices.small.length && choices.medium.length && choices.large.length));
 
   if (preview && (catalogLoading || (setup && setup.phase !== "finished")))
     return (

@@ -10,7 +10,9 @@ namespace Urd.Core.Sessions;
 // Runs bounded subagents and settles their resources.
 internal sealed class SubagentRuns(
     UrdStore store, PreferenceManager preferences, ModelSelector? modelSelector, AgentQuestions questions,
-    SessionRegistry registry, Func<SessionRecord, SubagentSession> createChild) {
+    SessionRegistry registry, Func<SessionRecord, int, SubagentSession> createChild) {
+  internal const int MaximumDepth = 2;
+
   // Runs one bounded child to its final report. The child is registered under the shutdown fence
   // before any of its work runs, cancellation stops and joins it, and its processes and registry
   // entry are released only after the run finishes. Cross-session waits hold no manager locks.
@@ -47,16 +49,31 @@ internal sealed class SubagentRuns(
   private async Task<SubagentAssignment> PrepareAssignmentAsync(HarnessToolContext caller,
       SubagentRunRequest request, CancellationToken cancellation) {
     ArgumentException.ThrowIfNullOrWhiteSpace(request.Task);
+    SessionRecord parent = store.Sessions.Read(caller.SessionId)
+        ?? throw new InvalidOperationException($"The calling session '{caller.SessionId}' does not exist.");
+    int childDepth = GetChildDepth(parent);
     if (modelSelector is null)
       throw new InvalidOperationException("Subagent buckets require a configured model selector.");
 
     UserPreferences captured = preferences.Read();
-    SessionRecord parent = store.Sessions.Read(caller.SessionId)
-        ?? throw new InvalidOperationException($"The calling session '{caller.SessionId}' does not exist.");
     LlmSelection selection = await modelSelector.ResolveSubagentAsync(request.Bucket, captured,
         store.Sessions.ReadSubagentProviders(parent.Id), cancellation);
     string? contextBlock = ReadParentContext(parent, caller, request, captured.CompactionTriggerTokenCount);
-    return new(parent.Id, caller.RequestId, caller.CallId, parent.WorkingDirectory, request.Task, contextBlock, selection);
+    return new(parent.Id, childDepth, caller.RequestId, caller.CallId, parent.WorkingDirectory, request.Task, contextBlock, selection);
+  }
+
+  private int GetChildDepth(SessionRecord parent) {
+    // The primary is at depth zero. Bound the walk even for deeper trees from older builds.
+    SessionRecord ancestor = parent;
+    for (int depth = 1; depth <= MaximumDepth; depth++) {
+      if (ancestor.Kind == SessionKind.Primary)
+        return depth;
+      if (depth == MaximumDepth)
+        break;
+      ancestor = ancestor.ParentSessionId is Guid id && store.Sessions.Read(id) is { } record
+          ? record : throw new InvalidOperationException("The calling session has no valid parent.");
+    }
+    throw new InvalidOperationException($"Subagent nesting limit reached ({MaximumDepth} levels below the primary). Finish the task without delegating.");
   }
 
   private string? ReadParentContext(SessionRecord parent, HarnessToolContext caller, SubagentRunRequest request,
@@ -81,7 +98,7 @@ internal sealed class SubagentRuns(
         throw new AuxiliaryModelUnavailableException("This session no longer allows the selected subagent provider.");
       // Install ownership before publishing the handle or starting the assignment.
       var child = createChild(store.Sessions.CreateSubagent(Guid.NewGuid(),
-          assignment.ParentSessionId, assignment.OwningCallId, assignment.WorkingDirectory, assignment.OwningRequestId));
+          assignment.ParentSessionId, assignment.OwningCallId, assignment.WorkingDirectory, assignment.OwningRequestId), assignment.Depth);
       questions.TrackDelegation(child.Id, owner);
       // Children are deliberately absent from SessionCreated and the primary tab list.
       registry.TrackChild(child);
@@ -151,6 +168,6 @@ internal sealed class SubagentRuns(
   private const string CancelledReport = "The subagent task was cancelled.";
 
   // One prepared bounded child: ownership, inherited directory and its whole assignment.
-  private sealed record SubagentAssignment(Guid ParentSessionId, Guid OwningRequestId, string OwningCallId,
+  private sealed record SubagentAssignment(Guid ParentSessionId, int Depth, Guid OwningRequestId, string OwningCallId,
       string? WorkingDirectory, string Task, string? ContextBlock, LlmSelection Selection);
 }

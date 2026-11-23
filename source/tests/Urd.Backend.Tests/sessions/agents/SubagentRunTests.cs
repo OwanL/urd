@@ -541,6 +541,7 @@ public sealed class SubagentRunTests {
     const string nestedReport = "nested report";
     var nestedEntered = Signal();
     var nestedRelease = Signal();
+    ScriptedRequest? grandchildRequest = null;
     var client = new ScriptedChatClient(Route);
     await using var fixture = await SubagentRunFixture.OpenAsync(client);
     PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
@@ -561,6 +562,18 @@ public sealed class SubagentRunTests {
             Assert.Equal(child.Id, item.ParentId);
           });
       Assert.Empty(await fixture.Manager.ListLiveSubagentsAsync(fixture.ParentSessionId).WaitAsync(TestTimeout));
+      Assert.NotNull(grandchildRequest);
+      Assert.DoesNotContain(grandchildRequest.Options!.Tools!, tool => tool.Name == "subagent");
+      Assert.Contains(grandchildRequest.Options.Tools!, tool => tool.Name == "ask_agent");
+
+      var caller = new HarnessToolContext(nested.Id, Guid.NewGuid(), "too-deep",
+          new ToolSessionServices(fixture.Store.Sessions, fixture.Manager)) { RequestId = Guid.NewGuid() };
+      var runner = (ISubagentRunner)fixture.Manager;
+      var error = await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunSubagentAsync(caller,
+          new("small", SubagentContextMode.None, "must not run"), CancellationToken.None).WaitAsync(TestTimeout));
+      Assert.Contains("nesting limit", error.Message, StringComparison.OrdinalIgnoreCase);
+      Assert.Null(await fixture.Manager.FindSubagentByCallAsync(nested.Id, caller.RequestId, caller.CallId)
+          .WaitAsync(TestTimeout));
     } finally {
       nestedRelease.TrySetResult();
     }
@@ -583,8 +596,10 @@ public sealed class SubagentRunTests {
         case "title":
           return TextUpdates([ChildTitle], token);
         case "conversation":
-          if (HasUserText(request, nestedTask))
+          if (HasUserText(request, nestedTask)) {
+            grandchildRequest = request;
             return NestedResponse(token);
+          }
           if (HasUserText(request, AssignmentTask))
             return HasResult(request, "inner") ? TextUpdates([ChildReport], token)
                 : ToolBatch(token, Delegate("inner", nestedTask));

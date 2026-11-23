@@ -204,16 +204,19 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     return new PrimarySession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
   }
 
-  private SubagentSession CreateChild(SessionRecord record) {
+  private SubagentSession CreateChild(SessionRecord record, int depth) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, false, out ChatProcesses? processes);
+    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, false,
+        out ChatProcesses? processes, canDelegate: depth < SubagentRuns.MaximumDepth);
     return new SubagentSession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
   }
 
-  private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, bool primary, out ChatProcesses? processes) {
+  private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, bool primary,
+      out ChatProcesses? processes, bool canDelegate = true) {
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
-      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
+      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending),
+      .. (canDelegate ? new AgentTool[] { new SubagentTool() } : []), new ListAgentsTool(),
       new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this), .. (primary ? new AgentTool[] { new ProposeMcpConnectionTool() } : [])];
     if (primary && playwright is { } automation)
       shared = [.. shared, new PlaywrightTool(automation)];

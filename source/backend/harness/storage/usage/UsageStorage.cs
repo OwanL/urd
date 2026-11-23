@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
+using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Usage;
 
@@ -226,8 +227,20 @@ internal sealed class UsageStorage(Database database) {
     List<string> conditions = [];
     List<(string Name, object? Value)> parameters = [];
     if (sessionId is Guid id) {
-      conditions.Add("session_id = $session");
+      // A primary owns its whole tree. Other session IDs still select their own ledger rows.
+      conditions.Add("""
+          session_id IN (
+            WITH RECURSIVE helpers(id) AS (
+              SELECT child.session_id FROM sessions parent JOIN sessions child ON child.parent_session_id = parent.session_id
+              WHERE parent.session_id = $session AND parent.kind = $primary
+              UNION ALL
+              SELECT child.session_id FROM sessions child JOIN helpers ON child.parent_session_id = helpers.id
+            )
+            SELECT $session UNION ALL SELECT id FROM helpers
+          )
+          """);
       parameters.Add(("$session", id));
+      parameters.Add(("$primary", (int)SessionKind.Primary));
     }
     if (from is DateTimeOffset start) {
       conditions.Add("started_at >= $from");

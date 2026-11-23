@@ -118,7 +118,7 @@ export function SessionIndicators({
       ) : null}
       <div class="session-indicator-item">
         <span class="session-indicator-name" aria-hidden="true">
-          Cost
+          Session cost
         </span>
         <UsageControl
           label="Session"

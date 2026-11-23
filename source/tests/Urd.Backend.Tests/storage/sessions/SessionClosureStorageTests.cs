@@ -82,6 +82,39 @@ public sealed class SessionClosureStorageTests {
   }
 
   [Fact]
+  public void PrimarySessionCostIncludesItsTreeWithoutDoubleCountingRollingTotals() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid primary = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    Guid child = store.Sessions.CreateSubagent(Guid.NewGuid(), primary, "spawn").Id;
+    Guid grandchild = store.Sessions.CreateSubagent(Guid.NewGuid(), child, "nest").Id;
+    Guid other = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    var now = new DateTimeOffset(2026, 11, 12, 15, 30, 0, TimeSpan.Zero);
+    RecordUsage(store, primary, now.AddDays(-8), 1m);
+    RecordUsage(store, child, now.AddDays(-7), 2m);
+    RecordUsage(store, grandchild, now.AddDays(-1), 4m, purpose: "title");
+    RecordUsage(store, other, now, 8m);
+    RecordUsage(store, null, now, 16m);
+
+    UsageSummary open = store.ReadUsage(primary);
+    Assert.Equal(new UsageTotals(7m, 3, 0, 0, 0), open.Totals);
+    Assert.Equal(4m, Assert.Single(open.Breakdown, group => group.Purpose == "title").Totals.CostUsd);
+    Assert.Equal(7m, open.History.Sum(point => point.Totals.CostUsd));
+    Assert.Equal(new Guid?[] { grandchild, child, primary }, open.Recent.Select(request => request.SessionId));
+    Assert.Equal(2m, store.ReadUsage(child).Totals.CostUsd);
+    Assert.Equal(4m, store.ReadUsage(primary, now.AddDays(-1), now).Totals.CostUsd);
+    AssertCosts();
+    Assert.True(store.DeletePrimarySession(primary));
+    AssertCosts();
+
+    void AssertCosts() {
+      Assert.Equal(open.Totals, store.ReadUsage(primary, detail: false).Totals);
+      Assert.Equal(new UsageTotals(28m, 3, 0, 0, 0), store.ReadUsage(null, now.AddDays(-1), now).Totals);
+      Assert.Equal(new UsageTotals(30m, 4, 0, 0, 0), store.ReadUsage(null, now.AddDays(-7), now, detail: false).Totals);
+    }
+  }
+
+  [Fact]
   public void UnsettledChildAndFailedCommitCannotEraseHistoryOrAccounting() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
@@ -115,8 +148,9 @@ public sealed class SessionClosureStorageTests {
     Assert.Empty(Directory.GetFiles(images));
   }
 
-  private static void RecordUsage(UrdStore store, Guid? session, DateTimeOffset at, decimal? cost, string? problem = null) =>
-      store.Usage.Begin(new(Guid.NewGuid(), session, "provider", "model", "purpose", at, at.AddSeconds(1),
+  private static void RecordUsage(UrdStore store, Guid? session, DateTimeOffset at, decimal? cost, string? problem = null,
+      string purpose = "conversation") =>
+      store.Usage.Begin(new(Guid.NewGuid(), session, "provider", "model", purpose, at, at.AddSeconds(1),
           cost, problem is not null, problem, new UsageTokens(11, 22, 0), null, Guid.NewGuid()));
 
   private static (Guid Run, Guid Request) SaveHistory(UrdStore store, Guid session, DataContent[] images) {

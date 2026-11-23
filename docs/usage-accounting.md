@@ -107,13 +107,18 @@ would require separately authorized requests and a representative reference corp
 
 ## Browser and HTTP
 
-The composer shows session cost; its popover shows provider composition with model
-costs directly underneath, followed by cost sources. History provider legends reveal
-model totals on hover, focus or click. Session and history-point details share the
-same provider/model breakdown. The workspace's
-two cost totals reveal Today and Last 7 days (browser-local midnight), with cumulative
-provider-stacked history and per-point model costs. Focus the chart and use arrow keys,
-Home or End to inspect samples; the model breakdown is readable HTML. Escape dismisses
+The composer shows the primary session’s lifetime cost, including all nested helpers
+and auxiliary calls attributed to them or the primary. Its Session popover uses the
+same scope for provider and model costs, followed by cost sources.
+
+The 24h and 7d totals cover the last 24 and 168 hours across the whole workspace,
+including unattributed requests. They count each attempt once by start time, not by
+adding session totals. Both global windows are available in the composer popover
+without changing the Session chip.
+
+History shows cumulative cost by provider. Its legends reveal model totals on hover,
+focus or click. Focus the chart and use arrow keys, Home or End to inspect samples;
+the per-point model breakdown is readable HTML. Escape dismisses
 the nearest detail first. Request records and rate provenance remain available through
 the API, not a ledger accordion in the cost tooltip.
 
@@ -124,7 +129,8 @@ estimates and omit unpriced usage; a dash marks unavailable amounts. The cost po
 notes when totals may be incomplete. Failed chip refreshes retain stale values. Hidden
 documents and inactive session views do not poll.
 
-`GET /api/usage?sessionId=<guid>` reads a session. Global reads require finite ISO
+`GET /api/usage?sessionId=<guid>` reads the primary and its descendants, or just that
+helper’s own requests if given a helper ID. Global reads require finite ISO
 `from`/`to` timestamps spanning at most 31 days. Both range bounds are inclusive;
 requests are attributed by start time. Add `detail=false` for totals only. Detailed
 responses bound breakdown/history to 64 entries and recent requests to 20. Overflow

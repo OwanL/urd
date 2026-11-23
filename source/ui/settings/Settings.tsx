@@ -255,6 +255,7 @@ export function Settings({
             setCompactionTriggerDraft({ value: compactionTriggerInput(value), edited: false })
           }
         />
+        <MaxSubagentDepth state={preferences} />
         {tab === "general" && (
           <section class="general-settings" aria-label="Source selection">
             <h3>Sources</h3>
@@ -306,7 +307,6 @@ export function Settings({
         {tab === "model-buckets" && (
           <DefaultSubagentProviders providers={state} state={preferences} />
         )}
-        <MaxSubagentDepth state={preferences} />
       </section>
       <section
         class="settings-page"

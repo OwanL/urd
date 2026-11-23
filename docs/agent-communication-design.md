@@ -141,7 +141,7 @@ cannot start a child on a newly disabled provider. This applies to descendants a
 cancelling already admitted children, changing the main chat provider, or hiding the separate
 communication tools. The cached starting context can be reused as providers are toggled.
 Delegation defaults to four subagent levels below the primary. Change **Max subagent depth** in
-**Settings → Model Buckets**; zero disables delegation. Agents at or above the limit are not
+**Settings → General**; zero disables delegation. Agents at or above the limit are not
 offered `subagent`, and admission checks the current limit before creating a child. Lowering it
 leaves existing agents running. The setting caps depth, not siblings; Stop still owns the whole tree.
 

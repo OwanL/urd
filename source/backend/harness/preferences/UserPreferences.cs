@@ -1,6 +1,8 @@
 namespace Urd.Core.Preferences;
 
 public sealed record UserPreferences(string? WorkingDirectory, int? CompactionTriggerTokenCount) {
+  public const int DefaultMaxSubagentDepth = 4;
+  public int MaxSubagentDepth { get; init; } = DefaultMaxSubagentDepth;
   public bool LanHostingEnabled { get; init; }
   public AuxiliaryModelPreferences ModelChoices { get; init; } = new();
   // Null allows all available providers; an empty list allows none.

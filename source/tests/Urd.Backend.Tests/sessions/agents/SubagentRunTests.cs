@@ -413,8 +413,10 @@ public sealed class SubagentRunTests {
     }
   }
 
-  [Fact]
-  public async Task ProviderToggleRejectsAStaleCallAndRestoresDelegationWithoutRebuildingContext() {
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task PolicyChangeRejectsAStaleCallAndRestoresDelegationWithoutRebuildingContext(bool changeDepth) {
     var firstRequest = new TaskCompletionSource<ScriptedRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
     var release = Signal();
     var deniedRequest = new TaskCompletionSource<ScriptedRequest>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -426,7 +428,10 @@ public sealed class SubagentRunTests {
     Guid execution = await StartParentAsync(parent);
     try {
       Assert.Contains((await firstRequest.Task.WaitAsync(TestTimeout)).Options!.Tools!, tool => tool.Name == "subagent");
-      await fixture.Manager.SetSubagentProvidersAsync(parent.Id, []);
+      if (changeDepth)
+        new PreferenceManager(fixture.Store).SetMaxSubagentDepth(0);
+      else
+        await fixture.Manager.SetSubagentProvidersAsync(parent.Id, []);
       release.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,
           (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
@@ -434,7 +439,10 @@ public sealed class SubagentRunTests {
       Assert.Equal(ExecutionOutcome.Failed, Assert.Single(StoredTools.Read(fixture.Database), call => call.CallId == "stale").Outcome);
       Assert.Equal(0L, fixture.Database.Scalar("SELECT EXISTS(SELECT 1 FROM sessions WHERE kind = 1);")); // raw-sql: rejected delegation must not create a child
 
-      await fixture.Manager.SetSubagentProvidersAsync(parent.Id, [providerId]);
+      if (changeDepth)
+        new PreferenceManager(fixture.Store).SetMaxSubagentDepth(1);
+      else
+        await fixture.Manager.SetSubagentProvidersAsync(parent.Id, [providerId]);
       Guid secondExecution = await StartParentAsync(parent, "Try again");
       Assert.Equal(ExecutionOutcome.Completed,
           (await parent.WaitForExecutionFinishAsync(secondExecution).WaitAsync(TestTimeout)).Outcome);
@@ -544,6 +552,7 @@ public sealed class SubagentRunTests {
     ScriptedRequest? grandchildRequest = null;
     var client = new ScriptedChatClient(Route);
     await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    new PreferenceManager(fixture.Store).SetMaxSubagentDepth(2);
     PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
     Guid execution = await StartParentAsync(parent);
     SessionRecord child;
@@ -626,6 +635,41 @@ public sealed class SubagentRunTests {
       await nestedRelease.Task.WaitAsync(token);
       await foreach (ChatResponseUpdate update in TextUpdates([nestedReport], token))
         yield return update;
+    }
+  }
+
+  [Theory]
+  [InlineData(null, 4)]
+  [InlineData(5, 5)]
+  public async Task DelegationReachesTheDefaultOrConfiguredDepth(int? configuredLimit, int expectedDepth) {
+    string[] tasks = Enumerable.Range(0, expectedDepth + 1).Select(depth => $"Explore level {depth}").ToArray();
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    if (configuredLimit is int limit)
+      new PreferenceManager(fixture.Store).SetMaxSubagentDepth(limit);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid execution = await StartParentAsync(parent, tasks[0]);
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+    var calls = StoredTools.Read(fixture.Database).Where(call => call.Name == "subagent").ToArray();
+    Assert.Equal(expectedDepth, calls.Length);
+    Assert.All(calls, call => Assert.Equal(ExecutionOutcome.Completed, call.Outcome));
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      if (request.Purpose == "title")
+        return TextUpdates([ChildTitle], token);
+      if (request.Purpose != "conversation")
+        return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+      int depth = Array.FindIndex(tasks, task => HasUserText(request, task));
+      Assert.InRange(depth, 0, expectedDepth);
+      if (depth == expectedDepth) {
+        Assert.DoesNotContain(request.Options!.Tools!, tool => tool.Name == "subagent");
+        return TextUpdates([ChildReport], token);
+      }
+      Assert.Contains(request.Options!.Tools!, tool => tool.Name == "subagent");
+      string callId = $"level-{depth + 1}";
+      return HasResult(request, callId) ? TextUpdates([ChildReport], token)
+          : ToolBatch(token, Delegate(callId, tasks[depth + 1]));
     }
   }
 

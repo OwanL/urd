@@ -21,6 +21,7 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
       large: [],
     },
     subagentProviderConnectionIds: ["connection-2"],
+    maxSubagentDepth: 4,
     protectedResources: {
       tools: ["bash", "read"],
       skills: ["C:\\work\\project\\skills\\safe\\SKILL.md"],
@@ -70,6 +71,7 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
   for (const ids of [null, [], ["connection-2"]]) {
     assert.deepEqual(await client.setSubagentProviders(ids), saved);
   }
+  assert.deepEqual(await client.setMaxSubagentDepth(0), saved);
   assert.deepEqual(
     await client.setProtectedItems("skills", ["C:\\work\\project\\skills\\safe\\SKILL.md"]),
     saved,
@@ -134,6 +136,11 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
         method: "POST",
         url: "/api/preferences/subagent-providers",
         body: '{"connectionIds":["connection-2"]}',
+      },
+      {
+        method: "POST",
+        url: "/api/preferences/subagent-depth",
+        body: '{"maxSubagentDepth":0}',
       },
       {
         method: "POST",

@@ -10,6 +10,27 @@ namespace Urd.Backend.Tests.Preferences;
 
 public sealed class PreferencesTests {
   [Fact]
+  public void SubagentDepthDefaultsValidatesAndPersists() {
+    using var database = new TemporaryDatabase();
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      Assert.Equal(UserPreferences.DefaultMaxSubagentDepth, preferences.Read().MaxSubagentDepth);
+      preferences.SetMaxSubagentDepth(0);
+      Assert.Throws<ArgumentOutOfRangeException>(() => preferences.SetMaxSubagentDepth(-1));
+      Assert.Equal(0, preferences.Read().MaxSubagentDepth);
+    }
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      Assert.Equal(0, preferences.Read().MaxSubagentDepth);
+      preferences.SetMaxSubagentDepth(int.MaxValue);
+      preferences.SetLanHostingEnabled(true);
+    }
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Equal(int.MaxValue, new PreferenceManager(reopened).Read().MaxSubagentDepth);
+    Assert.True(new PreferenceManager(reopened).Read().LanHostingEnabled);
+  }
+
+  [Fact]
   public void LanHostingPreferenceDefaultsToFalseAndPersistsIndependently() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {

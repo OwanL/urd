@@ -14,9 +14,10 @@ public sealed class SubagentSession : SessionBase {
 
   internal SubagentSession(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
-      PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null)
+      PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null,
+      int depth = 1)
       : base(record, SessionKind.Subagent, store, createChatClient, tools, processes, pending, preferences,
-          modelSelector, subagents) {
+          modelSelector, subagents, depth) {
     if (record.Kind != SessionKind.Subagent || record.ParentSessionId is null || record.OwningCallId is null)
       throw new ArgumentException("Subagent records require a parent session and an owning call.", nameof(record));
     ParentSessionId = record.ParentSessionId.Value;

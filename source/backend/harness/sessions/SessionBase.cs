@@ -32,9 +32,11 @@ public abstract partial class SessionBase {
 
   private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
-      PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null) {
+      PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null,
+      int subagentDepth = 0) {
     Id = record.Id;
     Kind = kind;
+    SubagentDepth = subagentDepth;
     notifications = new SessionNotifications(Id);
     status = new SessionStatus(record.HistoryRevision);
     Transcript = new SessionTranscript(Id, store, sessionLock);
@@ -70,6 +72,7 @@ public abstract partial class SessionBase {
   public string? WorkingDirectory { get; private set; }
 
   internal SessionKind Kind { get; }
+  internal int SubagentDepth { get; }
   internal bool IsClosed => closed;
   internal QuestionDelivery Questions { get; }
   internal SessionExecutionRecorder Recorder => CurrentExecution?.Recorder
@@ -151,9 +154,10 @@ public abstract partial class SessionBase {
           Kind == SessionKind.Subagent ? ReadSubagentProviders() : null, cancellation)
       ?? Task.FromException<LlmSelection>(new InvalidOperationException("No auxiliary model is configured."));
 
-  internal Task<bool> HasSubagentProvidersAsync(CancellationToken cancellation) =>
-      modelSelector?.HasSubagentProvidersAsync(ReadSubagentProviders(), cancellation)
-      ?? Task.FromResult(false);
+  internal Task<bool> CanDelegateAsync(CancellationToken cancellation) =>
+      modelSelector is not null && store.Preferences.WithCurrent(p => SubagentDepth < p.MaxSubagentDepth)
+          ? modelSelector.HasSubagentProvidersAsync(ReadSubagentProviders(), cancellation)
+          : Task.FromResult(false);
 
   public Task<CompactionReceipt?> CompactAsync(ManualCompactionRequest submission) => manualCompaction.CompactAsync(submission);
   public Task<CompactionReceipt?> CancelQueuedCompactionAsync(Guid operationId) => manualCompaction.CancelQueuedAsync(operationId);

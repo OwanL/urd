@@ -140,9 +140,10 @@ provider policy. Tool admission checks the current selection again, so an in-fli
 cannot start a child on a newly disabled provider. This applies to descendants as well, without
 cancelling already admitted children, changing the main chat provider, or hiding the separate
 communication tools. The cached starting context can be reused as providers are toggled.
-Delegation is capped at two subagent levels below the primary. A direct child can delegate, but
-its children are not offered `subagent` and cannot start another level. This caps depth, not the
-number of siblings. Stop still owns the whole work tree.
+Delegation defaults to four subagent levels below the primary. Change **Max subagent depth** in
+**Settings → Model Buckets**; zero disables delegation. Agents at or above the limit are not
+offered `subagent`, and admission checks the current limit before creating a child. Lowering it
+leaves existing agents running. The setting caps depth, not siblings; Stop still owns the whole tree.
 
 **Result (2026-11-16):** the parent's `subagent` call returns the child's final report (its final
 response), or an error if it failed or was stopped. Keep the guidance asking for that report

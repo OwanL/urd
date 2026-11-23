@@ -49,6 +49,7 @@ export interface Preferences {
   readonly modelChoices: AuxiliaryModelPreferences;
   readonly protectedResources: ProtectedResourcePreferences;
   readonly subagentProviderConnectionIds: SubagentProviderConnectionIds;
+  readonly maxSubagentDepth: number;
 }
 
 // Typed access to browser preferences; construction performs no I/O.
@@ -101,6 +102,12 @@ export class PreferencesClient {
   setSubagentProviders(connectionIds: SubagentProviderConnectionIds): Promise<Preferences> {
     return requestJson(new URL("/api/preferences/subagent-providers", this.origin), "POST", {
       connectionIds,
+    });
+  }
+
+  setMaxSubagentDepth(maxSubagentDepth: number): Promise<Preferences> {
+    return requestJson(new URL("/api/preferences/subagent-depth", this.origin), "POST", {
+      maxSubagentDepth,
     });
   }
 

@@ -92,6 +92,11 @@ public sealed class PreferenceManager {
           .Where(item => item.Model is not null)
           .Select(item => new BucketAssignment(item.Bucket, item.Model!.Id)).ToArray();
 
+  public void SetMaxSubagentDepth(int maxSubagentDepth) {
+    ArgumentOutOfRangeException.ThrowIfNegative(maxSubagentDepth);
+    store.Preferences.Update(preferences => preferences with { MaxSubagentDepth = maxSubagentDepth });
+  }
+
   public void SetSubagentProviders(IReadOnlyList<Guid>? connectionIds) {
     Guid[]? savedIds = NormalizeSubagentProviders(connectionIds);
     store.Preferences.Update(preferences => preferences with { SubagentProviderConnectionIds = savedIds });

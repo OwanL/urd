@@ -77,6 +77,36 @@ public sealed class PreferencesRoutesTests {
   }
 
   [Fact]
+  public async Task SubagentDepthRouteValidatesInputAndReturnsFullPreferences() {
+    using var database = new TemporaryDatabase();
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+    const string path = "/api/preferences/subagent-depth";
+    using (HttpResponseMessage initial = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences")) {
+      JsonElement preferences = await initial.Content.ReadFromJsonAsync<JsonElement>();
+      Assert.Equal(4, preferences.GetProperty("maxSubagentDepth").GetInt32());
+    }
+    foreach (int depth in new[] { 0, int.MaxValue }) {
+      using HttpResponseMessage saved = await RequestAsync(server.Client, HttpMethod.Post, path,
+          JsonBody($"{{\"maxSubagentDepth\":{depth}}}"));
+      Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+      AssertPrivateResponse(saved);
+      JsonElement preferences = await saved.Content.ReadFromJsonAsync<JsonElement>();
+      Assert.Equal(depth, preferences.GetProperty("maxSubagentDepth").GetInt32());
+      Assert.True(preferences.TryGetProperty("workingDirectory", out _));
+    }
+    foreach (string body in new[] { "{}", "null", "[]", "{\"maxSubagentDepth\":null}",
+        "{\"maxSubagentDepth\":\"1\"}", "{\"maxSubagentDepth\":true}",
+        "{\"maxSubagentDepth\":-1}", "{\"maxSubagentDepth\":1.5}", "{\"maxSubagentDepth\":2147483648}" }) {
+      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Post, path, JsonBody(body));
+      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+    }
+    using HttpResponseMessage current = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences");
+    Assert.Equal(int.MaxValue, (await current.Content.ReadFromJsonAsync<JsonElement>())
+        .GetProperty("maxSubagentDepth").GetInt32());
+  }
+
+  [Fact]
   public async Task CompactionTriggerPreferenceValidatesInputAndReturnsFullPreferences() {
     using var database = new TemporaryDatabase();
     string dataDirectory = Path.GetDirectoryName(database.Path)!;

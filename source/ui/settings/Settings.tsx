@@ -15,6 +15,7 @@ import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
 import { useProviderSettings } from "../providers/settings/useProviderSettings.ts";
 import { GeneralSettings } from "./GeneralSettings.tsx";
 import { DefaultSubagentProviders } from "./DefaultSubagentProviders.tsx";
+import { MaxSubagentDepth } from "./MaxSubagentDepth.tsx";
 import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
 import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
 import { SourceIgnorePicker } from "../setup/SourceIgnorePicker.tsx";
@@ -305,6 +306,7 @@ export function Settings({
         {tab === "model-buckets" && (
           <DefaultSubagentProviders providers={state} state={preferences} />
         )}
+        <MaxSubagentDepth state={preferences} />
       </section>
       <section
         class="settings-page"

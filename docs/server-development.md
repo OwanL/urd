@@ -45,6 +45,9 @@ for unknown model windows. Known windows cap the effective count to leave model 
 history is capped at half the effective count and 20,000 tokens, excluding the summary.
 See [history compaction](backend-development.md#history-compaction).
 
+`GET /api/preferences` includes `maxSubagentDepth`, a nonnegative integer defaulting to 4.
+A depth of 0 disables delegation.
+
 Settings → Model buckets sets the models for each tier and the delegation provider defaults
 for **new** chats. `POST /api/preferences/model-bucket` replaces one tier's array using
 `{ "bucket": "small", "models": [{ "connectionId": "…", "modelId": "…" }] }`.

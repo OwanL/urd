@@ -16,6 +16,7 @@ export type PreferenceKey =
   | "workingDirectory"
   | "compactionTriggerTokenCount"
   | "subagentProviderConnectionIds"
+  | "maxSubagentDepth"
   | `modelChoice:${AuxiliaryModelPurpose}`
   | `modelBucket:${ModelBucket}`
   | `protectedResources:${ProtectedResourceCategory}`;
@@ -36,6 +37,7 @@ export interface PreferencesState {
   saveModelChoice(purpose: AuxiliaryModelPurpose, choice: ModelChoice): Promise<boolean>;
   saveBucketModels(bucket: ModelBucket, models: readonly ConfiguredModel[]): Promise<boolean>;
   saveSubagentProviders(connectionIds: SubagentProviderConnectionIds): Promise<boolean>;
+  saveMaxSubagentDepth(value: number): Promise<boolean>;
   saveBlocks(command: "create" | "execute"): boolean;
   saveProtectedItems(
     category: ProtectedResourceCategory,
@@ -170,6 +172,15 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
       ),
     [client, save],
   );
+  const saveMaxSubagentDepth = useCallback(
+    (value: number) =>
+      save(
+        "maxSubagentDepth",
+        () => client.setMaxSubagentDepth(value),
+        "Max subagent depth could not be saved.",
+      ),
+    [client, save],
+  );
   const getSelectableResources = useCallback(
     (signal?: AbortSignal) => client.getSelectableResources(signal),
     [client],
@@ -202,6 +213,7 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
     saveModelChoice,
     saveBucketModels,
     saveSubagentProviders,
+    saveMaxSubagentDepth,
     saveBlocks,
     saveProtectedItems,
     clearError: () => {

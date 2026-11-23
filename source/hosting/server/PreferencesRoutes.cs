@@ -21,6 +21,7 @@ internal static class PreferencesRoutes {
         (Delegate)((HttpContext http) => SetCompactionTriggerTokenCountAsync(http, preferences)));
     routes.MapPost("/model-choice", (Delegate)((HttpContext http) => SetModelChoiceAsync(http, preferences)));
     routes.MapPost("/model-bucket", (Delegate)((HttpContext http) => SetBucketModelsAsync(http, preferences)));
+    routes.MapPost("/subagent-depth", (Delegate)((HttpContext http) => SetMaxSubagentDepthAsync(http, preferences)));
     routes.MapPost("/subagent-providers", (Delegate)((HttpContext http) => SetSubagentProvidersAsync(http, preferences)));
     routes.MapPost("/protected-resources", (Delegate)((HttpContext http) => SetProtectedItemsAsync(http, preferences)));
     routes.MapPost("/source-preview", (Delegate)((HttpContext http) => PreviewSourcesAsync(http, sessions)));
@@ -62,6 +63,15 @@ internal static class PreferencesRoutes {
       return Results.BadRequest();
 
     preferences.SetBucketModels(body.Bucket, body.Models);
+    return Results.Ok(preferences.Read());
+  }
+
+  private static async Task<IResult> SetMaxSubagentDepthAsync(HttpContext http, PreferenceManager preferences) {
+    SubagentDepthRequest? body = await http.Request.ReadFromJsonAsync<SubagentDepthRequest>(http.RequestAborted);
+    if (body is null)
+      return Results.BadRequest();
+
+    preferences.SetMaxSubagentDepth(body.MaxSubagentDepth);
     return Results.Ok(preferences.Read());
   }
 
@@ -137,6 +147,8 @@ internal static class PreferencesRoutes {
   private sealed record ModelChoiceRequest(AuxiliaryModelPurpose Purpose, ModelChoice Choice);
   private sealed record ModelBucketRequest(ModelBucket Bucket,
       [property: JsonRequired] ConfiguredModel[] Models);
+  private sealed record SubagentDepthRequest(
+      [property: JsonRequired, JsonNumberHandling(JsonNumberHandling.Strict)] int MaxSubagentDepth);
   private sealed record SubagentProvidersRequest([property: JsonRequired] Guid[]? ConnectionIds);
   private sealed record ProtectedItemsRequest(ProtectedResourceCategory Category, string[] Items);
   private sealed record SourceRulesRequest(string[]? Paths, string[]? Filenames, string[]? Includes = null);

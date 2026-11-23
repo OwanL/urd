@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 44;
+  private const int SchemaVersion = 45;
 
   private const string SnoozedSessionsIndex = """
       CREATE INDEX sessions_snoozed_until ON sessions(snoozed_until_ms) WHERE snoozed_until_ms IS NOT NULL;
@@ -162,7 +162,11 @@ internal static class DatabaseSchema {
     [42] = "ALTER TABLE preferences ADD COLUMN source_ignores_json TEXT;",
     [43] = """
         ALTER TABLE sessions ADD COLUMN snoozed_until_ms INTEGER CHECK (snoozed_until_ms IS NULL OR kind = 0);
-        """ + "\n" + SnoozedSessionsIndex
+        """ + "\n" + SnoozedSessionsIndex,
+    [44] = """
+        ALTER TABLE preferences ADD COLUMN max_subagent_depth INTEGER NOT NULL DEFAULT 4
+            CHECK (max_subagent_depth >= 0 AND max_subagent_depth <= 2147483647);
+        """
   };
 
   internal static void Initialize(SqliteConnection connection) {
@@ -644,7 +648,9 @@ internal static class DatabaseSchema {
           subagent_providers_json TEXT,
           protected_resources_json TEXT,
           lan_hosting_enabled INTEGER NOT NULL DEFAULT 0 CHECK (lan_hosting_enabled IN (0, 1)),
-          source_ignores_json TEXT
+          source_ignores_json TEXT,
+          max_subagent_depth INTEGER NOT NULL DEFAULT 4
+              CHECK (max_subagent_depth >= 0 AND max_subagent_depth <= 2147483647)
       ) STRICT;
       CREATE INDEX execution_runs_history_order ON execution_runs(session_id, history_revision, ordinal DESC);
       CREATE INDEX continuation_omitted_requests ON execution_runs(session_id, history_revision, continuation_omitted_request_id)

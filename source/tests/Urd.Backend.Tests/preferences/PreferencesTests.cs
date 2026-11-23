@@ -92,7 +92,10 @@ public sealed class PreferencesTests {
       Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), defaults.ModelChoices.Skills);
       Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), defaults.ModelChoices.Instructions);
       Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), defaults.ModelChoices.Title);
-      Assert.Equal(new[] { "bash", "read", "write", "edit" }, defaults.ProtectedResources.Tools);
+      Assert.Equal(new[] {
+        "bash", "read", "write", "edit", "web_search", "web_read", "list_pending_calls", "cancel_pending_calls",
+        "subagent", "list_agents", "ask_agent", "answer_agent", "ask_user"
+      }, defaults.ProtectedResources.Tools);
 
       preferences.SetBucketModels(ModelBucket.Small, [model, another]);
       preferences.SetModelChoice(AuxiliaryModelPurpose.Skills, ModelChoice.ForModel(model.ConnectionId, model.ModelId));

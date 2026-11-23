@@ -642,8 +642,8 @@ remain candidates unless protected; this does not automatically protect every `A
 or append-system resource. The skill-list formatter uses the selected skills rather
 than bypassing skill pruning. Existing instruction applicability and ordering still apply.
 Preferences also supply protected-item settings; protected entries bypass selection
-before inputs are built. Core tool protections are editable defaults: users may remove
-protection from `bash`, `read`, `write` and `edit`. Each pruning conversation receives
+before inputs are built. The [default protected tools](pruning-plan.md#protection-happens-before-selection)
+are editable; a saved list replaces the defaults. Each pruning conversation receives
 its category-selection instructions, its candidates and boundary-specific task input:
 the user prompt for a fresh session; the compaction summary alone for automatic
 post-compaction resumption; or the summary followed by the new user message for manual

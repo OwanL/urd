@@ -78,7 +78,10 @@ public sealed record AuxiliaryModelPreferences {
 
 // Tool IDs and discovered resource source paths are retained as exact identities.
 public sealed record ProtectedResourcePreferences {
-  public IReadOnlyList<string> Tools { get; init; } = ["bash", "read", "write", "edit"];
+  public IReadOnlyList<string> Tools { get; init; } = [
+    "bash", "read", "write", "edit", "web_search", "web_read", "list_pending_calls", "cancel_pending_calls",
+    "subagent", "list_agents", "ask_agent", "answer_agent", "ask_user"
+  ];
   public IReadOnlyList<string> Skills { get; init; } = [];
   public IReadOnlyList<string> Instructions { get; init; } = [];
 

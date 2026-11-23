@@ -185,11 +185,13 @@ an unchanged main-agent prefix.
 
 ## Protection happens before selection
 
-Settings also has protected-item lists for each category. Protect **`bash`, `read`,
-`write` and `edit`** by default, not as non-removable pins. Users can remove those
-protections if they wish and can add protected tools, skills and instruction documents.
-An unprotected core tool becomes an ordinary pruning candidate; its availability to
-the main agent is no longer guaranteed unless runtime protection applies.
+Settings has protected-item lists for each category. For profiles with no saved tool
+protections, the defaults are `bash`, `read`, `write`, `edit`, `web_search`, `web_read`,
+`list_pending_calls`, `cancel_pending_calls`, `subagent`, `list_agents`, `ask_agent`,
+`answer_agent` and `ask_user`. Saved choices replace these defaults. Users can remove
+protections or add protected tools, skills and instruction documents. An unprotected
+core tool becomes an ordinary pruning candidate; its availability to the main agent
+is no longer guaranteed unless runtime protection applies.
 
 **Post-compaction runtime protection:** tools with currently running background calls
 are protected for that preparation, in both automatic resumption and manual

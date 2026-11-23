@@ -65,6 +65,12 @@ Its tab strip lists the chat's and its helpers' pages.
   returns to 1280×800, so unattended work uses desktop layouts. The agent targets elements by ref, so
   a resize cannot misdirect clicks; a ref hidden by the new layout fails and the agent re-reads the
   page. `click_at` is rejected if the page size changed since the screenshot it is based on.
+- Opening: when a chat has pages, a "Browser · N tabs" chip appears in the composer's indicator row;
+  it opens the window, and a minimized window returns to it. The question card's **Open browser**
+  opens the same window. The window never opens by itself.
+- Controls are minimal: the window is for watching and handoff, not general browsing. The top bar
+  only switches between the chat's and its helpers' tabs; there is no address bar, back/forward,
+  reload, new-tab or close button. Navigation is the agent's job.
 - Phones: the window is full screen only and can be minimized back to the chat. Safe defaults: tap
   clicks, drag scrolls, a keyboard button opens the phone keyboard and sends text, and the pending
   question stays visible. Phone input is best-effort and untested; refine after real use.

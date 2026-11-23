@@ -1,6 +1,7 @@
 # Browser automation
 
-Status: design draft under review; Google sign-in qualified by spike. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
+Status: design agreed (2026-11-24); implementation pending, starting with the prerequisite below.
+Google sign-in qualified by spike. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
 relaunch, network proxy). The earlier design and probes are in Git history before this revision.
 
 ## Goals
@@ -74,14 +75,22 @@ Its tab strip lists the chat's and its helpers' pages.
 - Phones: the window is full screen only and can be minimized back to the chat. Safe defaults: tap
   clicks, drag scrolls, a keyboard button opens the phone keyboard and sends text, and the pending
   question stays visible. Phone input is best-effort and untested; refine after real use.
+- Tab selection: the window opens on the agent's active page; after that the user switches tabs
+  independently, and the user's choice never changes the agent's active page. New pages appear in
+  the tab strip without stealing the view, except a popup opened by the user's own input in the
+  window, which is shown like in a normal browser.
+- Defaults (revisit after use): the window shows no agent status of its own (the chat already does)
+  and does not highlight what the agent clicks. When all of a chat's pages close, its window closes
+  and the chip disappears.
+- Known limitation: frames are rendered at 1 device pixel per CSS pixel (Playwright fixes the scale
+  factor per context), so text is softer on high-DPI screens and phones. Refine later if needed.
+- Debounce window resizes before resizing the page.
 
 - Frames: `page.Screencast.StartAsync(new() { OnFrame = ... })` delivers JPEG frames, sent over a
   per-viewer WebSocket (input travels back on the same socket, keeping its order) and drawn on a
   `<canvas>`. Frames flow only while a viewer is open. Send the latest frame when a viewer connects.
 - Input: canvas mouse, wheel, key and paste events are scaled to page coordinates and replayed with
   `page.Mouse` and `page.Keyboard` (`InsertTextAsync` for paste).
-- The viewer follows the chat's active page and shows its pages as tabs, so an OAuth popup appears
-  where the user expects it.
 - Because the same page keeps running, a half-finished login, popup or form survives the handoff.
   There is no headed relaunch and no profile release.
 
@@ -190,9 +199,17 @@ Only bash and read cap their own output today; other tools, including MCP tools,
 browser work, apply one size cap with spill-to-file (the bash pattern, 50 KB / 2,000 lines) to every
 tool result in the shared tool runner, as a separate change.
 
+Existing pieces to unify rather than duplicate: `tools/runtime/ToolOutputLimits.cs` (the limits),
+`tools/shell/BashOutput.cs` (spill file and `fullOutputPath`), web_read's `spillPath`, and
+`tools/pruning/ToolResultPruner.HasSpill`, which special-cases both names. Text is capped; image
+results are not. The browser tool's own 12,000-character truncation goes away with it.
+
 ## Qualification order
 
 1. Done: spike with real Google sign-in (see above).
-2. Browser host and `browser` tool, replacing the current tool.
-3. Viewer and handoff in the chat, including from a LAN device.
-4. End-to-end mailbox-to-insurer flow, including an emailed code and a user-solved captcha.
+2. Prerequisite: shared tool output cap (separate change).
+3. Browser host and `browser` tool, replacing the current tool.
+4. Viewer and handoff in the chat, including from a LAN device. Suggested slices: screencast and
+   input over WebSocket in a docked window; chip, tabs and **Open browser**; page resizing;
+   floating, maximize and minimize; phone full screen.
+5. End-to-end mailbox-to-insurer flow, including an emailed code and a user-solved captcha.

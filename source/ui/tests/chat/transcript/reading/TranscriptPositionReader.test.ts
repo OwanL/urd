@@ -117,19 +117,53 @@ void test("reads entry and fraction targets only when requested", async () => {
   assert.equal(await fractionRead, sought);
 });
 
-void test("a newer read aborts and ignores an older response", async () => {
+void test("stream notices let a slow window publish and coalesce into one latest read", async () => {
   const { calls, client } = fakeClient();
   const reader = new TranscriptPositionReader(client, "session-a");
-  const oldRead = reader.read({ kind: "fraction", historyRevision: 7, fraction: 0.4 });
-  const currentRead = reader.read({ kind: "entry", entry });
+  const target = { kind: "fraction", historyRevision: 7, fraction: 1 } as const;
+  const first = reader.read(target, "1");
+  for (const notice of ["2", "3", "4"]) assert.equal(reader.shouldRefresh(7, notice), false);
+  assert.equal(calls[0]?.signal.aborted, false);
 
-  assert.equal(calls[0]?.signal.aborted, true);
-  calls[0]!.response.resolve(positionWindow(7));
+  const intermediate = positionWindow(7);
+  calls[0]!.response.resolve(intermediate);
+  assert.equal(await first, intermediate);
+  assert.equal(reader.isCurrent(first), true);
+  assert.equal(reader.shouldRefresh(7, "1"), false);
+  assert.equal(reader.shouldRefresh(7, "4"), true);
+
+  const followUp = reader.read(target, "4");
+  const latest = positionWindow(7);
+  calls[1]!.response.resolve(latest);
+  assert.equal(await followUp, latest);
+  assert.equal(reader.shouldRefresh(7, "4"), false);
+  assert.equal(calls.length, 2);
+});
+
+void test("explicit navigation and a changed revision can supersede a busy window", async () => {
+  const { calls, client } = fakeClient();
+  const reader = new TranscriptPositionReader(client, "session-a");
+  const oldRead = reader.read({ kind: "fraction", historyRevision: 7, fraction: 0.4 }, "1");
+  assert.equal(reader.shouldRefresh(7, "2"), false);
+  const seek = reader.read({ kind: "entry", entry }, "2");
+  assert.equal(reader.shouldRefresh(7, "3"), false);
+  assert.equal(reader.shouldRefresh(8, "3"), true);
+  const currentRead = reader.read({ kind: "fraction", historyRevision: 8, fraction: 0.6 }, "3");
+  assert.equal(reader.shouldRefresh(8, "4"), false);
+
+  for (const call of calls.slice(0, 2)) {
+    assert.equal(call.signal.aborted, true);
+    call.response.resolve(positionWindow(7));
+  }
   assert.equal(await oldRead, null);
+  assert.equal(await seek, null);
+  assert.equal(reader.shouldRefresh(8, "4"), false, "superseded reads cannot release a refresh");
 
-  const current = positionWindow(7);
-  calls[1]!.response.resolve(current);
+  const current = positionWindow(8);
+  calls[2]!.response.resolve(current);
   assert.equal(await currentRead, current);
+  assert.equal(reader.shouldRefresh(8, "3"), false);
+  assert.equal(reader.shouldRefresh(8, "4"), true, "only the current read releases the refresh");
 });
 
 void test("a settled response is no longer publishable if a newer read starts first", async () => {
@@ -192,17 +226,20 @@ void test("a settled failure from a superseded read is no longer current", async
 void test("cancel aborts a pending read, while a current failure remains visible", async () => {
   const { calls, client } = fakeClient();
   const reader = new TranscriptPositionReader(client, "session-a");
-  const pendingRead = reader.read({ kind: "fraction", historyRevision: 7, fraction: 1 });
+  const pendingRead = reader.read({ kind: "fraction", historyRevision: 7, fraction: 1 }, "1");
+  assert.equal(reader.shouldRefresh(7, "2"), false);
   reader.cancel();
 
   assert.equal(calls[0]?.signal.aborted, true);
   assert.equal(reader.isCurrent(pendingRead), false);
   calls[0]!.response.reject(new DOMException("Aborted", "AbortError"));
   assert.equal(await pendingRead, null);
+  assert.equal(reader.shouldRefresh(7, "2"), true, "resume can start a fresh read");
 
   const failure = new Error("position read failed");
   const currentRead = reader.read({ kind: "entry", entry });
   calls[1]!.response.reject(failure);
   await assert.rejects(currentRead, (cause) => cause === failure);
   assert.equal(reader.isCurrent(currentRead), true);
+  assert.equal(reader.shouldRefresh(7, "new notice"), true);
 });

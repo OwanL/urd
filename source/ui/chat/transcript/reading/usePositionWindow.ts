@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../../../sessions/SessionClient.ts";
 import type { TranscriptPositionWindow } from "../../../sessions/transcript/Messages.ts";
 import type { TranscriptNavigationStore } from "../navigation/useTranscriptNavigation.ts";
-import { TranscriptPositionReader } from "./TranscriptPositionReader.ts";
+import {
+  TranscriptPositionReader,
+  type TranscriptPositionTarget,
+} from "./TranscriptPositionReader.ts";
 
 const seekDebounceMs = 75;
 
@@ -51,14 +54,15 @@ export function usePositionWindow({
   const loadWindowRef = useRef<(fraction: number) => Promise<void>>(async () => {});
   const suspended = useRef(false);
   const initialized = useRef(false);
-  const initialReadNotice = useRef<string | null>(null);
   const seekTimer = useRef<number | null>(null);
   const desiredFraction = useRef(1);
   const latest = useRef({ historyRevision, visible, notice });
   latest.current = { historyRevision, visible, notice };
 
   const clearSeekTimer = useCallback(() => {
-    if (seekTimer.current !== null) window.clearTimeout(seekTimer.current);
+    if (seekTimer.current === null) return;
+    window.clearTimeout(seekTimer.current);
+    seekTimer.current = null;
   }, []);
   const cancelRead = useCallback(() => positionReader.cancel(), [positionReader]);
   const isSuspended = useCallback(() => suspended.current, []);
@@ -69,7 +73,6 @@ export function usePositionWindow({
     suspended.current = true;
     cancelRead();
     clearSeekTimer();
-    seekTimer.current = null;
     setLoading(false);
     onSuspended();
   }, [cancelRead, clearSeekTimer, onSuspended]);
@@ -102,27 +105,49 @@ export function usePositionWindow({
     setLoading(false);
   }, []);
 
-  const loadWindow = useCallback(
-    async (fraction: number) => {
+  const readWindow = useCallback(
+    async (target: TranscriptPositionTarget, fraction: number) => {
       const { historyRevision: revision, visible, notice } = latest.current;
       if (suspended.current || !visible || revision === null) return;
 
-      desiredFraction.current = fraction;
       setLoading(true);
-      const read = positionReader.read({ kind: "fraction", historyRevision: revision, fraction });
+      const read = positionReader.read(target, notice);
       try {
         const next = await read;
         if (next === null || !canPublish(read, revision)) return;
-        if (!initialized.current) initialReadNotice.current = notice;
         setWindow(next, fraction, !initialized.current, finishRead);
         initialized.current = true;
       } catch (cause) {
         if (canPublish(read, revision)) failRead(cause);
+      } finally {
+        // Let the viewport apply this window and its anchor before locating the next one.
+        if (
+          canPublish(read, revision) &&
+          positionReader.shouldRefresh(revision, latest.current.notice)
+        )
+          setReadEpoch((epoch) => epoch + 1);
       }
     },
     [canPublish, failRead, finishRead, positionReader, setWindow],
   );
+  const loadWindow = useCallback(
+    async (fraction: number) => {
+      const revision = latest.current.historyRevision;
+      if (revision === null) return;
+      desiredFraction.current = fraction;
+      await readWindow({ kind: "fraction", historyRevision: revision, fraction }, fraction);
+    },
+    [readWindow],
+  );
   loadWindowRef.current = loadWindow;
+
+  useLayoutEffect(
+    () => () => {
+      cancelRead();
+      clearSeekTimer();
+    },
+    [cancelRead, clearSeekTimer, historyRevision, root, visible],
+  );
 
   useEffect(() => {
     if (
@@ -131,7 +156,8 @@ export function usePositionWindow({
       documentInactive ||
       !root ||
       !visible ||
-      historyRevision === null
+      historyRevision === null ||
+      !positionReader.shouldRefresh(historyRevision, latest.current.notice)
     )
       return;
     const width = root.clientWidth;
@@ -144,45 +170,42 @@ export function usePositionWindow({
     const target = restore
       ? { kind: "entry" as const, entry: restore.entry }
       : { kind: "fraction" as const, historyRevision, fraction: 1 };
-    setLoading(true);
-    const noticeWhenRead = latest.current.notice;
-    const read = positionReader.read(target);
-    void read
-      .then((next) => {
-        if (next === null || !canPublish(read, historyRevision)) return;
-        initialReadNotice.current = noticeWhenRead;
-        setWindow(next, 1, true, finishRead);
-        initialized.current = true;
-      })
-      .catch((cause: unknown) => {
-        if (canPublish(read, historyRevision)) failRead(cause);
-      });
-    return cancelRead;
+    void readWindow(target, 1);
   }, [
-    canPublish,
-    cancelRead,
     documentInactive,
-    failRead,
-    finishRead,
     historyRevision,
     positionReader,
     readEpoch,
+    readWindow,
     root,
-    sessionId,
-    setWindow,
     store,
     visible,
   ]);
 
   useEffect(() => {
-    if (!hasWindow || !visible || historyRevision === null || notice === null) return;
-    // Revisit notices that arrived before the first window was published, but don't reread it otherwise.
-    const coveredNotice = initialReadNotice.current;
-    initialReadNotice.current = null;
-    if (coveredNotice === notice) return;
+    if (
+      !hasWindow ||
+      !root ||
+      !visible ||
+      documentInactive ||
+      historyRevision === null ||
+      !positionReader.shouldRefresh(historyRevision, notice)
+    )
+      return;
     const fraction = getReadFraction();
     if (fraction !== null) void loadWindow(fraction);
-  }, [getReadFraction, hasWindow, historyRevision, loadWindow, notice, visible]);
+  }, [
+    documentInactive,
+    getReadFraction,
+    hasWindow,
+    historyRevision,
+    loadWindow,
+    notice,
+    positionReader,
+    readEpoch,
+    root,
+    visible,
+  ]);
 
   function updateSeek(fraction: number, covered: boolean) {
     desiredFraction.current = fraction;

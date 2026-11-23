@@ -11,9 +11,15 @@ export type TranscriptPositionTarget =
 // Owns the current position-window read for one mounted transcript.
 type TranscriptPositionClient = Pick<SessionClient, "getEntryPosition" | "locatePosition">;
 
+interface PositionRead {
+  readonly result: Promise<TranscriptPositionWindow | null>;
+  readonly historyRevision: number;
+  readonly notice: string | null;
+}
+
 export class TranscriptPositionReader {
   private activeRequest: AbortController | null = null;
-  private latestRead: Promise<TranscriptPositionWindow | null> | null = null;
+  private latestRead: PositionRead | null = null;
   private requestGeneration = 0;
   private readonly client: TranscriptPositionClient;
   private readonly sessionId: string;
@@ -23,19 +29,32 @@ export class TranscriptPositionReader {
     this.sessionId = sessionId;
   }
 
-  read(target: TranscriptPositionTarget): Promise<TranscriptPositionWindow | null> {
+  // Let a read finish before revisiting a newer notice for the same history.
+  shouldRefresh(historyRevision: number, notice: string | null): boolean {
+    return (
+      this.latestRead?.historyRevision !== historyRevision ||
+      (this.activeRequest === null && notice !== null && this.latestRead.notice !== notice)
+    );
+  }
+
+  read(
+    target: TranscriptPositionTarget,
+    notice: string | null = null,
+  ): Promise<TranscriptPositionWindow | null> {
     this.activeRequest?.abort();
     const controller = new AbortController();
     this.activeRequest = controller;
     const generation = ++this.requestGeneration;
-    const read = this.readWindow(target, controller, generation);
-    this.latestRead = read;
-    return read;
+    const result = this.readWindow(target, controller, generation);
+    const historyRevision =
+      target.kind === "entry" ? target.entry.historyRevision : target.historyRevision;
+    this.latestRead = { result, historyRevision, notice };
+    return result;
   }
 
   // Recheck at publication: another request may start after this promise settles.
   isCurrent(read: Promise<TranscriptPositionWindow | null>): boolean {
-    return this.latestRead === read;
+    return this.latestRead?.result === read;
   }
 
   cancel(): void {

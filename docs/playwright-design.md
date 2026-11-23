@@ -1,66 +1,123 @@
-# Playwright browser automation
+# Browser automation
 
-Status: enabled by default on Windows. The native tool, shared profile and chat handoff are implemented and locally tested with synthetic sessions. Twin Sandbox and real identity providers have not been qualified.
+Status: design draft. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
+relaunch, network proxy). The earlier design and probes are in Git history before this revision.
 
-## Try it locally
+## Goals
 
-Start Urd normally. Playwright is available in primary chats, and Chromium is launched on demand. If Chromium is not cached, Urd provisions it on first use.
+- The user signs into a site once (including Google and Sign in with Google); the login lasts as
+  long as the site allows, across chats and Urd restarts.
+- Agents complete multi-site flows on their own, for example: read a policy number from Gmail,
+  sign into the insurer, read the emailed verification code, enter it and report the answer.
+- When the agent is blocked (password it doesn't have, captcha, MFA prompt), the user takes over
+  inside Urd, then hands control back. This works from another device on the LAN.
+- Each chat drives its own pages without coordinating with other chats.
+- Few lines of code, few tool actions, low memory when idle.
 
-Public sites need no setup. For local development, give the host the exact origins to allow, for example from PowerShell:
+## Trust model
 
-```powershell
-$env:URD_PLAYWRIGHT_LOCAL_ORIGINS = 'http://localhost:3000'
-.\Start.exe
-```
+The browser has the same trust as the shell tools: none of the earlier restrictions remain. Agents
+read full page text, type anything (including codes and passwords the user supplies), and reach
+any destination including localhost. Browsing stays available with LAN hosting on; securing the
+network is the user's responsibility. Urd's API already rejects requests from other origins, so a
+web page cannot drive Urd. Agent guidance, not code, asks the agent to leave payments, sending mail
+and similar final actions to the user.
 
-Supply comma-separated origins if needed. Use the exact scheme, hostname, and port registered as the callback origin with your identity provider. Playwright pauses while unauthenticated LAN hosting is active. If a browser task is still running, finish or stop it before enabling LAN hosting.
+## One browser, pages per chat
 
-## One browser profile
+- One persistent Chromium context (`LaunchPersistentContextAsync`) with a `browser-profile`
+  directory under the data root. Every chat shares its logins.
+- A chat owns the pages it opens and any popup whose opener it owns (OAuth popups follow their
+  chat). A chat can only list and drive its own pages. Pages run concurrently; there is no
+  browser-wide lock.
+- Launch on first use. Close a chat's pages when the chat closes or after 30 idle minutes; logins
+  survive because they live in the profile. Exit Chromium after 5 minutes with no pages.
+- Limitation: two chats cannot be signed into the same site as different accounts.
 
-All local Urd chats use one Urd-owned Chromium profile. There is no profile picker, project binding, or per-chat permission prompt. Signing in once makes that site's browser session available to later chats, including after a Urd restart, until the site requires sign-in again. This is a separate profile, not the user's everyday Chrome profile. The `playwright-profile` directory lives under Urd's durable local data root, outside the Chromium install cache. Chromium manages saved credentials, persistent cookies and other site data on disk; Urd does not export tokens or copy passwords into its database. To start with a blank browser, stop Urd and rename that directory before relaunching it.
+## Always headless; the user sees the page in Urd
 
-The shared profile is shared account access, not a read-only grant. Make that clear on the first sign-in. Authenticated browser automation is local-only in v1; defer running it on hosts serving unauthenticated LAN clients. No per-site integrations. Leave [web search and reading](web-access-plan.md) separate, with their existing public, read-only behavior unchanged.
+Chromium never shows a window. To watch or take over, the user opens a viewer in the chat:
 
-## Browser and chat handoff
+- Frames: `page.Screencast.StartAsync(new() { OnFrame = ... })` delivers JPEG frames, sent over a
+  per-viewer WebSocket and drawn on a `<canvas>`. Frames flow only while a viewer is open.
+- Input: canvas mouse, wheel, key and paste events are scaled to page coordinates and replayed with
+  `page.Mouse` and `page.Keyboard` (`InsertTextAsync` for paste).
+- The viewer follows the chat's active page and shows its pages as tabs, so an OAuth popup appears
+  where the user expects it.
+- Because the same page keeps running, a half-finished login, popup or form survives the handoff.
+  There is no headed relaunch and no profile release.
 
-- Primary chats get a native `playwright` tool using Urd's existing .NET Playwright dependency and bundled full Chromium. It supports navigation, a bounded accessibility summary, click, fill, and sign-in handoff. It does not support screenshots or arbitrary scripts in this preview. Use the same executable and `LaunchPersistentContextAsync` profile path in both modes. Launch on demand. Share login state, not live tabs: serialize browser ownership in v1 so another chat or subagent cannot operate on a tab or take over the profile during a handoff.
-- The agent can request a sign-in handoff when it encounters an auth gate. Urd shows **Sign in** in the requesting chat. The button reopens the last explicit navigation destination, not a model-supplied sign-in link or an in-flight OAuth redirect. The user should verify the browser address before entering credentials. Show the destination origin in chat; don't expose transient OAuth URLs or their query parameters.
-- On **Sign in**, close the headless context, wait for it to release the profile, and open the visible browser. Block browser-tool actions, page observations and captures while the user is in control. The user completes the site's redirects and MFA before clicking **Continue**. Close the visible window before reopening headless with the same profile and returning to the task. Resume from a safe URL and inspect the resulting page; don't blindly replay a click or submit. The live tab, its in-memory state, and partially completed login transactions are not moved between processes.
-- The typed handoff follows Urd's pending-question pattern: a session update triggers a fresh read, and the pending handoff is kept in memory. A chat reload can recover it while the host is alive; Stop, a closed sign-in window, and shutdown must end the handoff and release the browser. Do not resume automation automatically if the sign-in window is closed without **Continue**.
-- Allow public sites and explicitly targeted local dev origins, including the hosted login redirects that the user needs for those sites. Keep browser sandboxing and an enforceable destination boundary; do not give pages blanket access to localhost, private services, the Urd control plane, or `file:` URLs. Do not expose browser settings or password manager pages through the tool, or offer arbitrary Playwright scripts in v1. Website content is untrusted; a generic browser cannot infer that every click is safe. For sending mail or buying something, leave the final action to the user rather than claiming the tool can reliably detect every side effect.
+A disposable probe already showed frame display and click mapping on headless Chromium with
+35–61 ms local click-to-frame latency (Git history). Real identity providers were not tested.
 
-## Verification and limits
+## Handoff
 
-- Lifecycle and prompt tests cover exclusive ownership, explicit Continue, cancellation, and closing the visible window. Opt-in loopback tests (`URD_TEST_PLAYWRIGHT_PROFILE=1`, `URD_TEST_PLAYWRIGHT_HANDOFF=1`, pinned browser already cached) cover persisted login across launches, server-side session revocation, and the visible-to-headless handoff with the production proxy. The browser tests use disposable profiles; no database migration is needed for the single profile.
-- Plain `ws://` connections and chunked HTTP uploads are not supported by the proxy, so some dev tooling, including Vite hot reload, may not work. HTTPS stays end-to-end encrypted. The browser is not a read-only account boundary. Page summaries may still contain account data, and tool results follow Urd's usual model and transcript handling.
-- Next qualification: drive the complete chat flow against Twin Sandbox with opt-in, including a real API-backed action after restart. Also verify the browser's native save-password prompt. Google account password sync is not a preview requirement.
+- `handoff` with a short message for the user: the chat shows the message and the viewer with
+  **Done**. The tool call waits. **Done** returns a fresh snapshot to the agent; Stop cancels.
+- The user can also open the viewer at any time to watch. Typing or clicking in it takes control:
+  agent actions on that page wait until the user clicks **Done**.
 
-## Local feasibility evidence
+## Agent tool
 
-Pinned .NET Playwright 1.65.0 and the bundled full Chrome for Testing 158.0.8127.18 passed a loopback test: visible sign-in, headless restart with the same profile, server-side session revocation, visible re-sign-in, and another successful headless run. A fresh profile was unauthenticated in a separate fixture. With fake credentials added via the built-in Password Manager, the bundled browser and installed Chrome both autofilled after relaunch. The native save prompt and Google Password Manager sync from the user's everyday profile were not verified. No live site, account, or personal profile was used.
+One `browser` tool, shaped like Playwright MCP. Every action returns a fresh snapshot of the active
+page, capped in size with a truncation note.
 
-## In-chat headless viewer: offline feasibility (not shipped)
+| Action | Arguments |
+| --- | --- |
+| `navigate` | `url`, optional `new_tab` |
+| `snapshot` | |
+| `click` | `ref` |
+| `type` | `ref`, `text`, optional `submit` |
+| `press` | `key` |
+| `select` | `ref`, `values` |
+| `back` | |
+| `tabs` | optional `select` or `close` page id |
+| `screenshot` | returns an image for vision-capable models |
+| `click_at` | `x`, `y` from the last screenshot (captchas, canvas) |
+| `wait` | `text` or `ms` |
+| `handoff` | `message` |
 
-A user can view Chromium's **existing page** inside Urd without relaunching the browser or loading the site in a WebView. The candidate design is one persistent Urd-owned browser profile, with pages assigned to chats. The profile outlives the pages. A user-invoked viewer would show only the chat's page and its assigned popups; no video stream is needed for ordinary Playwright actions. Watching and taking control are separate operations.
+Snapshots use `page.AriaSnapshotAsync(new() { Mode = "ai" })`, which includes page text, iframes and
+`[ref=eN]` references; actions resolve refs with the `aria-ref=` locator. Captchas: the agent may
+try with `screenshot` and `click_at`, then hands off if it fails.
 
-A disposable Windows probe used Playwright 1.65.0 and full headless Chromium 158.0.8127.18 over pipes, with no debugging listener. A second headless browser stood in for the Urd frontend: it decoded the target's screencast frames, displayed them in a resized panel and mapped clicks back to the original viewport. In two runs, all eight clicks across four panel widths hit the intended control and produced the expected pixel change in the viewer. Click-to-visible-change was 35–61 ms including the test driver, using an in-process relay and a simple local page; this is **not** a Urd transport or LAN latency measurement. The test relay rejected input while watching, after control was returned and with an expired control identifier. This is evidence for the interaction primitive, not a shipped viewer or a security test.
+The email-code flow needs no special support: the agent opens Gmail in a second tab, searches, reads
+the code from the snapshot and types it into the first tab.
 
-A separate probe ran three times with fresh profiles. Decoded frames identified the opener, its synthetic sign-in popup, and the redirected opener; coordinate and keyboard input generated trusted DOM events on the target. A peer page accepted input during capture. After stopping capture, changing the target's background produced no new frames during a 350 ms observation. First matching opener frames took 398–532 ms including PNG decoding: acknowledge opening the viewer immediately rather than waiting for the first frame. No Urd routes or real identity providers were involved.
+## Main risk: Google sign-in under automation
 
-The production tool currently chooses the first open tab, releases ownership by execution, and restarts the browser for sign-in. Before enabling takeover, assign targets (including popups) to the originating chat, drain in-flight actions and observations, and bind viewer input to the current target and handoff. Keep private frames and keystrokes out of model inputs, logs and transcripts. A shared profile is shared account access, not isolation from other chats on the same site. Keep the existing LAN exclusion. A page stream does not establish support for browser-owned dialogs, local authenticators or real providers.
+Google refuses sign-in when it detects an automated browser ("This browser or app may not be
+secure"). This blocks the goals more than anything else, so qualify it first, with the user's real
+account, before building the viewer UI.
 
-A synthetic mailbox-to-insurer workflow passed twice, each time starting with a fresh profile. After one browser-form sign-in and a clean browser restart, a script using Playwright read a policy reference from the mailbox, entered it at a separate insurer origin, requested a code, read the new message, and completed the outstanding form without navigating away from it. A third page retained its unsaved draft and a per-load random marker. Mailbox sign-out removed access. Requests outside the fixture origins were denied by the test harness. The run used two related pages (inbox and pending form) for the task, not one page repeatedly navigating back and forth. It did not use a mail API, a model, Urd's restricted tools or a real provider.
+- Launch without `--enable-automation`, with `--disable-blink-features=AutomationControlled`, and
+  remove the `Headless` marker from the user agent.
+- Prefer a branded browser: Edge is always installed on Windows (`Channel = "msedge"`, no download).
+  Fall back to the provisioned Chrome for Testing elsewhere.
+- If Google still refuses headless, run headed with an off-screen window; the screencast viewer
+  works the same.
+- Headless has no browser-owned dialogs: passkeys and Windows Hello are unavailable, so the user
+  chooses another sign-in method. The browser's save-password prompt is also unavailable.
 
-The current model-facing tool is intentionally narrower than Playwright itself. Its accessibility summary drops ordinary paragraph text (but an accessible name can still contain sensitive information), and `fill` rejects verification-code fields. Viewer feasibility does not authorize revealing mailbox contents or putting one-time codes in ordinary tool arguments, results or transcripts. Any unattended email verification feature needs a separate design for authorized transfer to the intended site, including how to identify that site without trusting instructions in incoming email.
+## Keeping logins
 
-## Earlier alternative: native sign-in window on Windows (not shipped)
+The profile directory keeps persistent cookies and site storage across restarts. Session cookies
+(no expiry) die when Chromium exits, as in a normal browser, which would sign the user out of some
+sites after an idle shutdown or Urd restart. On a clean browser exit, save session cookies from
+`StorageStateAsync()` beside the profile and add them back with `AddCookiesAsync` on launch. Check
+first whether the profile preference "Continue where you left off" achieves this without code.
 
-The common lifetime goal is a live page per primary chat, retained across replies and released on chat closure or after 30 idle minutes. Ordinary browsing must not show a window or take focus. In the native-window variant, only a user clicking **Sign in** would make a window visible; **Continue** would close that window without losing another chat's unsaved work. Pages share website logins, not control of each other's tabs. The single-execution implementation above does not yet provide these guarantees.
+## Replaces
 
-[WebView2 controllers](https://learn.microsoft.com/en-us/dotnet/api/microsoft.web.webview2.core.corewebview2controller.isvisible) can be hidden individually and use a [shared browser profile](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/user-data-folder). This would change the Windows interactive browser host, not the public search/read tools. Use a separate Urd-owned WebView2 data folder rather than opening the existing Chromium profile or exporting its cookies. Users should expect to sign in again.
+Delete the network proxy (`PlaywrightNetwork*`), profile lease and serialization, the headed
+sign-in relaunch with its routes and UI prompt, the sensitive-field filter, the LAN pause and
+`URD_PLAYWRIGHT_LOCAL_ORIGINS`. Keep browser provisioning for the fallback.
 
-A disposable Windows probe ran twice using WebView2 Runtime `158.0.4370.33` and SDK `1.0.2903.40` on a private, non-input desktop. Two controllers shared one fresh profile. The fixture issued a synthetic login cookie while A alone was shown. B kept its unsaved text and a memory-only marker during the handoff, after A was hidden, and after A was closed. B loaded its document once, retained the same browser PID, and its requests changed from signed out to signed in without a reload. The probe used a non-forwarding fixture proxy, no debugger listener, and no real credentials. This tests page continuity, not real provider sign-in or full tool parity.
+## Qualification order
 
-For agent input, hide the top-level host window rather than disabling rendering on the controller. With both hidden, the probe could read the accessibility tree, but a button received no click and filling a text box inserted rather than replaced its value. Leaving the controller rendering inside the hidden host produced a trusted click and a replacement fill on exact, unique top-frame controls, without showing a browser window or exposing a debugging listener. A combined run filled B's form this way, then clicked B's button while A's sign-in window was visible: B received exactly one trusted click, retained its draft, and did not open a window. The sample also suppressed a new-window request. Through Urd's production proxy with public destinations disabled, an allowed fixture loaded; a direct request and redirect to a disallowed loopback origin and a request to a mock Urd API all returned 403 without reaching either denied listener. These checks cover specific fixtures, not a complete security review or Playwright actionability parity.
-
-Browser visibility and identity-provider compatibility are separate decisions. For example, [Google's OAuth policy](https://developers.google.com/identity/protocols/oauth2/policies#browsers) prohibits directing authorization requests to an embedded user-agent under the developer's control. A successful local sign-in fixture is not evidence that **Sign in with Google** will work in a WebView. Do not disguise the browser or transfer credentials from a different browser to work around this restriction.
+1. Spike, no Urd UI: Google sign-in in headless Edge and Chrome for Testing through a throwaway
+   screencast viewer; restart; confirm Gmail is still signed in; complete Sign in with Google on a
+   third-party site.
+2. Browser host and `browser` tool, replacing the current tool.
+3. Viewer and handoff in the chat, including from a LAN device.
+4. End-to-end mailbox-to-insurer flow, including an emailed code and a user-solved captcha.

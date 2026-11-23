@@ -29,7 +29,7 @@ superseded research and plans live in Git history, not an archive directory.
   ownership and cycle handling; backend behavior and deferred UI work.
 - [Agent tools](agent-tools-design.md): tool set, parallel/background calls, approved class shapes.
 - [Browser](BROWSER-DESIGN.md): shared UI, local access and remaining host/closure choices.
-- [Playwright automation](playwright-design.md): shared browser profile, sign-in handoff and first implementation slice.
+- [Browser automation](playwright-design.md): draft redesign: per-chat pages, in-chat viewer and handoff, open trust model.
 - [Transcript](TRANSCRIPT-DESIGN.md): approved requirements, delivered foundation and remaining
   staged work. Stage 2 is active; historical checkpoints are not overall acceptance.
 

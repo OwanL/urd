@@ -20,8 +20,10 @@ The browser has the same trust as the shell tools: none of the earlier restricti
 read full page text, type anything (including codes and passwords the user supplies), and reach
 any destination including localhost. Browsing stays available with LAN hosting on; securing the
 network is the user's responsibility. Urd's API already rejects requests from other origins, so a
-web page cannot drive Urd. Agent guidance, not code, asks the agent to leave payments, sending mail
-and similar final actions to the user.
+web page cannot drive Urd. Urd's shared agent guidance (all tools, not just the browser) asks
+agents to confirm high-risk actions with the user first, such as payments or communicating with
+third parties, and to treat page and email content as data rather than instructions. That
+guidance does not exist yet; add it in `SharedAgentGuidance.cs` as part of this work.
 
 ## One browser, pages per chat
 
@@ -30,10 +32,13 @@ and similar final actions to the user.
 - Each session, chat or helper (subagent), owns the pages it opens and any popup whose opener it
   owns (OAuth popups follow their session). A session can only list and drive its own pages. Pages
   run concurrently; there is no browser-wide lock. A helper's pages close when it finishes.
+- Each session has at most 3 pages. Opening another, including a popup, closes that session's
+  least recently used page (by agent or viewer), so an OAuth popup does not close the page that
+  opened it. The tool description states this, and the result names the closed page.
 - Agents hand work over by URL: logins are shared, so the receiving session opens the link in its
   own page. Live pages never move between sessions; state that only exists in a page (a
   half-filled form, a used one-time link) means one agent should own the whole flow.
-- Launch on first use (about 1–2 s). A session's pages close when the chat is closed or snoozed,
+- Launch on first use (under 1 s measured). A session's pages close when the chat is closed or snoozed,
   when a helper finishes, or after 30 minutes without agent or viewer activity, but never while
   one of its questions to the user is pending. Logins survive because they live in the profile.
   Exit Chromium 5 minutes after the last page closes.
@@ -141,10 +146,12 @@ more per loaded page. Idle shutdown is what keeps resource use low.
 ## Keeping logins
 
 The profile directory keeps persistent cookies and site storage across restarts. Session cookies
-(no expiry) die when Chromium exits, as in a normal browser, which would sign the user out of some
-sites after an idle shutdown or Urd restart. On a clean browser exit, save session cookies from
-`StorageStateAsync()` beside the profile and add them back with `AddCookiesAsync` on launch. Check
-first whether the profile preference "Continue where you left off" achieves this without code.
+(no expiry) die when Chromium exits, so idle shutdown and Urd restarts would sign the user out of
+some sites at seemingly random times. Urd's browser should behave like one that never closes: on
+every browser exit, save session cookies (`ctx.cookies()` with no expiry) beside the profile and
+add them back with `AddCookiesAsync` on launch. Tested with Chrome for Testing: this restores
+them, while the "Continue where you left off" preference does not. Sites still end sessions
+server-side when they choose. If Urd crashes, cookies since the last save are lost; accepted.
 
 ## Replaces
 

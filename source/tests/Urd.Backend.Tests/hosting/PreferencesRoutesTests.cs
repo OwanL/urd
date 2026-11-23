@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Preferences;
 using Urd.Core.Sessions;
 using Xunit;
 using static Urd.Backend.Tests.Support.HttpTest;
@@ -214,7 +215,7 @@ public sealed class PreferencesRoutesTests {
       Assert.Empty(models.GetProperty("medium").EnumerateArray());
       Assert.Equal(JsonValueKind.Null, models.GetProperty("skills").GetProperty("bucket").ValueKind);
       Assert.Equal("skills-model", models.GetProperty("skills").GetProperty("modelId").GetString());
-      Assert.Equal(new[] { "bash", "read", "write", "edit" },
+      Assert.Equal<string?>(new ProtectedResourcePreferences().Tools,
           preferences.GetProperty("protectedResources").GetProperty("tools").EnumerateArray()
               .Select(item => item.GetString()).ToArray());
       Assert.Equal(sourcePath, Assert.Single(preferences.GetProperty("protectedResources")

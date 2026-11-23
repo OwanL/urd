@@ -49,9 +49,14 @@ guidance does not exist yet; add it in `SharedAgentGuidance.cs` as part of this 
 
 ## Always headless; the user sees the page in Urd
 
-Chromium never shows a window. To watch or take over, the user opens a viewer in the chat. Working
-assumption: an expandable panel whose tab strip lists the chat's and its helpers' pages. Placement
-and interaction need their own UI ideation before implementation (open question).
+Chromium never shows a window. To watch or take over, the user opens a browser window in the chat.
+Its tab strip lists the chat's and its helpers' pages.
+
+- Desktop layout: the window works like a small desktop window. It can dock as a split view beside
+  the chat (default, with a draggable divider), float (move and resize over the chat), maximize to
+  fill Urd, or minimize to a chip. Floating keeps the chat and question cards usable; docked never
+  covers them. Rejected: inline in the transcript (scrolls away) and overlay-only (hides the
+  question being answered).
 
 - Frames: `page.Screencast.StartAsync(new() { OnFrame = ... })` delivers JPEG frames, sent over a
   per-viewer WebSocket (input travels back on the same socket, keeping its order) and drawn on a

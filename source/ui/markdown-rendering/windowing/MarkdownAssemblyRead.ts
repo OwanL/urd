@@ -44,6 +44,7 @@ export class MarkdownAssemblyRead {
   readonly pieces: Map<number, MarkdownTextPiece>;
   readonly contexts: Map<number, AssembledMarkdownContext>;
   private readonly descriptors = new Map<number, MarkdownRenderContext>();
+  private readonly expandedDescriptors = new Set<number>();
   private readonly rows = new Map<number, readonly number[]>();
   private readonly manifest: MarkdownRenderManifest;
   private readonly source: MarkdownPageSource;
@@ -81,6 +82,7 @@ export class MarkdownAssemblyRead {
   }
 
   async add(page: MarkdownPiecePage): Promise<void> {
+    this.readPiecePageDescriptors(page);
     let last: MarkdownTextPiece | undefined;
     for (const [offset, piece] of page.pieces.entries()) {
       if (piece.id !== page.from + offset)
@@ -107,15 +109,41 @@ export class MarkdownAssemblyRead {
     await this.hydrateRows();
   }
 
+  private readPiecePageDescriptors(page: MarkdownPiecePage): void {
+    this.signal.throwIfAborted();
+    if (page.contexts) for (const context of page.contexts) this.rememberDescriptor(context);
+  }
+
+  private rememberDescriptor(context: MarkdownRenderContext): void {
+    const existing = this.descriptors.get(context.id);
+    if (!existing) this.descriptors.set(context.id, context);
+    else if (!sameMarkdownContext(existing, context))
+      throw new Error("Markdown render context changed between pages.");
+  }
+
   private async prefetchDescriptors(seeds: readonly number[]): Promise<void> {
-    let pending = [...new Set(seeds)];
-    while (pending.length > 0) {
+    let pending = new Set(seeds);
+    while (pending.size > 0) {
       this.signal.throwIfAborted();
-      const requested = [...new Set(pending)].filter((id) => !this.descriptors.has(id));
-      pending = [];
-      for (const id of requested)
-        if (!isIndex(id) || id >= this.manifest.contextCount)
-          throw new Error("Invalid Markdown render context.");
+      const requested: number[] = [];
+      // Follow all known dependencies before issuing a batch for the missing ones.
+      for (const id of pending) {
+        if (this.expandedDescriptors.has(id)) continue;
+        const context = this.descriptors.get(id);
+        if (!context) {
+          if (!isIndex(id) || id >= this.manifest.contextCount)
+            throw new Error("Invalid Markdown render context.");
+          requested.push(id);
+          continue;
+        }
+        this.expandedDescriptors.add(id);
+        if (context.parent >= 0) pending.add(context.parent);
+        if (context.kind === "row" && context.firstChild >= 0) pending.add(context.firstChild);
+        if (context.kind === "cell") {
+          if (context.nextSibling >= 0) pending.add(context.nextSibling);
+          if (context.headerCell >= 0) pending.add(context.headerCell);
+        }
+      }
 
       for (let offset = 0; offset < requested.length; offset += 32) {
         const ids = Object.freeze(requested.slice(offset, offset + 32));
@@ -126,26 +154,11 @@ export class MarkdownAssemblyRead {
           const response = await this.source.readContexts(ids, cursor, this.signal);
           this.signal.throwIfAborted();
           const page = copyMarkdownContextDescriptorPage(response, ids, cursor, this.manifest);
-          for (const context of page.contexts) {
-            const existing = this.descriptors.get(context.id);
-            if (existing && !sameMarkdownContext(existing, context))
-              throw new Error("Markdown render context changed between descriptor pages.");
-            this.descriptors.set(context.id, context);
-          }
+          for (const context of page.contexts) this.rememberDescriptor(context);
           index = page.next;
         }
       }
-
-      for (const id of requested) {
-        const context = this.descriptors.get(id);
-        if (!context) throw new Error("Markdown context descriptor was not returned.");
-        if (context.parent >= 0) pending.push(context.parent);
-        if (context.kind === "row" && context.firstChild >= 0) pending.push(context.firstChild);
-        if (context.kind === "cell") {
-          if (context.nextSibling >= 0) pending.push(context.nextSibling);
-          if (context.headerCell >= 0) pending.push(context.headerCell);
-        }
-      }
+      pending = new Set(requested);
     }
   }
 
@@ -198,11 +211,8 @@ export class MarkdownAssemblyRead {
       const cursor = { generation: this.generation, index };
       const page = await this.source.readContext(id, cursor, this.signal);
       requireMarkdownPage(page, cursor, page.values);
-      const receivedContext = copyMarkdownContext(page.context, id, this.manifest);
-      if (descriptor && !sameMarkdownContext(descriptor, receivedContext))
-        throw new Error("Markdown render context changed between pages.");
-      descriptor = receivedContext;
-      this.descriptors.set(id, descriptor);
+      descriptor = copyMarkdownContext(page.context, id, this.manifest);
+      this.rememberDescriptor(descriptor);
       if (page.next > descriptor.valueCount || page.hasMore !== page.next < descriptor.valueCount)
         throw new Error("Markdown value count is inconsistent.");
 
@@ -312,10 +322,12 @@ export class MarkdownAssemblyRead {
           this.manifest,
         );
         if (page.next <= index) throw new Error("Detached header read did not advance.");
-        for (const [offset, piece] of page.pieces.entries()) {
+        this.readPiecePageDescriptors(page);
+        const pieces = page.next > end ? page.pieces.slice(0, end - index) : page.pieces;
+        await this.prefetchDescriptors(pieces.map((piece) => piece.context));
+        for (const [offset, piece] of pieces.entries()) {
           if (piece.id !== page.from + offset)
             throw new Error("Invalid detached Markdown text piece ID.");
-          if (piece.id >= end) break;
           this.addPiece(piece);
           const ancestry = await this.ancestry(piece.context, piece.id);
           if (!ancestry.some((ancestor) => ancestor.id === cell.id))

@@ -62,9 +62,13 @@ export function normalizePiecePage(
   if (!isRecord(value) || !Array.isArray(value.pieces))
     throw new TypeError("Server returned an invalid Markdown piece page.");
   requireGeneration(value.generation, manifest);
+  const { contexts } = value;
+  if (contexts !== undefined && !Array.isArray(contexts))
+    throw new TypeError("Server returned invalid Markdown piece page contexts.");
   return {
     ...value,
     pieces: value.pieces.map((piece) => normalizeTextPiece(piece)),
+    ...(contexts === undefined ? {} : { contexts: contexts.map(normalizeContext) }),
   } as unknown as MarkdownPiecePage;
 }
 

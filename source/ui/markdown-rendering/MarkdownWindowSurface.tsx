@@ -143,11 +143,13 @@ export class MarkdownWindowSurface {
     snapshot: MarkdownRenderSnapshot,
     anchor: MarkdownWindowAnchor | null,
     imageLoader: MarkdownImageLoader | null,
-  ): void {
+  ): number | undefined {
     const previous = this.published;
     const top = this.scrollport.scrollTop;
     try {
       this.renderSnapshot(snapshot, anchor, imageLoader);
+      const restoredTop = this.scrollport.scrollTop;
+      return restoredTop === top ? undefined : restoredTop;
     } catch (error) {
       // Rendering or measurement may already have changed the DOM. Rebuild the last
       // good surface while its lease is still owned, before rejecting the replacement.

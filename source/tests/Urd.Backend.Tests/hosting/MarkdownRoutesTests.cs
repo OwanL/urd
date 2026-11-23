@@ -56,11 +56,13 @@ public sealed class MarkdownRoutesTests {
       Assert.Equal(JsonValueKind.Number, wire.RootElement.GetProperty("pieces")[0].GetProperty("kind").ValueKind);
       MarkdownPiecePage pieces = JsonSerializer.Deserialize<MarkdownPiecePage>(bytes, MarkdownRenderJson.Options)!;
       Assert.NotEmpty(pieces.Pieces);
+      Assert.InRange(pieces.Pieces.Count + pieces.Contexts.Count, 1, 256);
       int contextId = pieces.Pieces[0].Context;
       using HttpResponseMessage contextResponse = await RequestAsync(server.Client, HttpMethod.Get,
           path + $"/contexts/{contextId}" + cursor);
       MarkdownContextPage context = (await contextResponse.Content.ReadFromJsonAsync<MarkdownContextPage>(MarkdownRenderJson.Options))!;
       Assert.Equal(MarkdownElementKind.Link, context.Context.Kind);
+      Assert.Contains(context.Context, pieces.Contexts);
       Assert.Equal("https://example.invalid/0", context.Values.Single().Text);
       Assert.NotEqual(-1, context.Context.Parent);
       using HttpResponseMessage parentContextResponse = await RequestAsync(server.Client, HttpMethod.Get,
@@ -73,9 +75,14 @@ public sealed class MarkdownRoutesTests {
       Assert.Equal(new MarkdownRenderCursor(generation, context.Context.FirstPiece), childLocation);
       using HttpResponseMessage beforeResponse = await RequestAsync(server.Client, HttpMethod.Get,
           path + $"/pieces/before?generation={generation}&index={pieces.Next}");
-      MarkdownPiecePage before = (await beforeResponse.Content.ReadFromJsonAsync<MarkdownPiecePage>(MarkdownRenderJson.Options))!;
+      Assert.Equal(HttpStatusCode.OK, beforeResponse.StatusCode);
+      byte[] beforeBytes = await beforeResponse.Content.ReadAsByteArrayAsync();
+      Assert.InRange(beforeBytes.Length, 1, 16 * 1024);
+      MarkdownPiecePage before = JsonSerializer.Deserialize<MarkdownPiecePage>(beforeBytes, MarkdownRenderJson.Options)!;
       Assert.Equal(pieces.Next, before.Next);
       Assert.NotEmpty(before.Pieces);
+      Assert.InRange(before.Pieces.Count + before.Contexts.Count, 1, 256);
+      Assert.All(before.Pieces, piece => Assert.Contains(before.Contexts, context => context.Id == piece.Context));
     }
 
     int[] ids = Enumerable.Range(0, 256).ToArray();

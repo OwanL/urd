@@ -102,6 +102,7 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
         from: 0,
         next: 1,
         hasMore: true,
+        contexts: [context()],
         pieces: [
           {
             id: 0,
@@ -121,6 +122,7 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
         from: 0,
         next: 1,
         hasMore: true,
+        contexts: [context()],
         pieces: [
           {
             id: 0,
@@ -171,6 +173,10 @@ void test("maps lease and page routes, bodies, and numeric Markdown enums", asyn
   assert.equal(pieces.pieces[0]?.kind, "text");
   assert.equal(pieces.pieces[0]?.mapping, "exact");
   assert.equal(preceding.pieces[0]?.kind, "text");
+  for (const page of [pieces, preceding]) {
+    assert.equal(page.contexts?.[0]?.kind, "document");
+    assert.equal(page.contexts?.[0]?.alignment, "center");
+  }
   assert.equal(contextPage.context.kind, "document");
   assert.equal(contextPage.context.alignment, "center");
   assert.deepEqual(childCursor, { generation, index: 2 });

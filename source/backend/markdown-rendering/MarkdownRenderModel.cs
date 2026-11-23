@@ -38,7 +38,10 @@ public sealed record MarkdownValueFragment(
 
 public sealed record MarkdownPiecePage(
     Guid Generation, int From, int Next, bool HasMore,
-    IReadOnlyList<MarkdownTextPiece> Pieces);
+    IReadOnlyList<MarkdownTextPiece> Pieces) {
+  // Best-effort descriptors only; missing descriptors and all values have separate reads.
+  public IReadOnlyList<MarkdownRenderContext> Contexts { get; init; } = [];
+}
 
 public sealed record MarkdownContextPage(
     Guid Generation, MarkdownRenderContext Context, int From, int Next, bool HasMore,

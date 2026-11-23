@@ -97,6 +97,9 @@ export function useTranscriptViewport({
   }, [store]);
   const isSuspended = useCallback(() => readLifecycle.current?.isSuspended() ?? false, []);
   const requestLayout = useCallback(() => setModelVersion((value) => value + 1), []);
+  const onProgrammaticScroll = useCallback((top: number) => {
+    programmaticScroll.current = top;
+  }, []);
   const onAnchorRecorded = useCallback(() => {
     scrollAdjustment.current = null;
     saveCurrentState();
@@ -121,6 +124,7 @@ export function useTranscriptViewport({
     lookupRow,
     isSuspended,
     requestLayout,
+    onProgrammaticScroll,
     onAnchorRecorded,
   });
 
@@ -244,7 +248,7 @@ export function useTranscriptViewport({
       hasPendingRestore,
     );
     if (target !== null) programmaticScroll.current = target;
-    applyWidthRestore(node, (top) => (programmaticScroll.current = top));
+    applyWidthRestore(node, onProgrammaticScroll);
   }, [
     applyWidthRestore,
     documentInactive,
@@ -252,6 +256,7 @@ export function useTranscriptViewport({
     isInitialized,
     lastScrollport,
     modelVersion,
+    onProgrammaticScroll,
     positionWindow,
     resumingVisibility,
     root,

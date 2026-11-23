@@ -81,10 +81,10 @@ export function RichMessageBody(props: RichMessageBodyProps) {
       const paused = current.paused || !current.streamId;
       if (!view && paused) return;
       view ??= new MarkdownMessageView(element!, root!, display.retainedPieces, {
-        changed() {
+        changed(restoredScrollTop) {
           element!.style.minHeight = "";
           setError(null);
-          latest.current.onPublished?.();
+          latest.current.onPublished?.(restoredScrollTop);
           schedule();
         },
         error: report,
@@ -93,7 +93,13 @@ export function RichMessageBody(props: RichMessageBodyProps) {
       if (paused || stopped || releasing) return;
       // A retained panel may reappear at a new width while its view was paused.
       // Restore the parent's explicit source before testing gaps at the old scroll offset.
-      if (current.saved && view.restoreCapturedSource(current.saved)) current.onPublished?.();
+      if (current.saved) {
+        const top = root!.scrollTop;
+        if (view.restoreCapturedSource(current.saved)) {
+          const restoredTop = root!.scrollTop;
+          current.onPublished?.(restoredTop === top ? undefined : restoredTop);
+        }
+      }
       if (reading) {
         queued = true;
         return;

@@ -28,5 +28,5 @@ export interface RichMessageBodyProps {
     capture: ((signal: AbortSignal) => Promise<MarkdownSavedSourcePosition | null>) | null,
   ) => void;
   registerRestore?: (restore: ((saved: MarkdownSavedSourcePosition) => boolean) | null) => void;
-  onPublished?: () => void;
+  onPublished?: (restoredScrollTop?: number) => void;
 }

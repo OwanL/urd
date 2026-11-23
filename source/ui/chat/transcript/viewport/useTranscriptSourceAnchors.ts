@@ -28,6 +28,7 @@ interface SourceAnchorOptions {
   lookupRow: (key: string) => PositionedRow | undefined;
   isSuspended: () => boolean;
   requestLayout: () => void;
+  onProgrammaticScroll: (top: number) => void;
   onAnchorRecorded: () => void;
 }
 
@@ -39,6 +40,7 @@ export function useTranscriptSourceAnchors({
   lookupRow,
   isSuspended,
   requestLayout,
+  onProgrammaticScroll,
   onAnchorRecorded,
 }: SourceAnchorOptions) {
   const [pendingRestore, setPendingRestore] = useState<SavedAnchor | null>(null);
@@ -232,7 +234,13 @@ export function useTranscriptSourceAnchors({
   }, []);
 
   const onPublished = useCallback(
-    (key: string) => {
+    (key: string, restoredScrollTop?: number) => {
+      if (restoredScrollTop !== undefined) {
+        // Markdown restores a source anchor on the shared scrollport. Its scroll
+        // event must not be treated as the reader opting out of following.
+        onProgrammaticScroll(restoredScrollTop);
+        if (viewport.current?.snapshot().followsLatest) requestLayout();
+      }
       if (pendingWidthRestore.current?.key === key) {
         requestLayout();
         return;
@@ -241,7 +249,7 @@ export function useTranscriptSourceAnchors({
       if (restore && entryKey(restore.entry) === key) restoreAnchor(null);
       scheduleSourceCapture();
     },
-    [requestLayout, restoreAnchor, scheduleSourceCapture],
+    [onProgrammaticScroll, requestLayout, restoreAnchor, scheduleSourceCapture, viewport],
   );
 
   function savedPositionForRow(row: PositionedRow) {

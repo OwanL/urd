@@ -79,6 +79,7 @@ export interface MarkdownRenderContext {
   readonly source: MarkdownSourceRange;
   readonly firstPiece: number;
   readonly pieceCount: number;
+  readonly firstValue?: number;
   readonly valueCount: number;
   readonly position: number;
   readonly level: number;
@@ -100,6 +101,7 @@ export interface MarkdownPiecePage {
   readonly next: number;
   readonly hasMore: boolean;
   readonly pieces: readonly MarkdownTextPiece[];
+  readonly contexts?: readonly MarkdownRenderContext[];
 }
 export interface MarkdownContextPage {
   readonly generation: string;

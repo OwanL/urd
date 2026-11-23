@@ -194,13 +194,15 @@ reconnect read pending questions from the running server; they do not resubmit a
 `source/ui/markdown-rendering/` contains a standalone virtualized Markdown pipeline:
 `MarkdownWindowAssembler` reads bounded forward/backward semantic pages through
 `MarkdownPageSource`, and `MarkdownRenderer` turns manifests and snapshots into HTML
-while retaining source ranges. Dependency-aware trimming separates display from support
-ranges. Native selection/focus pins defer trimming; complete code lines and table rows
-have placeholders and source-anchor geometry, while arbitrary giant paragraphs, lines,
-cells and metadata are not bounded. Generation handoff awaits read drain and generation
-release before another open or final disposal. `MarkdownClient` adapts the page-owned
-HTTP lease API, normalizes Core numeric enums and awaits explicit release, including
-failed opens. Normal startup composes the bridge-backed renderer and activates Markdown
+while retaining source ranges. Piece pages can include same-generation ancestry and table
+context descriptors within their shared 16 KiB / 256-record limit. Missing descriptors and
+variable metadata still use separate bounded reads. Dependency-aware trimming separates
+display from support ranges. Native selection/focus pins defer trimming; complete code
+lines and table rows have placeholders and source-anchor geometry, while arbitrary giant
+paragraphs, lines, cells and metadata are not bounded. Generation handoff awaits read drain
+and generation release before another open or final disposal. `MarkdownClient` adapts
+the page-owned HTTP lease API, normalizes Core numeric enums and awaits explicit
+release, including failed opens. Normal startup composes the bridge-backed renderer and activates Markdown
 in `Transcript` with explicit limits. Catch-up can be deferred by selection, and unmounting
 loses selection. Fast unit tests cover the model, paging and handoff logic. Browser suites
 and their synthetic renderer harness were removed by owner decision on 2026-11-11;

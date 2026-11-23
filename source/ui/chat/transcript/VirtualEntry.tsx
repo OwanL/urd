@@ -61,7 +61,7 @@ export function VirtualEntry({
     capture: ((signal: AbortSignal) => Promise<MarkdownSavedSourcePosition | null>) | null,
   ) => void;
   onSourceRestore: (key: string, restore: RestoreSource | null) => void;
-  onPublished: (key: string) => void;
+  onPublished: (key: string, restoredScrollTop?: number) => void;
 }) {
   const row = useRef<HTMLDivElement>(null);
   const key = entryKey(descriptor.entry);
@@ -74,7 +74,10 @@ export function VirtualEntry({
     (restore: RestoreSource | null) => onSourceRestore(key, restore),
     [key, onSourceRestore],
   );
-  const published = useCallback(() => onPublished(key), [key, onPublished]);
+  const published = useCallback(
+    (restoredScrollTop?: number) => onPublished(key, restoredScrollTop),
+    [key, onPublished],
+  );
 
   useLayoutEffect(() => {
     const element = row.current;

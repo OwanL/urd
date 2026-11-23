@@ -2,23 +2,20 @@ using System.Text.Json;
 
 namespace Urd.Core.MarkdownRendering;
 
-// Bounded indexed reads only: no tree walk, whole-projection scan or source read.
+// Bounded indexed reads only: follow needed descriptor links, never scan the projection or source.
 // The serialization options are part of this internal byte-ceiling contract.
 internal static class MarkdownPageReader {
   internal static MarkdownPiecePage Read(MarkdownRenderIndex index, MarkdownRenderCursor cursor, MarkdownPageLimits? limits = null) {
     limits ??= new();
     limits.Validate();
     Validate(index, cursor, index.PieceCount);
-    var pieces = new List<MarkdownTextPiece>();
     var next = cursor.Index;
     // Max-width Next and false (longer than true) conservatively cover the envelope.
-    var bytes = Size(new MarkdownPiecePage(index.Generation, cursor.Index, int.MaxValue, false, []));
-    while (next < index.PieceCount && pieces.Count < limits.Records) {
-      if (!TryAddWithinByteLimit(pieces, index.Piece(next), index.PieceUtf8Bytes(next), ref bytes, limits.Utf8Bytes)) break;
-      next++;
-    }
+    var envelopeBytes = Size(new MarkdownPiecePage(index.Generation, cursor.Index, int.MaxValue, false, []));
+    var page = new MarkdownPiecePageBuilder(index, limits, envelopeBytes);
+    while (next < index.PieceCount && page.TryAdd(next)) next++;
     EnsureAdvance(cursor.Index, next, index.PieceCount);
-    return new(index.Generation, cursor.Index, next, next < index.PieceCount, pieces.AsReadOnly());
+    return page.Build(cursor.Index, next);
   }
 
   internal static MarkdownPiecePage ReadBefore(MarkdownRenderIndex index,
@@ -26,19 +23,15 @@ internal static class MarkdownPageReader {
     limits ??= new();
     limits.Validate();
     Validate(index, exclusiveEndCursor, index.PieceCount);
-    var pieces = new List<MarkdownTextPiece>();
     var from = exclusiveEndCursor.Index;
     var hasMore = exclusiveEndCursor.Index < index.PieceCount;
     // From is not known until the reverse walk completes; reserve its widest JSON form.
-    var bytes = Size(new MarkdownPiecePage(index.Generation, int.MaxValue, exclusiveEndCursor.Index, hasMore, []));
-    while (from > 0 && pieces.Count < limits.Records) {
-      if (!TryAddWithinByteLimit(pieces, index.Piece(from - 1), index.PieceUtf8Bytes(from - 1), ref bytes, limits.Utf8Bytes)) break;
-      from--;
-    }
+    var envelopeBytes = Size(new MarkdownPiecePage(index.Generation, int.MaxValue, exclusiveEndCursor.Index, hasMore, []));
+    var page = new MarkdownPiecePageBuilder(index, limits, envelopeBytes);
+    while (from > 0 && page.TryAdd(from - 1)) from--;
     if (from == exclusiveEndCursor.Index && exclusiveEndCursor.Index > 0)
       throw new InvalidOperationException("Markdown record cannot fit within the page limits.");
-    pieces.Reverse();
-    return new(index.Generation, from, exclusiveEndCursor.Index, hasMore, pieces.AsReadOnly());
+    return page.Build(from, exclusiveEndCursor.Index, reverse: true);
   }
 
   // Fetch requested constant-size context descriptors in request order. Metadata values
@@ -99,6 +92,8 @@ internal static class MarkdownPageReader {
   }
 
   internal static int MeasurePiece(MarkdownTextPiece piece) => Size(piece);
+
+  internal static int MeasureContext(MarkdownRenderContext context) => Size(context);
 
   static int Size<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, MarkdownRenderJson.Options).Length;
 

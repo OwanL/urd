@@ -117,6 +117,9 @@ export function copyMarkdownContext(
     !Number.isSafeInteger(context.firstPiece + context.pieceCount) ||
     context.firstPiece + context.pieceCount > manifest.pieceCount ||
     !isIndex(context.valueCount) ||
+    (context.firstValue !== undefined &&
+      (!isIndex(context.firstValue) ||
+        !Number.isSafeInteger(context.firstValue + context.valueCount))) ||
     !isIndex(context.position) ||
     !isIndex(context.level) ||
     typeof context.ordered !== "boolean" ||
@@ -144,6 +147,16 @@ export function copyMarkdownContext(
   });
 }
 
+function copyMarkdownContextDescriptor(
+  context: MarkdownRenderContext,
+  expectedId: number,
+  manifest: MarkdownRenderManifest,
+): MarkdownRenderContext {
+  if (context && typeof context === "object" && "values" in context)
+    throw new Error("Markdown context descriptor must not include values.");
+  return copyMarkdownContext(context, expectedId, manifest);
+}
+
 export function copyMarkdownContextDescriptorPage(
   page: MarkdownContextDescriptorPage,
   ids: readonly number[],
@@ -153,10 +166,6 @@ export function copyMarkdownContextDescriptorPage(
   if (!page || typeof page !== "object" || !Array.isArray(page.contexts))
     throw new Error("Invalid Markdown context descriptor page.");
   if ("values" in page)
-    throw new Error("Markdown context descriptor page must not include values.");
-  if (
-    page.contexts.some((context) => context && typeof context === "object" && "values" in context)
-  )
     throw new Error("Markdown context descriptor page must not include values.");
   if (page.generation !== cursor.generation)
     throw new Error("Markdown render generation changed; restart from the source anchor.");
@@ -182,7 +191,7 @@ export function copyMarkdownContextDescriptorPage(
     hasMore: page.hasMore,
     contexts: Object.freeze(
       page.contexts.map((context, offset) =>
-        copyMarkdownContext(context, ids[cursor.index + offset]!, manifest),
+        copyMarkdownContextDescriptor(context, ids[cursor.index + offset]!, manifest),
       ),
     ),
   });
@@ -203,6 +212,7 @@ export function sameMarkdownContext(
     left.source.end === right.source.end &&
     left.firstPiece === right.firstPiece &&
     left.pieceCount === right.pieceCount &&
+    left.firstValue === right.firstValue &&
     left.valueCount === right.valueCount &&
     left.position === right.position &&
     left.level === right.level &&
@@ -257,10 +267,7 @@ export function copyMarkdownPiecePage(
     (page.hasMore && page.next <= page.from)
   )
     throw new Error("Markdown page did not advance consistently.");
-  return Object.freeze({
-    ...page,
-    pieces: Object.freeze(page.pieces.map((piece) => copyMarkdownTextPiece(piece, manifest))),
-  });
+  return copyMarkdownPiecePageRecords(page, manifest);
 }
 
 export function copyMarkdownPiecePageBefore(
@@ -284,9 +291,32 @@ export function copyMarkdownPiecePageBefore(
     (cursor.index > 0 && count === 0)
   )
     throw new Error("Markdown preceding page did not match its cursor.");
+  return copyMarkdownPiecePageRecords(page, manifest);
+}
+
+function copyMarkdownPiecePageRecords(
+  page: MarkdownPiecePage,
+  manifest: MarkdownRenderManifest,
+): MarkdownPiecePage {
+  if ("values" in page) throw new Error("Markdown piece page must not include values.");
+  const { contexts } = page;
+  let hints: readonly MarkdownRenderContext[] | undefined;
+  if (contexts !== undefined) {
+    if (!Array.isArray(contexts)) throw new Error("Invalid Markdown piece page contexts.");
+    const ids = new Set<number>();
+    const copies: MarkdownRenderContext[] = [];
+    for (const context of contexts as readonly MarkdownRenderContext[]) {
+      const descriptor = copyMarkdownContextDescriptor(context, context?.id, manifest);
+      if (ids.has(descriptor.id)) throw new Error("Duplicate Markdown context in piece page.");
+      ids.add(descriptor.id);
+      copies.push(descriptor);
+    }
+    hints = Object.freeze(copies);
+  }
   return Object.freeze({
     ...page,
     pieces: Object.freeze(page.pieces.map((piece) => copyMarkdownTextPiece(piece, manifest))),
+    ...(hints === undefined ? {} : { contexts: hints }),
   });
 }
 

@@ -15,7 +15,7 @@ import { refreshMarkdownWindow } from "./windowing/MarkdownWindowRefresh.ts";
 export type MarkdownTextRequest = MarkdownClientRequest;
 export type { MarkdownSavedSourcePosition } from "./MarkdownSourceMappings.ts";
 export interface MarkdownMessageViewCallbacks {
-  changed(): void;
+  changed(restoredScrollTop?: number): void;
   error(error: unknown): void;
 }
 export type MarkdownPublication = "published" | "cancelled";
@@ -340,12 +340,16 @@ export class MarkdownMessageView {
     anchor: MarkdownWindowAnchor | null,
     generation = this.activeGeneration,
   ): void {
-    this.surface.publish(snapshot, anchor, generation?.imageLoader ?? null);
+    const restoredScrollTop = this.surface.publish(
+      snapshot,
+      anchor,
+      generation?.imageLoader ?? null,
+    );
     this.activeGeneration = generation;
     this.sourceMappings.prune(generation, snapshot);
     this.publicationVersion++;
     try {
-      this.callbacks.changed();
+      this.callbacks.changed(restoredScrollTop);
     } catch (error) {
       // A failed notification cannot roll back a successfully published surface.
       queueMicrotask(() => this.callbacks.error(error));

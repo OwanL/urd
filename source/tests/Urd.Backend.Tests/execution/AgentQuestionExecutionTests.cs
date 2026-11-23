@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
@@ -172,7 +173,7 @@ public sealed class AgentQuestionExecutionTests {
   [InlineData(false)]
   [InlineData(true)]
   public async Task SettlingOrStoppingFailsOnlyThePresentedQuestion(bool stop) {
-    await using var fixture = await QuestionFixture.OpenAsync();
+    await using var fixture = await QuestionFixture.OpenAsync(protectProbe: true);
     var entered = Signal();
     var release = Signal();
     fixture.Respond(token => Paused(entered, release, token));
@@ -201,6 +202,62 @@ public sealed class AgentQuestionExecutionTests {
       Assert.True(fixture.Questions.AnswerAgent(successor.Context, "later"));
       Assert.Equal("later", (await second.WaitAsync(TestTimeout)).Answer);
       successor.Release.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(next)).Outcome);
+    } finally {
+      release.TrySetResult();
+    }
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ProviderFailureReleasesUndeliveredWakingAsksWithoutStartingAnotherRequest(bool presentFirst) {
+    await using var fixture = await QuestionFixture.OpenAsync(protectProbe: true);
+    int callsBeforeRun = fixture.Client.Calls;
+    var entered = Signal();
+    var release = Signal();
+    fixture.Respond(token => FailProviderAfterRelease(entered, release, token));
+    Task<AgentQuestionResult>? presented = presentFirst ? fixture.Ask("presented question", wake: true) : null;
+    try {
+      if (presented is null)
+        await fixture.StartAsync("ordinary work");
+      await entered.Task.WaitAsync(TestTimeout);
+      Guid execution = Assert.IsType<Guid>((await fixture.Recipient.ReadSnapshotAsync()).UnsettledExecutionId);
+      int presentedCount = presentFirst ? 1 : 0;
+      Assert.Equal(presentedCount, fixture.QuestionRows().Count);
+
+      Task<AgentQuestionResult> first = fixture.Ask("first undelivered question", wake: true);
+      await fixture.WaitForQueueAsync(presentedCount + 1);
+      Task<AgentQuestionResult> opportunistic = fixture.Ask("opportunistic question", wake: false);
+      await fixture.WaitForQueueAsync(presentedCount + 2);
+      Task<AgentQuestionResult> second = fixture.Ask("second undelivered question", wake: true);
+      await fixture.WaitForQueueAsync(presentedCount + 3);
+      Assert.Equal(presentedCount, fixture.QuestionRows().Count);
+
+      release.TrySetResult();
+      SessionExecutionResult failed = await fixture.FinishAsync(execution);
+      Assert.Equal(ExecutionOutcome.Failed, failed.Outcome);
+      Assert.Equal("Scripted provider rejected the request.", failed.Error);
+      Assert.Null((await fixture.Recipient.ReadSnapshotAsync()).UnsettledExecutionId);
+      Assert.Equal(callsBeforeRun + 1, fixture.Client.Calls);
+      Assert.Equal(presentedCount, fixture.QuestionRows().Count);
+      Assert.Equal("opportunistic question", Assert.Single(fixture.Manager.Questions.Queued(fixture.Recipient.Id)).Prompt);
+      Assert.False(opportunistic.IsCompleted);
+      foreach (Task<AgentQuestionResult> ask in new[] { first, second }) {
+        AgentQuestionResult result = await ask.WaitAsync(TestTimeout);
+        Assert.Null(result.Answer);
+        Assert.Contains("run failed before it saw it", result.Error, StringComparison.Ordinal);
+        Assert.Contains("ask again", result.Error, StringComparison.Ordinal);
+      }
+      if (presented is not null)
+        Assert.Equal(AgentQuestions.RecipientFinished, (await presented.WaitAsync(TestTimeout)).Error);
+
+      fixture.Respond(Probe("opportunistic"), Complete);
+      Guid next = await fixture.StartAsync("later work");
+      CapturedCall later = await fixture.NextCallAsync();
+      Assert.True(fixture.Questions.AnswerAgent(later.Context, "later answer"));
+      Assert.Equal("later answer", (await opportunistic.WaitAsync(TestTimeout)).Answer);
+      later.Release.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed, (await fixture.FinishAsync(next)).Outcome);
     } finally {
       release.TrySetResult();
@@ -493,6 +550,14 @@ public sealed class AgentQuestionExecutionTests {
     }
   }
 
+  private static async IAsyncEnumerable<ChatResponseUpdate> FailProviderAfterRelease(TaskCompletionSource entered,
+      TaskCompletionSource release, [EnumeratorCancellation] CancellationToken token) {
+    yield return Text("partial output");
+    entered.TrySetResult();
+    await release.Task.WaitAsync(token);
+    throw new InvalidOperationException("Scripted provider rejected the request.");
+  }
+
   private static bool IsReminder(ChatMessage message) => message.Text.StartsWith(Reminder, StringComparison.Ordinal);
 
   private static void AssertNoQuestionOffer(ScriptedRequest request) {
@@ -596,9 +661,15 @@ public sealed class AgentQuestionExecutionTests {
         responses.TryDequeue(out var response) ? response(cancellation)
             : throw new InvalidOperationException("No scripted response remains.");
 
-    internal static async Task<QuestionFixture> OpenAsync(Func<CancellationToken, Task<ChatResponse>>? summarize = null) {
+    internal static async Task<QuestionFixture> OpenAsync(Func<CancellationToken, Task<ChatResponse>>? summarize = null,
+        bool protectProbe = false) {
       var fixture = new QuestionFixture(summarize);
       try {
+        // The compaction scenarios exercise a pruned answer tool, not the protected defaults.
+        if (summarize is not null)
+          new PreferenceManager(fixture.store).SetProtectedItems(ProtectedResourceCategory.Tools, []);
+        else if (protectProbe)
+          new PreferenceManager(fixture.store).SetProtectedItems(ProtectedResourceCategory.Tools, [fixture.probe.Name]);
         await fixture.ConfigureAuxiliaryModelAsync();
         fixture.Sender = await fixture.Manager.CreatePrimaryAsync();
         fixture.Respond(Probe("sender"), Complete);

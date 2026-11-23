@@ -181,10 +181,14 @@ never handles question IDs. The answer becomes the asker's `ask_agent` result; t
 then continues its own task.
 
 If the recipient's execution ends or is stopped without answering its presented question, that
-question fails with a clear "recipient finished without answering" error. When a bounded child
-finishes or is stopped, its queued questions fail the same way. Compaction re-presents the
-current question, as it does for outstanding background calls, so `answer_agent` never answers a
-question the recipient can no longer see.
+question fails with a clear "recipient finished without answering" error. If a conversation run
+fails before presenting queued `wake: true` questions, the askers get a not-delivered error;
+Urd does not start a new model request for them. For a primary, unpresented `wake: false`
+questions remain opportunistic, and explicit Stop still leaves unpresented questions queued.
+When a bounded child finishes, fails or is stopped, its mailbox closes and any remaining
+questions fail as unanswered. Compaction re-presents the current question, as it does for
+outstanding background calls, so `answer_agent` never answers a question the recipient can no
+longer see.
 
 ### `list_agents`
 

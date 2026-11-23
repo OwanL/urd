@@ -126,8 +126,11 @@ internal sealed class QuestionDelivery(SessionBase session, UrdStore store, Asyn
 
   internal void ForgetRecipient() => agentQuestions?.ForgetRecipient(session.Id);
 
-  // Caller holds the session lock.
-  internal void FinishExecution() {
+  // Caller holds the session lock. A failed conversation rejects undelivered waking asks
+  // instead of starting another run. A bounded child still closes its entire mailbox.
+  internal void FinishExecution(bool failedConversation) {
+    if (failedConversation)
+      agentQuestions?.FailUndeliveredWaking(session.Id);
     if (session.Kind == SessionKind.Subagent)
       agentQuestions?.CloseRecipient(session.Id);
     else

@@ -295,7 +295,7 @@ public abstract partial class SessionBase {
 
   // Caller holds the session lock. A completed run may admit a queued waking ask.
   internal TaskCompletionSource? FinishExecution(SessionExecutionDriver execution, SessionExecutionResult saved) {
-    Questions.FinishExecution();
+    Questions.FinishExecution(failedConversation: saved.Outcome == ExecutionOutcome.Failed && !execution.IsManualCompaction);
     execution.Release();
     activeExecution.Clear();
     status.Settled(saved);

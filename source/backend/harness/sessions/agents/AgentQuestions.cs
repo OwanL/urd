@@ -6,8 +6,8 @@ namespace Urd.Core.Sessions;
 // own request was shown. Records settle exactly once — answered, cancelled by the waiting ask, or
 // failed — and completions are signalled outside the lock. No SQLite, wake or join runs here.
 internal sealed class AgentQuestions {
-  // Every failed record carries the same blame: the recipient ended without answering.
   internal const string RecipientFinished = "The recipient agent finished without answering the question.";
+  private const string RecipientFailedBeforeDelivery = "Your question was not delivered because the recipient's run failed before it saw it. You can ask again if the recipient is still available.";
 
   private readonly object stateLock = new();
   private readonly Dictionary<Guid, Mailbox> mailboxes = [];
@@ -232,8 +232,8 @@ internal sealed class AgentQuestions {
     }
   }
 
-  // Fails the presented head when the recipient's execution ends, stops or faults without
-  // answering. Unpresented questions stay queued for the recipient's next run.
+  // Fails only the presented head when the recipient's execution ends, stops or faults
+  // without answering.
   internal void FailPresented(Guid recipientId) {
     Question head;
     lock (stateLock) {
@@ -245,6 +245,27 @@ internal sealed class AgentQuestions {
     }
 
     Settle(head, new(null, RecipientFinished));
+  }
+
+  // An unsuccessful run will not wake itself to deliver these asks. Leave opportunistic
+  // questions queued in FIFO order and release every affected waiter outside the lock.
+  internal void FailUndeliveredWaking(Guid recipientId) {
+    List<Question> failed = [];
+    lock (stateLock) {
+      if (!mailboxes.TryGetValue(recipientId, out Mailbox? mailbox))
+        return;
+
+      mailbox.Questions.RemoveAll(question => {
+        if (!question.Wake || question.PresentedRequests is not null)
+          return false;
+        question.Settled = true;
+        failed.Add(question);
+        return true;
+      });
+    }
+
+    foreach (Question question in failed)
+      Settle(question, new(null, RecipientFailedBeforeDelivery));
   }
 
   // Fails one waiting record with a stated reason; absent or settled records stay untouched.

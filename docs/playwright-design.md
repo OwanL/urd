@@ -57,6 +57,14 @@ Its tab strip lists the chat's and its helpers' pages.
   fill Urd, or minimize to a chip. Floating keeps the chat and question cards usable; docked never
   covers them. Rejected: inline in the transcript (scrolls away) and overlay-only (hides the
   question being answered).
+- Each chat has its own window. Switching chat tabs hides it, and each chat remembers whether its
+  window was open, docked, floating or maximized, plus its size and position.
+- The page resizes to match the window while a viewer is open (minimum width about 360px), so text is
+  drawn at full size and phones get the site's mobile layout. When two viewers watch the same chat,
+  the most recently opened or resized one sets the size. When the last viewer closes, the page
+  returns to 1280×800, so unattended work uses desktop layouts. The agent targets elements by ref, so
+  a resize cannot misdirect clicks; a ref hidden by the new layout fails and the agent re-reads the
+  page. `click_at` is rejected if the page size changed since the screenshot it is based on.
 
 - Frames: `page.Screencast.StartAsync(new() { OnFrame = ... })` delivers JPEG frames, sent over a
   per-viewer WebSocket (input travels back on the same socket, keeping its order) and drawn on a

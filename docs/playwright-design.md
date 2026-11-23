@@ -27,8 +27,9 @@ guidance does not exist yet; add it in `SharedAgentGuidance.cs` as part of this 
 
 ## One browser, pages per chat
 
-- One persistent Chromium context (`LaunchPersistentContextAsync`) with a `browser-profile`
-  directory under the data root. Every chat shares its logins.
+- One persistent Chromium context (`LaunchPersistentContextAsync`) in the existing
+  `playwright-profile` directory under the data root, so logins made with the preview survive.
+  Every chat shares its logins.
 - Each session, chat or helper (subagent), owns the pages it opens and any popup whose opener it
   owns (OAuth popups follow their session). A session can only list and drive its own pages. Pages
   run concurrently; there is no browser-wide lock. A helper's pages close when it finishes.
@@ -53,7 +54,8 @@ assumption: an expandable panel whose tab strip lists the chat's and its helpers
 and interaction need their own UI ideation before implementation (open question).
 
 - Frames: `page.Screencast.StartAsync(new() { OnFrame = ... })` delivers JPEG frames, sent over a
-  per-viewer WebSocket and drawn on a `<canvas>`. Frames flow only while a viewer is open.
+  per-viewer WebSocket (input travels back on the same socket, keeping its order) and drawn on a
+  `<canvas>`. Frames flow only while a viewer is open. Send the latest frame when a viewer connects.
 - Input: canvas mouse, wheel, key and paste events are scaled to page coordinates and replayed with
   `page.Mouse` and `page.Keyboard` (`InsertTextAsync` for paste).
 - The viewer follows the chat's active page and shows its pages as tabs, so an OAuth popup appears
@@ -76,7 +78,7 @@ A disposable probe already showed frame display and click mapping on headless Ch
 
 ## Agent tool
 
-One `browser` tool, shaped like Playwright MCP. As there, every action returns a full snapshot of
+One `browser` tool (replacing `playwright`), shaped like Playwright MCP. As there, every action returns a full snapshot of
 the active page, with no browser-specific trimming. Oversized results use the general tool output
 cap (prerequisite below).
 

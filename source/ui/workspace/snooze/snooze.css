@@ -36,8 +36,15 @@
 
 .snooze-wheel {
   position: relative;
-  display: grid;
-  grid-template-rows: repeat(5, 25px);
+  height: calc(5 * var(--snooze-row-height));
+  padding-block: calc(2 * var(--snooze-row-height));
+  overflow: hidden auto;
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  touch-action: pan-y pinch-zoom;
+  mask-image: linear-gradient(transparent, #000d 4% 16%, #000 35% 65%, #000d 84% 96%, transparent);
+  cursor: grab;
   font-variant-numeric: tabular-nums;
 }
 
@@ -45,29 +52,30 @@
   border-inline-start: 1px solid var(--surface-hover);
 }
 
+.snooze-wheel[data-dragging] {
+  cursor: grabbing;
+}
+
+.snooze-wheel:focus-visible {
+  mask-image: none;
+}
+
+.snooze-wheel[aria-disabled="true"] {
+  overflow-y: hidden;
+  cursor: default;
+}
+
 .snooze-wheel span {
   display: grid;
   place-items: center;
+  height: var(--snooze-row-height);
   color: var(--text-secondary);
 }
 
-.snooze-wheel span:first-child,
-.snooze-wheel span:last-child {
-  color: #858585;
-}
-
-.snooze-wheel span:nth-child(3) {
+.snooze-wheel span[data-selected="true"] {
   color: var(--text-primary);
   font-size: 15px;
   font-weight: 600;
-}
-
-.snooze-wheel:not([aria-disabled="true"]) span:not(.is-empty, :nth-child(3)) {
-  cursor: pointer;
-}
-
-.snooze-wheel:not([aria-disabled="true"]) span:not(.is-empty, :nth-child(3)):hover {
-  color: var(--text-primary);
 }
 
 .snooze-footer,

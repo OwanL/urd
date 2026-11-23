@@ -103,9 +103,10 @@ active run and its pending steering; there is no after-run queue. The composer k
 and reasoning pickers and Send/Continue visible on one row at every width. Stop appears only
 while work is active and is disabled while stopping. More options holds session details; these
 never crowd or wrap the toolbar.
-Right-click a chat tab or press Shift+F10 on it and choose **Snooze…**. The day, hour and minute
-wheels default to 9:00 am local time tomorrow and show the return time before you confirm. Only
-idle chats with no pending work can be snoozed. History, drafts and local tab order are retained.
+Right-click a chat tab or press Shift+F10 on it and choose **Snooze…**. Scroll or drag the day,
+hour and minute wheels, or use the arrow keys. The wheels default to 9:00 am local time tomorrow
+and show the return time before you confirm. Only idle chats with no pending work can be snoozed.
+History, drafts and local tab order are retained.
 The header moon lists snoozed chats and lets you restore them early. The deadline survives a
 restart; a returning tab is not selected or focused, and no work starts.
 

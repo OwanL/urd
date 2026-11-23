@@ -1,6 +1,6 @@
 # Browser automation
 
-Status: design draft. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
+Status: design draft; Google sign-in qualified by spike. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
 relaunch, network proxy). The earlier design and probes are in Git history before this revision.
 
 ## Goals
@@ -84,11 +84,15 @@ try with `screenshot` and `click_at`, then hands off if it fails.
 The email-code flow needs no special support: the agent opens Gmail in a second tab, searches, reads
 the code from the snapshot and types it into the first tab.
 
-## Main risk: Google sign-in under automation
+## Google sign-in under automation
 
 Google refuses sign-in when it detects an automated browser ("This browser or app may not be
-secure"). This blocks the goals more than anything else, so qualify it first, with the user's real
-account, before building the viewer UI.
+secure"). A spike (2026-11-24, Playwright 1.65.1, headless Edge 158, settings below) passed with the
+owner's real account: Google sign-in with 2FA through the screencast viewer, a full browser restart
+with Gmail still signed in, and Sign in with Google on a third-party site. The viewer also worked
+from another laptop over LAN. The page reported `navigator.webdriver = false` and no `Headless`
+marker in the user agent or client-hint brands. Chrome for Testing and phone input were not tested.
+A viewer must receive the latest frame when it connects: unchanged pages produce no new frames.
 
 - Launch without `--enable-automation`, with `--disable-blink-features=AutomationControlled`, and
   remove the `Headless` marker from the user agent.
@@ -115,9 +119,7 @@ sign-in relaunch with its routes and UI prompt, the sensitive-field filter, the 
 
 ## Qualification order
 
-1. Spike, no Urd UI: Google sign-in in headless Edge and Chrome for Testing through a throwaway
-   screencast viewer; restart; confirm Gmail is still signed in; complete Sign in with Google on a
-   third-party site.
+1. Done: spike with real Google sign-in (see above).
 2. Browser host and `browser` tool, replacing the current tool.
 3. Viewer and handoff in the chat, including from a LAN device.
 4. End-to-end mailbox-to-insurer flow, including an emailed code and a user-solved captcha.

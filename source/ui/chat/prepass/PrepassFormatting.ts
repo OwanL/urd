@@ -28,14 +28,6 @@ export function formatElapsedMilliseconds(milliseconds: number): string | null {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-// Costs stay truthful: pending work, absent totals and estimates are distinguishable.
-export function prepassCostLabel(
-  costUsd: number | null | undefined,
-  costIsEstimated: boolean,
-  finished: boolean,
-): string {
-  if (!finished) return "Cost pending";
-  if (costUsd === null || costUsd === undefined || !Number.isFinite(costUsd)) return "—";
-  const amount = formatCostUsd(costUsd);
-  return costIsEstimated ? `~${amount}` : amount;
+export function prepassCostLabel(costUsd: number | null | undefined, finished: boolean): string {
+  return finished ? formatCostUsd(costUsd ?? null) : "Cost pending";
 }

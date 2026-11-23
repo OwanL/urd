@@ -21,13 +21,21 @@ void test("USD formatting uses two decimals and distinguishes sub-cent costs fro
   assert.equal(formatCostUsd(0.0000001), "<$0.01");
   assert.equal(formatCostUsd(-0.005), "−<$0.01");
   assert.equal(formatCostUsd(null), "—");
-  assert.equal(formatUsageCost(totals({ requests: 2, unknownRequests: 2 })), "Unknown");
+});
+
+void test("usage costs show a plain amount, or a dash when no amount is available", () => {
   assert.equal(formatUsageCost(totals()), "$0.00");
+  assert.equal(formatUsageCost(totals({ requests: 2, unknownRequests: 2 })), "—");
   assert.equal(
-    formatUsageCost(totals({ costUsd: 0.005, unknownRequests: 2 })),
-    "<$0.01 + 2 unknown",
+    formatUsageCost(totals({ costUsd: 0.42, requests: 2, estimatedRequests: 1 })),
+    "$0.42",
   );
-  assert.equal(formatUsageCost(totals({ costUsd: 0.005, estimatedRequests: 1 })), "~<$0.01");
+  assert.equal(
+    formatUsageCost(
+      totals({ costUsd: 0.005, requests: 2, estimatedRequests: 2, unknownRequests: 2 }),
+    ),
+    "<$0.01",
+  );
 });
 
 void test("usage colors are deterministic, order-independent and distinct for small sets", () => {

@@ -115,9 +115,11 @@ the nearest detail first. Request records and rate provenance remain available t
 the API, not a ledger accordion in the cost tooltip.
 
 Inspection snapshots stay fixed until reopened while the cost chips continue refreshing.
-Chart.js loads on demand; charts and listeners are destroyed on close. `~` marks estimates;
-unknown costs stay explicit and only known amounts are plotted. Failed chip refreshes
-retain stale values. Hidden documents and inactive session views do not poll.
+Chart.js loads on demand; charts and listeners are destroyed on close. Amounts display
+without estimate markers or unknown-request suffixes. Totals and charts include available
+estimates and omit unpriced usage; a dash marks unavailable amounts. The cost popover
+notes when totals may be incomplete. Failed chip refreshes retain stale values. Hidden
+documents and inactive session views do not poll.
 
 `GET /api/usage?sessionId=<guid>` reads a session. Global reads require finite ISO
 `from`/`to` timestamps spanning at most 31 days. Both range bounds are inclusive;

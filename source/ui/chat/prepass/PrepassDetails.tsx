@@ -147,9 +147,7 @@ export function PrepassDetailsView({
   const elapsed =
     details === null ? null : formatPrepassElapsed(details.startedAt, details.finishedAt, now);
   const cost =
-    details === null
-      ? null
-      : prepassCostLabel(details.costUsd, details.costIsEstimated, details.finishedAt !== null);
+    details === null ? null : prepassCostLabel(details.costUsd, details.finishedAt !== null);
 
   return (
     <div ref={scrollport} class="prepass-details" onScroll={detailsScroll}>

@@ -166,7 +166,9 @@ function SummaryContent({
           </div>
         </section>
       )}
-      {totals.unknownRequests > 0 && <p class="usage-note">Chart shows known costs only.</p>}
+      {totals.unknownRequests > 0 && (
+        <p class="usage-note">Totals may exclude unpriced requests.</p>
+      )}
     </>
   );
 }

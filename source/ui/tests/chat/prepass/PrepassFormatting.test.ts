@@ -30,12 +30,12 @@ void test("elapsed runs from the published start to the published finish", () =>
   );
 });
 
-void test("costs distinguish pending, estimated, exact and absent totals", () => {
-  assert.equal(prepassCostLabel(0.0003, true, false), "Cost pending");
-  assert.equal(prepassCostLabel(null, false, false), "Cost pending");
-  assert.equal(prepassCostLabel(0.0003, true, true), "~<$0.01");
-  assert.equal(prepassCostLabel(1.25, false, true), "$1.25");
-  assert.equal(prepassCostLabel(1, false, true), "$1.00");
-  assert.equal(prepassCostLabel(null, false, true), "—");
-  assert.equal(prepassCostLabel(Number.NaN, false, true), "—");
+void test("costs distinguish pending, available and absent totals", () => {
+  assert.equal(prepassCostLabel(0.0003, false), "Cost pending");
+  assert.equal(prepassCostLabel(null, false), "Cost pending");
+  assert.equal(prepassCostLabel(0.0003, true), "<$0.01");
+  assert.equal(prepassCostLabel(1.25, true), "$1.25");
+  assert.equal(prepassCostLabel(1, true), "$1.00");
+  assert.equal(prepassCostLabel(null, true), "—");
+  assert.equal(prepassCostLabel(Number.NaN, true), "—");
 });

@@ -41,10 +41,8 @@ export function formatCostUsd(costUsd: number | null): string {
 
 export function formatUsageCost(totals: UsageTotals): string {
   if (totals.costUsd === 0 && totals.requests > 0 && totals.unknownRequests === totals.requests)
-    return "Unknown";
-  const estimate = totals.estimatedRequests > 0 ? "~" : "";
-  const unknown = totals.unknownRequests > 0 ? ` + ${totals.unknownRequests} unknown` : "";
-  return `${estimate}${formatCostUsd(totals.costUsd)}${unknown}`;
+    return "—";
+  return formatCostUsd(totals.costUsd);
 }
 
 export function formatUsageCount(count: number): string {

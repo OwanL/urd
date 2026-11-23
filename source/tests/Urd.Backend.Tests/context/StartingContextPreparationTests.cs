@@ -173,8 +173,10 @@ public sealed class StartingContextPreparationTests {
     }
   }
 
-  [Fact]
-  public async Task PreparationWarnsWhenSkillAndInstructionCandidatesComeFromAPartialIndex() {
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task MissingProtectedResourcesSurviveAnIncompleteCatalogWithoutWaiting(bool stale) {
     string root = Path.Combine(Path.GetTempPath(), $"urd-context-{Guid.NewGuid():N}");
     string project = Path.Combine(root, "project");
     string packaged = Path.Combine(root, "packaged");
@@ -182,6 +184,17 @@ public sealed class StartingContextPreparationTests {
     try {
       string document = Write(project, "AGENTS.md", "Root rule.\n");
       string skill = Write(project, "skills/local/SKILL.md", "---\nname: local\ndescription: Local skill.\n---\n");
+      if (stale) {
+        await using var previous = Catalog(root, [document, skill]);
+        await previous.FindPathsAsync(project, CancellationToken.None).WaitAsync(TestTimeout);
+      }
+      string protectedDocument = Write(project, "rules/AGENTS.md", "Protected rule.\n");
+      string protectedSkill = Write(project, "skills/protected/SKILL.md",
+          "---\nname: protected\ndescription: Protected skill.\n---\nNot advertised.\n");
+      string ignoredDocument = Write(project, "ignored/CLAUDE.md", "Ignored rule.\n");
+      string outsideDocument = Write(root, "sibling/AGENTS.md", "Sibling rule.\n");
+      string excludedDocument = Write(project, "node_modules/AGENTS.md", "Excluded rule.\n");
+      Write(project, "pending/AGENTS.md", "Unlisted optional rule.\n");
       string answer = JsonSerializer.Serialize(new { keptIds = new[] { "s1", "i1" } });
       var auxiliary = new ScriptedChatClient(token => TextUpdates([answer], token));
       await using RunningParent parent = await StartParentAsync();
@@ -191,18 +204,25 @@ public sealed class StartingContextPreparationTests {
         statuses.Enqueue(status);
         return Task.CompletedTask;
       }, "Use the resources.");
-      // The cold scan publishes its first matches but never settles, so the builder receives a partial index.
-      await using var catalog = new InstructionResourceCatalog(
-          Path.Combine(root, "catalog.db"),
+      var scanStarted = Signal();
+      await using var catalog = new InstructionResourceCatalog(Path.Combine(root, "catalog.db"),
           (_, matched, cancellation) => {
-            matched(document);
-            matched(skill);
+            if (!stale) {
+              matched(document);
+              matched(skill);
+            }
+            scanStarted.SetResult();
             return new TaskCompletionSource<string[]>().Task.WaitAsync(cancellation);
-          });
+          }, (_, _, _) => null);
+      catalog.Warm(project);
+      await scanStarted.Task.WaitAsync(TestTimeout);
       var builder = new StartingContextBuilder(new ToolCatalog([]),
           instructionDiscovery: new InstructionResourceDiscovery(catalog, packaged));
       var preferences = new UserPreferences(project, null) {
-        ProtectedResources = new() { Tools = [], Skills = [], Instructions = [] }
+        ProtectedResources = new() {
+          Tools = [], Skills = [protectedSkill],
+          Instructions = [protectedDocument, ignoredDocument, outsideDocument, excludedDocument]
+        }
       };
 
       StartingContext context = await builder.PrepareAsync(
@@ -213,10 +233,22 @@ public sealed class StartingContextPreparationTests {
       string text = string.Join("\n", context.Instructions.Select(message => message.Text));
       Assert.Contains("Root rule.", text, StringComparison.Ordinal);
       Assert.Contains("Local skill.", text, StringComparison.Ordinal);
-      string expected = $"Index of {project} incomplete: 2 files found so far.";
+      Assert.Contains("Protected rule.", text, StringComparison.Ordinal);
+      Assert.Contains(Path.GetDirectoryName(protectedDocument)!, text, StringComparison.Ordinal);
+      Assert.Contains("Protected skill.", text, StringComparison.Ordinal);
+      Assert.DoesNotContain("Not advertised.", text, StringComparison.Ordinal);
+      Assert.DoesNotContain("Ignored rule.", text, StringComparison.Ordinal);
+      Assert.DoesNotContain("Sibling rule.", text, StringComparison.Ordinal);
+      Assert.DoesNotContain("Excluded rule.", text, StringComparison.Ordinal);
+      Assert.DoesNotContain("Unlisted optional rule.", text, StringComparison.Ordinal);
+      Assert.Equal(2, auxiliary.Calls);
+      string expected = stale ? $"Index of {project} is being refreshed; results may be stale."
+          : $"Index of {project} incomplete: 2 files found so far.";
       Assert.Contains(statuses, status => status.Category == "tools" && status.State == "completed" && status.Error is null);
-      Assert.Contains(statuses, status => status.Category == "skills" && status.State == "completed" && status.Error == expected);
-      Assert.Contains(statuses, status => status.Category == "instructions" && status.State == "completed" && status.Error == expected);
+      Assert.Contains(statuses, status => status.Category == "skills" && status.State == "completed"
+          && status.Error == expected && status.Total == 2 && status.Retained == 2);
+      Assert.Contains(statuses, status => status.Category == "instructions" && status.State == "completed"
+          && status.Error == expected && status.Total == 2 && status.Retained == 2);
     } finally {
       if (Directory.Exists(root))
         Directory.Delete(root, recursive: true);

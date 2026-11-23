@@ -102,7 +102,10 @@ has not been established for every platform.
 
 At a fresh session's first prompt, and the first request after successful compaction,
 `StartingContextBuilder.PrepareAsync` runs three independent, parallel selections over
-unprotected tools, skills and instruction documents. `StartingResourcePruner` validates
+unprotected tools, skills and instruction documents. If the catalog omits an explicitly
+protected project file, preparation checks that path directly under the same directory,
+ignore, mount, link and opened-file rules. It does not wait for a partial or stale scan
+to finish or search for missing optional files. `StartingResourcePruner` validates
 kept IDs and retains the original resources in source order. File candidates are grouped by
 directory with short model-facing IDs; unknown and duplicate returned IDs are ignored.
 On ordinary category failure, skills and instructions retain only protected resources,

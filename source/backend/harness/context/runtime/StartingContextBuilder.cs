@@ -49,7 +49,8 @@ internal sealed class StartingContextBuilder {
 
     DiscoveredInstructionResources resources = input.WorkingDirectory is null
         ? new(Array.Empty<DiscoveredSkill>(), Array.Empty<DiscoveredInstructionDocument>())
-        : await discovery.FindAsync(input.WorkingDirectory, preferences.SourceIgnores, cancellation);
+        : await discovery.FindAsync(input.WorkingDirectory, preferences.SourceIgnores,
+            preferences.ProtectedResources.Skills, preferences.ProtectedResources.Instructions, cancellation);
     cancellation.ThrowIfCancellationRequested();
 
     HashSet<string> protectedToolNames = new(preferences.ProtectedResources.Tools, StringComparer.Ordinal);

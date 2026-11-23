@@ -50,8 +50,19 @@ internal sealed class FdResourceScanner {
     return false;
   }
 
-  private static bool IsBelow(string path, string directory) => path.Length > directory.Length &&
-      path.StartsWith(directory, nameComparison) &&
+  // Match the same scan-root and anchored mount exclusions for a known project path.
+  internal static bool IncludesPath(ResourceMountPolicy.Scan scan, string path) =>
+      IsBelow(path, scan.Root) && !IsExcluded(path, scan.Root) && !scan.Excludes.Any(exclusion => {
+        string excludedPath = Path.Combine(scan.Root, exclusion.Replace('/', Path.DirectorySeparatorChar));
+        // The macOS mount plan treats case variants as the same mount, even on a case-sensitive volume.
+        var comparison = OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : nameComparison;
+        return path.Equals(excludedPath, comparison) || IsBelow(path, excludedPath, comparison);
+      });
+
+  private static bool IsBelow(string path, string directory) => IsBelow(path, directory, nameComparison);
+
+  private static bool IsBelow(string path, string directory, StringComparison comparison) => path.Length > directory.Length &&
+      path.StartsWith(directory, comparison) &&
       (Path.EndsInDirectorySeparator(directory) || path[directory.Length] == Path.DirectorySeparatorChar);
 
   private static string EscapeGlob(string path) {
@@ -75,21 +86,20 @@ internal sealed class FdResourceScanner {
         throw new IOException("The scan directory and its ancestors must not be symbolic links or junctions.");
     }
 
-    ResourceMountPolicy.Scan[] scans;
-    if (OperatingSystem.IsLinux()) {
-      scans = ResourceMountPolicy.Plan(root, await File.ReadAllTextAsync("/proc/self/mountinfo", cancellation));
-    } else if (OperatingSystem.IsMacOS()) {
-      scans = ResourceMountPolicy.PlanMac(root, ResourceMountPolicy.ReadMacMounts());
-    } else if (OperatingSystem.IsWindows()) {
-      scans = [new(root, [])];
-    } else {
-      throw new PlatformNotSupportedException("Safe mount traversal is not available on this platform.");
-    }
-
     var paths = new List<string>();
-    foreach (var scan in scans)
+    foreach (var scan in await PlanAsync(root, cancellation))
       paths.AddRange(await ScanAsync(scan, cancellation, matched));
     return paths.Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).ToArray();
+  }
+
+  internal static async Task<ResourceMountPolicy.Scan[]> PlanAsync(string root, CancellationToken cancellation) {
+    if (OperatingSystem.IsLinux())
+      return ResourceMountPolicy.Plan(root, await File.ReadAllTextAsync("/proc/self/mountinfo", cancellation));
+    if (OperatingSystem.IsMacOS())
+      return ResourceMountPolicy.PlanMac(root, ResourceMountPolicy.ReadMacMounts());
+    if (OperatingSystem.IsWindows())
+      return [new(root, [])];
+    throw new PlatformNotSupportedException("Safe mount traversal is not available on this platform.");
   }
 
   internal async Task<string[]> ScanAsync(ResourceMountPolicy.Scan scan, CancellationToken cancellation, Action<string>? matched = null) {

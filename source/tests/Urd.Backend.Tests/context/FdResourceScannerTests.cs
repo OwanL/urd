@@ -58,6 +58,9 @@ public sealed class FdResourceScannerTests {
       Assert.DoesNotContain(Path.Combine(root, "remote", "share", "AGENTS.md"), paths);
       Assert.Contains(Path.Combine(root, "safe", "proc", "AGENTS.md"), paths);
       Assert.Contains(Path.Combine(root, "safe", "remote", "share", "AGENTS.md"), paths);
+      Assert.Equal(OperatingSystem.IsLinux(), FdResourceScanner.IncludesPath(scan, Path.Combine(root, "REMOTE", "share", "AGENTS.md")));
+      Assert.Equal(paths.Order(StringComparer.Ordinal), directories.Select(directory => Path.Combine(directory, "AGENTS.md"))
+          .Where(path => FdResourceScanner.IncludesPath(scan, path)).Order(StringComparer.Ordinal));
     } finally {
       if (Directory.Exists(root))
         Directory.Delete(root, recursive: true);

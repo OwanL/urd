@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using Urd.Core.Preferences;
 using Urd.Core.Tools;
 
@@ -25,11 +26,20 @@ internal sealed class InstructionResourceDiscovery {
   internal Task<DiscoveredInstructionResources> FindAsync(string workingDirectory, CancellationToken cancellation) =>
       FindAsync(workingDirectory, new SourceIgnoreRules(), cancellation);
 
+  internal Task<DiscoveredInstructionResources> FindAsync(
+      string workingDirectory, SourceIgnoreRules rules, CancellationToken cancellation) =>
+      FindAsync(workingDirectory, rules, [], [], cancellation);
+
   internal async Task<DiscoveredInstructionResources> FindAsync(
-      string workingDirectory, SourceIgnoreRules rules, CancellationToken cancellation) {
+      string workingDirectory, SourceIgnoreRules rules, IReadOnlyList<string> protectedSkills,
+      IReadOnlyList<string> protectedInstructions, CancellationToken cancellation) {
     workingDirectory = Path.GetFullPath(workingDirectory);
     InstructionResourceCatalogResult served = await catalog.FindPathsAsync(workingDirectory, cancellation);
     string[] paths = ProjectPaths(served, workingDirectory);
+    if (protectedSkills.Count != 0 || protectedInstructions.Count != 0) {
+      paths = await IncludeMissingProtectedPathsAsync(paths, workingDirectory, rules,
+          protectedSkills, protectedInstructions, cancellation);
+    }
     DiscoveredSkill[] skills = ReadSkills(SkillPaths(paths, cancellation)
         .Where(path => !rules.IsIgnored(path, skill: true)), workingDirectory, cancellation);
     DiscoveredInstructionDocument[] instructions = await ReadInstructionsAsync(paths.Where(IsInstructionDocument)
@@ -103,6 +113,32 @@ internal sealed class InstructionResourceDiscovery {
   private static string[] ProjectPaths(InstructionResourceCatalogResult served, string workingDirectory) =>
       served.Paths.Select(Path.GetFullPath).Where(path => IsWithinDirectory(path, workingDirectory))
           .Distinct(pathComparer).Order(StringComparer.Ordinal).ToArray();
+
+  // The background catalog is best effort. Check only explicitly protected paths it missed,
+  // then let the ordinary readers apply the same opened-file validation and ordering.
+  private static async Task<string[]> IncludeMissingProtectedPathsAsync(string[] paths, string workingDirectory,
+      SourceIgnoreRules rules, IReadOnlyList<string> protectedSkills, IReadOnlyList<string> protectedInstructions,
+      CancellationToken cancellation) {
+    var indexed = paths.ToHashSet(pathComparer);
+    string[] missing = protectedSkills.Select(Path.GetFullPath)
+        .Where(path => FdResourceScanner.IsSkillPath(path) && !rules.IsIgnored(path, skill: true))
+        .Concat(protectedInstructions.Select(Path.GetFullPath)
+            .Where(path => IsInstructionDocument(path) && !rules.IsIgnored(path, skill: false)))
+        .Where(path => !indexed.Contains(path) && IsWithinDirectory(path, workingDirectory))
+        .Distinct(pathComparer).ToArray();
+    if (missing.Length == 0)
+      return paths;
+
+    ResourceMountPolicy.Scan[] scans;
+    try {
+      scans = await FdResourceScanner.PlanAsync(Path.TrimEndingDirectorySeparator(workingDirectory), cancellation);
+    } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or Win32Exception or PlatformNotSupportedException) {
+      // Do not read missing paths when local mount coverage cannot be established.
+      return paths;
+    }
+    string[] eligible = missing.Where(path => scans.Any(scan => FdResourceScanner.IncludesPath(scan, path))).ToArray();
+    return eligible.Length == 0 ? paths : paths.Concat(eligible).Order(StringComparer.Ordinal).ToArray();
+  }
 
   private IEnumerable<string> SkillPaths(string[] projectPaths, CancellationToken cancellation) =>
       projectPaths.Where(FdResourceScanner.IsSkillPath).Concat(PackagedSkillPaths(cancellation)).Distinct(pathComparer);

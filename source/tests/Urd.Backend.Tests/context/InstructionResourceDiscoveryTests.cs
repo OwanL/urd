@@ -258,6 +258,13 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
     DiscoveredInstructionResources resources = await discovery.FindAsync(Project, CancellationToken.None);
     Assert.Empty(resources.Instructions);
     Assert.Empty(resources.Skills);
+
+    await using var emptyCatalog = new InstructionResourceCatalog(Path.Combine(root, "empty.sqlite"),
+        (_, _, _) => Task.FromResult(Array.Empty<string>()), (_, _, _) => null);
+    DiscoveredInstructionResources protectedResources = await new InstructionResourceDiscovery(emptyCatalog, Packaged)
+        .FindAsync(Project, new(), [skill], [instruction], CancellationToken.None);
+    Assert.Empty(protectedResources.Instructions);
+    Assert.Empty(protectedResources.Skills);
   }
 
   [Fact]

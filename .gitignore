@@ -22,3 +22,10 @@
 *.sqlite3-journal
 *.sqlite3-shm
 *.sqlite3-wal
+/staged/
+/staged-next-*/
+/staged-previous-*/
+/custom/
+/.custom-next-*/
+/.custom-previous-*/
+/Urd-staged-launch-*.exe

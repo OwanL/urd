@@ -3,8 +3,7 @@
 **2026-11-18 — backend implemented; UI was deferred.** Agent question presentation landed
 on 2026-11-19; dedicated subagent presentation has since landed as described below. This records
 the selected direction after comparing delegation, handoff, workflow and messaging models in other
-harnesses. The backend implements the model-facing tool surface and runtime behavior below.
-Existing [execution](execution-design.md), [agent tool](agent-tools-design.md)
+harnesses. The backend implements the model-facing tool surface and runtime behavior below. Existing [execution](execution-design.md), [agent tool](agent-tools-design.md)
 and [architecture](ARCHITECTURE.md) constraints still apply; reconcile their older delegation
 sketches against this implemented behavior.
 
@@ -119,15 +118,15 @@ The backend implements these runtime behaviors:
 ## Backend model-facing tool surface (settled 2026-11-16; implemented)
 
 The backend exposes the settled `subagent`, `list_agents`, `ask_agent` and `answer_agent` tools.
-There is no `ask_user` tool yet; user-mode context therefore contains human input only, not
-`ask_user` questions or answers.
+At this milestone there was no `ask_user` tool; it has since been implemented. User-mode context
+retains human inputs rather than agent questions or answers.
 
 ### `subagent`
 
 | Input | Meaning |
 | --- | --- |
 | `bucket` | `small`, `medium`, or `large`; selects a model in the requested tier under the session's enabled-provider policy. |
-| `context` | Parent context to retain: `none` (task only), `user` (human inputs sent in attempted requests up to this call; nested inherited context is filtered to entries marked human input only), or `recent` (the parent's recent conversation, using the same amount compaction retains; no new setting). `user` excludes agent questions and answers; `ask_user` is not yet present. |
+| `context` | Parent context to retain: `none` (task only), `user` (human inputs sent in attempted requests up to this call; nested inherited context is filtered to entries marked human input only), or `recent` (the parent's recent conversation, using the same amount compaction retains; no new setting). `user` excludes agent questions and answers. |
 | `task` | Text prompt describing the delegated task. |
 
 The caller does **not** supply a title. Creation runs Urd's existing pruning/title prepass and

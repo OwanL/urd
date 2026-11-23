@@ -49,16 +49,14 @@ internal sealed class StartingContextBuilder {
 
     DiscoveredInstructionResources resources = input.WorkingDirectory is null
         ? new(Array.Empty<DiscoveredSkill>(), Array.Empty<DiscoveredInstructionDocument>())
-        : await discovery.FindAsync(input.WorkingDirectory, cancellation);
+        : await discovery.FindAsync(input.WorkingDirectory, preferences.SourceIgnores, cancellation);
     cancellation.ThrowIfCancellationRequested();
 
     HashSet<string> protectedToolNames = new(preferences.ProtectedResources.Tools, StringComparer.Ordinal);
     protectedToolNames.UnionWith(runtimeProtectedTools);
     AIFunctionDeclaration[] allTools = toolCatalog.Tools.Select(AgentToolDeclaration.Create).ToArray();
-    string[] protectedSkillPaths = preferences.ProtectedResources.Skills.Select(CanonicalPath).ToArray();
-    string[] protectedInstructionPaths = preferences.ProtectedResources.Instructions.Select(CanonicalPath).ToArray();
-    var protectedSkills = new HashSet<string>(protectedSkillPaths, pathComparer);
-    var protectedInstructions = new HashSet<string>(protectedInstructionPaths, pathComparer);
+    var protectedSkills = ProtectedPaths(preferences.ProtectedResources.Skills);
+    var protectedInstructions = ProtectedPaths(preferences.ProtectedResources.Instructions);
 
     AIFunctionDeclaration[] toolCandidates = allTools
         .Where(tool => !protectedToolNames.Contains(tool.Name))
@@ -148,6 +146,8 @@ internal sealed class StartingContextBuilder {
     cancellation.ThrowIfCancellationRequested();
     return new(Array.AsReadOnly(instructions.ToArray()), Array.AsReadOnly(tools.ToArray()));
   }
+
+  internal static HashSet<string> ProtectedPaths(IEnumerable<string> paths) => new(paths.Select(CanonicalPath), pathComparer);
 
   private static string CanonicalPath(string path) => Path.GetFullPath(path);
 

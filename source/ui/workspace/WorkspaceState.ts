@@ -3,7 +3,7 @@ import { isChat, isId, isRecord, isSelection } from "../chat/ChatState.ts";
 import type { ChatState } from "../chat/ChatState.ts";
 
 export interface WorkspaceState {
-  version: 7;
+  version: 8;
   tabs: string[];
   activeId: string | null;
   chats: Record<string, ChatState>;
@@ -11,7 +11,7 @@ export interface WorkspaceState {
 }
 
 export function emptyWorkspace(): WorkspaceState {
-  return { version: 7, tabs: [], activeId: null, chats: {}, lastSelection: null };
+  return { version: 8, tabs: [], activeId: null, chats: {}, lastSelection: null };
 }
 
 export function applySessionTitle(
@@ -82,7 +82,7 @@ export function encodeWorkspace(state: WorkspaceState): string {
 function isWorkspace(value: unknown): value is WorkspaceState {
   if (
     !isRecord(value) ||
-    value.version !== 7 ||
+    value.version !== 8 ||
     !Array.isArray(value.tabs) ||
     !value.tabs.every(isId) ||
     !isRecord(value.chats) ||

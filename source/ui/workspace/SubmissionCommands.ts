@@ -1,5 +1,6 @@
 import { RequestError } from "../http/RequestError.ts";
 import { newUuid } from "../Uuid.ts";
+import { maxUserImages } from "../chat/user-images/ImagePaste.ts";
 import {
   applyContinuationReceipt,
   applyReceipt,
@@ -79,7 +80,9 @@ export class SubmissionCommands {
       latest.pendingContinuation ||
       latest.messageEdit ||
       !selection ||
-      !latest.draft.trim() ||
+      (!latest.draft.trim() && latest.draftImages.length === 0) ||
+      latest.draftImages.length > maxUserImages ||
+      (latest.draftImages.length > 0 && selection.supportsImages === false) ||
       submissionTextError(latest.draft)
     )
       return;
@@ -88,6 +91,9 @@ export class SubmissionCommands {
       submissionId: newUuid(),
       expectedHistoryRevision: snapshot.historyRevision,
       text: latest.draft,
+      ...(latest.draftImages.length
+        ? { imageIds: latest.draftImages.map((image) => image.imageId) }
+        : {}),
       llmSelection: selection,
     };
     const persisted = this.access.updateChat(
@@ -107,7 +113,7 @@ export class SubmissionCommands {
       );
       return;
     }
-    await this.retryOriginalSubmission(id);
+    await this.reconcile(id, true, true);
   }
 
   async continueSession(
@@ -134,6 +140,7 @@ export class SubmissionCommands {
       latest.pending ||
       latest.pendingContinuation ||
       latest.messageEdit ||
+      latest.draftImages.length > 0 ||
       latest.knownExecutionId ||
       this.coordinator.isStopping(id) ||
       this.coordinator.hasPendingInputRemoval(id) ||
@@ -172,6 +179,7 @@ export class SubmissionCommands {
     const latest = this.access.read().chats[id];
     if (
       snapshot.sessionId !== id ||
+      (source.imageIds?.length ?? 0) > maxUserImages ||
       this.coordinator.executionSettingsSaving(id) ||
       this.coordinator.isCompacting(id) ||
       !latest ||
@@ -186,6 +194,7 @@ export class SubmissionCommands {
       submissionId: newUuid(),
       expectedHistoryRevision: snapshot.historyRevision,
       text: source.text,
+      ...(source.imageIds ? { imageIds: [...source.imageIds] } : {}),
       llmSelection: source.llmSelection,
     };
     if (
@@ -204,7 +213,7 @@ export class SubmissionCommands {
       );
       return null;
     }
-    const receipt = await this.retryOriginalSubmission(id);
+    const receipt = await this.reconcile(id, true, true);
     return { submissionId: submission.submissionId, receipt };
   }
 
@@ -329,7 +338,11 @@ export class SubmissionCommands {
     );
   }
 
-  private async reconcile(id: string, retry: boolean): Promise<UserMessageReceipt | null> {
+  private async reconcile(
+    id: string,
+    retry: boolean,
+    firstAttempt = false,
+  ): Promise<UserMessageReceipt | null> {
     const original = this.access.read().chats[id]?.pending?.original;
     if (
       !original ||
@@ -359,8 +372,31 @@ export class SubmissionCommands {
       return receipt;
     } catch (cause) {
       if (controller?.signal.aborted) return null;
+      if (retry && cause instanceof RequestError && cause.status === 400) {
+        if (firstAttempt) {
+          this.access.updateChat(id, (previous) =>
+            previous.pending?.original.submissionId === original.submissionId
+              ? {
+                  ...previous,
+                  pending: null,
+                  error: `Send was rejected: ${requestErrorDescription(cause)}`,
+                }
+              : previous,
+          );
+          return null;
+        }
+        try {
+          const receipt = await this.client.getMessageReceipt(id, original.submissionId);
+          if (receipt) {
+            this.access.updateChat(id, (previous) => applyReceipt(previous, id, receipt));
+            return receipt;
+          }
+        } catch {
+          // A failed receipt read cannot establish whether the submission was admitted.
+        }
+      }
       this.access.updateChat(id, (previous) =>
-        previous.pending
+        previous.pending?.original.submissionId === original.submissionId
           ? {
               ...previous,
               pending: { ...previous.pending, status: "uncertain" },

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "preact/hooks";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { MessageEditingContext, InlineMessageEditor } from "./message-editing/EditableMessage.tsx";
 import type { MessageEditing } from "./message-editing/MessageEditing.ts";
 import { Composer } from "./composer/Composer.tsx";
@@ -26,6 +26,16 @@ import type { ChatCommands, ChatStopState } from "./ChatCommands.ts";
 import type { ChatState } from "./ChatState.ts";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot.ts";
 import type { ModelOptionsState } from "../providers/models/useModelOptions.ts";
+import type { UserImage } from "../sessions/transcript/Messages.ts";
+import { DraftImagePreviews } from "./user-images/DraftImagePreviews.tsx";
+import {
+  imageLimitError,
+  imageModelError,
+  maxUserImages,
+  pasteTarget,
+  pastedImages,
+} from "./user-images/ImagePaste.ts";
+import { useImageUploads } from "./user-images/useImageUploads.ts";
 import { UserQuestions } from "./ask-user/UserQuestions.tsx";
 import { BrowserSignInPrompt } from "./playwright/BrowserSignInPrompt.tsx";
 import "./chat.css";
@@ -37,6 +47,8 @@ interface ChatProps {
   providerClient: ProviderClient;
   sessionId: string;
   active?: boolean;
+  pasteEnabled: boolean;
+  onUploadsPendingChange(id: string, pending: boolean): void;
   transcript?: TranscriptDisplay | undefined;
   streamId?: string | null;
   chat: ChatState;
@@ -60,6 +72,8 @@ interface ChatProps {
   onSetUpProvider(): void;
   onChooseModels(): void;
   editDraft(id: string, text: string): boolean;
+  appendDraftImage(id: string, image: UserImage): boolean;
+  removeDraftImage(id: string, imageId: string): boolean;
   selectModel(id: string, selection: LlmSelection): boolean;
   position: ReadingPosition | undefined;
   onPositionChange(position: ReadingPosition): void;
@@ -73,6 +87,8 @@ export function Chat({
   providerClient,
   sessionId,
   active = true,
+  pasteEnabled,
+  onUploadsPendingChange,
   transcript,
   streamId = null,
   chat,
@@ -95,6 +111,8 @@ export function Chat({
   onSetUpProvider,
   onChooseModels,
   editDraft,
+  appendDraftImage,
+  removeDraftImage,
   selectModel,
   position,
   onPositionChange,
@@ -132,6 +150,51 @@ export function Chat({
   const [workingDirectoryNotice, setWorkingDirectoryNotice] = useState<string | null>(null);
   const workingDirectoryGate = useRef(false);
   const composerInput = useRef<HTMLTextAreaElement>(null);
+  const panel = useRef<HTMLElement>(null);
+  const editTarget = chat.messageEdit?.target ?? null;
+  const composerUploads = useImageUploads(sessionId, sessionId, chat.draftImages, (image) =>
+    appendDraftImage(sessionId, image),
+  );
+  const editUploads = useImageUploads(
+    sessionId,
+    editTarget,
+    chat.messageEdit?.images ?? [],
+    (image, target) => (target ? messageEditing.appendImage(sessionId, target, image) : false),
+  );
+  const uploadsPending = composerUploads.images.length > 0 || editUploads.images.length > 0;
+  useLayoutEffect(() => {
+    if (!uploadsPending) return;
+    onUploadsPendingChange(sessionId, true);
+    return () => onUploadsPendingChange(sessionId, false);
+  }, [sessionId, uploadsPending, onUploadsPendingChange]);
+  const readPaste = useRef<(event: ClipboardEvent) => void>(() => {});
+  readPaste.current = (event) => {
+    if (event.defaultPrevented || !canPersist || closing || unavailable || panel.current?.hidden)
+      return;
+    const input = composerInput.current;
+    const target = pasteTarget(event.composedPath(), input);
+    if (target === "other") return;
+    if (
+      target instanceof HTMLTextAreaElement &&
+      (!panel.current?.contains(target) || chat.messageEdit?.status !== "editing")
+    )
+      return;
+    const images = pastedImages(event.clipboardData);
+    if (!images.length) return;
+    event.preventDefault();
+    if (target instanceof HTMLTextAreaElement) {
+      editUploads.paste(images, chat.messageEdit?.images ?? []);
+    } else {
+      if (document.activeElement !== input) input?.focus({ preventScroll: true });
+      composerUploads.paste(images, chat.draftImages);
+    }
+  };
+  useLayoutEffect(() => {
+    if (!active || !pasteEnabled) return;
+    const paste = (event: ClipboardEvent) => readPaste.current(event);
+    window.addEventListener("paste", paste);
+    return () => window.removeEventListener("paste", paste);
+  }, [active, pasteEnabled]);
   const updateWorkingDirectoryGate = useCallback((locked: boolean, message: string | null) => {
     workingDirectoryGate.current = locked;
     setWorkingDirectoryLocked(locked);
@@ -197,12 +260,18 @@ export function Chat({
     !compactionPending,
   );
   const selection = state.selection;
+  const hasComposerImages = chat.draftImages.length > 0 || composerUploads.images.length > 0;
+  const imageBlocked = hasComposerImages && selection?.supportsImages === false;
+  const tooManyImages = chat.draftImages.length > maxUserImages;
+  const sendingBlocked = imageBlocked || tooManyImages || composerUploads.images.length > 0;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
   const editingContext = {
     controller: messageEditing,
     sessionId,
     draft: chat.messageEdit,
+    uploads: editUploads,
+    active,
     selection,
     canEdit: Boolean(
       ready &&
@@ -221,6 +290,7 @@ export function Chat({
 
   return (
     <section
+      ref={panel}
       id={active ? "chat-view" : undefined}
       hidden={!active}
       data-chat-session={sessionId}
@@ -341,7 +411,13 @@ export function Chat({
       {active && (
         <>
           <UserQuestions client={client} sessionId={sessionId} connected={ready} notice={notice} />
-          <BrowserSignInPrompt key={sessionId} client={client} sessionId={sessionId} connected={ready} notice={notice} />
+          <BrowserSignInPrompt
+            key={sessionId}
+            client={client}
+            sessionId={sessionId}
+            connected={ready}
+            notice={notice}
+          />
         </>
       )}
       <Composer
@@ -395,6 +471,18 @@ export function Chat({
           />
         }
         text={chat.draft}
+        hasImages={hasComposerImages}
+        imagePreviews={
+          <DraftImagePreviews
+            sessionId={sessionId}
+            images={chat.draftImages}
+            uploads={composerUploads}
+            input={composerInput}
+            onRemove={(imageId) => removeDraftImage(sessionId, imageId)}
+            modelError={tooManyImages ? imageLimitError : imageBlocked ? imageModelError : null}
+            paused={!active}
+          />
+        }
         onTextChange={(text) => {
           editDraft(sessionId, text);
         }}
@@ -418,17 +506,29 @@ export function Chat({
         }}
         selectionLocked={state.selectionLocked}
         configurationPending={executionSettingsSaving}
-        canSend={state.canSend && !workingDirectoryLocked && !executionSettingsSaving}
-        canContinue={state.canContinue && !workingDirectoryLocked && !executionSettingsSaving}
+        canSend={
+          state.canSend && !sendingBlocked && !workingDirectoryLocked && !executionSettingsSaving
+        }
+        canContinue={
+          state.canContinue &&
+          !hasComposerImages &&
+          !workingDirectoryLocked &&
+          !executionSettingsSaving
+        }
         continuationAvailable={state.continuationAvailable}
         working={state.active}
         stopping={state.executionStatus === "stopping"}
         onSend={() => {
-          if (!workingDirectoryGate.current && snapshot)
+          if (
+            !workingDirectoryGate.current &&
+            !sendingBlocked &&
+            !composerUploads.pending() &&
+            snapshot
+          )
             void commands.send(sessionId, snapshot, state.active, state.canSend, defaultSelection);
         }}
         onContinue={() => {
-          if (!workingDirectoryGate.current && snapshot)
+          if (!workingDirectoryGate.current && !composerUploads.pending() && snapshot)
             void commands.continueSession(sessionId, snapshot, state.canContinue, defaultSelection);
         }}
         onStop={() => {

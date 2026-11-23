@@ -2,6 +2,7 @@ import type { TargetedKeyboardEvent } from "preact";
 import type { RefObject } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { Icon } from "../controls/Icon.tsx";
+import { McpSettings, useMcpSettings } from "../mcp/McpSettings.tsx";
 import { IconButton } from "../controls/IconButton.tsx";
 import { Popover } from "../controls/Popover.tsx";
 import {
@@ -16,11 +17,12 @@ import { GeneralSettings } from "./GeneralSettings.tsx";
 import { DefaultSubagentProviders } from "./DefaultSubagentProviders.tsx";
 import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
 import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
+import { SourceIgnorePicker } from "../setup/SourceIgnorePicker.tsx";
 import "./settings.css";
 
-export type SettingsTab = "providers" | "general" | "model-buckets" | "prepass";
+export type SettingsTab = "providers" | "general" | "model-buckets" | "prepass" | "mcp";
 
-const tabs: readonly SettingsTab[] = ["providers", "general", "model-buckets", "prepass"];
+const tabs: readonly SettingsTab[] = ["providers", "general", "model-buckets", "prepass", "mcp"];
 
 interface SettingsProps {
   open: boolean;
@@ -32,6 +34,7 @@ interface SettingsProps {
   onClose: (returnFocus: boolean) => void;
   onChanged: () => void;
   onProviderReady?: (connectionId: string) => Promise<boolean>;
+  mcpDraft?: { url: string } | undefined;
 }
 
 // Keep this owner mounted; closing the surface stops reads, not accepted commands.
@@ -45,7 +48,9 @@ export function Settings({
   onClose,
   onChanged,
   onProviderReady,
+  mcpDraft,
 }: SettingsProps) {
+  const mcp = useMcpSettings(open && tab === "mcp", mcpDraft);
   const state = useProviderSettings(
     client,
     open,
@@ -55,6 +60,8 @@ export function Settings({
     preferences.refresh,
   );
   const [search, setSearch] = useState("");
+  const [sourceKind, setSourceKind] = useState<"instructions" | "skills">("instructions");
+  const [sourceBusy, setSourceBusy] = useState(false);
   const savedCompactionTriggerTokenCount =
     preferences.preferences?.compactionTriggerTokenCount ?? null;
   const [compactionTriggerDraft, setCompactionTriggerDraft] = useState(() => ({
@@ -76,6 +83,7 @@ export function Settings({
   const generalTab = useRef<HTMLButtonElement>(null);
   const modelBucketsTab = useRef<HTMLButtonElement>(null);
   const prepassTab = useRef<HTMLButtonElement>(null);
+  const mcpTab = useRef<HTMLButtonElement>(null);
   const id = useId();
   if (!open) return null;
 
@@ -92,7 +100,9 @@ export function Settings({
         ? generalTab
         : next === "model-buckets"
           ? modelBucketsTab
-          : prepassTab
+          : next === "prepass"
+            ? prepassTab
+            : mcpTab
     ).current?.focus();
   };
   const navigateTabs = (event: TargetedKeyboardEvent<HTMLDivElement>) => {
@@ -102,7 +112,7 @@ export function Settings({
       focusTab(tabs[(tabs.indexOf(tab) + direction + tabs.length) % tabs.length] ?? "providers");
     } else if (event.key === "Home" || event.key === "End") {
       event.preventDefault();
-      focusTab(event.key === "Home" ? "providers" : "prepass");
+      focusTab(event.key === "Home" ? "providers" : "mcp");
     }
   };
   return (
@@ -118,7 +128,9 @@ export function Settings({
             ? workingDirectoryButton
             : tab === "model-buckets"
               ? modelBucketsTab
-              : prepassTab
+              : tab === "prepass"
+                ? prepassTab
+                : mcpTab
       }
       onClose={close}
     >
@@ -180,7 +192,28 @@ export function Settings({
         >
           Prepass
         </button>
+        <button
+          ref={mcpTab}
+          type="button"
+          id={`${id}-mcp-tab`}
+          role="tab"
+          aria-selected={tab === "mcp"}
+          aria-controls={`${id}-mcp-panel`}
+          tabIndex={tab === "mcp" ? 0 : -1}
+          onClick={() => onTabChange("mcp")}
+        >
+          MCP
+        </button>
       </div>
+      <section
+        class="settings-page"
+        id={`${id}-mcp-panel`}
+        role="tabpanel"
+        aria-labelledby={`${id}-mcp-tab`}
+        hidden={tab !== "mcp"}
+      >
+        {tab === "mcp" && <McpSettings state={mcp} />}
+      </section>
       <section
         class="settings-page"
         id={`${id}-providers-panel`}
@@ -221,6 +254,38 @@ export function Settings({
             setCompactionTriggerDraft({ value: compactionTriggerInput(value), edited: false })
           }
         />
+        {tab === "general" && (
+          <section class="general-settings" aria-label="Source selection">
+            <h3>Sources</h3>
+            <div class="settings-tabs" role="group" aria-label="Source category">
+              <button
+                type="button"
+                disabled={sourceBusy}
+                aria-pressed={sourceKind === "instructions"}
+                onClick={() => setSourceKind("instructions")}
+              >
+                Instructions
+              </button>
+              <button
+                type="button"
+                disabled={sourceBusy}
+                aria-pressed={sourceKind === "skills"}
+                onClick={() => setSourceKind("skills")}
+              >
+                Skills
+              </button>
+            </div>
+            {sourceKind === "instructions" ? (
+              <SourceIgnorePicker
+                key="instructions"
+                kind="instructions"
+                onBusyChange={setSourceBusy}
+              />
+            ) : (
+              <SourceIgnorePicker key="skills" kind="skills" onBusyChange={setSourceBusy} />
+            )}
+          </section>
+        )}
       </section>
       <section
         class="settings-page"

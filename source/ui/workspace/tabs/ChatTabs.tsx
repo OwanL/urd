@@ -5,6 +5,7 @@ import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { isBusySessionStatus } from "../SessionActivity.ts";
 import { SubagentMenu, useSubagentMenu } from "./SubagentMenu.tsx";
+import { TabContextMenu } from "./TabContextMenu.tsx";
 import { moveTab } from "./TabOrder.ts";
 import { useTabDrag } from "./useTabDrag.ts";
 import "./chat-tabs.css";
@@ -29,6 +30,7 @@ export interface ChatTabsProps {
     status?: string | undefined;
     knownStatus?: string | undefined;
     closeAvailable: boolean;
+    snoozeAvailable: boolean;
     closing: boolean;
   }[];
   activeId: string | null;
@@ -36,6 +38,7 @@ export interface ChatTabsProps {
   emptyFocusTarget: RefObject<HTMLButtonElement | null>;
   onOpen(id: string): void;
   onClose(id: string): Promise<void>;
+  onSnooze(id: string, until: string): Promise<string | null>;
   onReorder(id: string, beforeId: string | null): void;
   loadSubagents?(rootId: string, signal: AbortSignal): Promise<readonly SubagentLink[]>;
   onOpenSubagent?(rootId: string, path: readonly SubagentLink[]): void;
@@ -48,11 +51,16 @@ export function ChatTabs({
   emptyFocusTarget,
   onOpen,
   onClose,
+  onSnooze,
   onReorder,
   loadSubagents,
   onOpenSubagent,
 }: ChatTabsProps) {
   const [announcement, setAnnouncement] = useState("");
+  const [context, setContext] = useState<{
+    id: string;
+    anchor: RefObject<HTMLElement | null>;
+  } | null>(null);
   const drag = useTabDrag(tabs, (id, beforeId) => {
     reorder(id, beforeId);
     focusTab(id);
@@ -63,9 +71,34 @@ export function ChatTabs({
   const dragging = drag.draggedId !== null;
   const menuTab = target && tabs.find((tab) => tab.id === target.rootId);
   const menuUnavailable = !!target && !isBusySessionStatus(menuTab?.status);
+  const contextTab = context && tabs.find((tab) => tab.id === context.id);
   useLayoutEffect(() => {
     if (dragging || menuUnavailable) closeMenu();
   }, [dragging, menuUnavailable, closeMenu]);
+  useLayoutEffect(() => {
+    if (context && (dragging || !contextTab)) setContext(null);
+  }, [context, contextTab, dragging]);
+
+  function openTabMenu(id: string, button: HTMLButtonElement, canShowAgents: boolean) {
+    if (canShowAgents) {
+      setContext(null);
+      subagents.open(id, button);
+    } else {
+      closeMenu();
+      setContext({ id, anchor: { current: button } });
+    }
+  }
+
+  function finishSnooze(id: string, anchor: RefObject<HTMLElement | null>) {
+    setContext((current) => (current?.anchor === anchor ? null : current));
+    const index = tabs.findIndex((tab) => tab.id === id);
+    const next = activeId === id ? (tabs[index + 1]?.id ?? tabs[index - 1]?.id) : activeId;
+    requestAnimationFrame(() => {
+      if (document.activeElement !== document.body) return;
+      const tab = next && document.getElementById(`tab-${next}`);
+      (tab || emptyFocusTarget.current)?.focus({ preventScroll: true });
+    });
+  }
 
   function focusTab(id: string) {
     requestAnimationFrame(() => {
@@ -160,7 +193,7 @@ export function ChatTabs({
         const canShowAgents = busy && !!loadSubagents && !!onOpenSubagent;
         const shortcuts = ["Alt+Shift+ArrowLeft Alt+Shift+ArrowRight"]; // gitleaks:allow -- public keyboard shortcuts, not a credential
         if (closeAvailable) shortcuts.push("Delete");
-        if (canShowAgents) shortcuts.push("Shift+F10");
+        shortcuts.push("Shift+F10");
         const pausedBusy = status === "updates-paused" && isBusySessionStatus(knownStatus);
         const completed = unread.has(id) && id !== activeId && status === "idle";
         const lastKnownLabel = knownStatus ? (statusLabels[knownStatus] ?? knownStatus) : null;
@@ -195,7 +228,7 @@ export function ChatTabs({
           <div
             key={id}
             data-tab-id={id}
-            class={`chat-tab ${id === activeId ? "is-active" : ""} ${drag.draggedId === id ? "is-dragging" : ""} ${completed ? "has-unread" : ""}`}
+            class={`chat-tab ${id === activeId ? "is-active" : ""} ${drag.draggedId === id ? "is-dragging" : ""} ${completed ? "has-unread" : ""} ${context?.id === id ? "is-context-target" : ""}`}
             onPointerEnter={
               canShowAgents && !dragging
                 ? (event) => {
@@ -215,7 +248,7 @@ export function ChatTabs({
               aria-selected={id === activeId}
               aria-busy={closing}
               aria-controls="chat-view"
-              aria-haspopup={canShowAgents ? "dialog" : undefined}
+              aria-haspopup={canShowAgents ? "dialog" : "menu"}
               aria-keyshortcuts={shortcuts.join(" ")}
               tabIndex={id === activeId ? 0 : -1}
               onPointerDown={(event) => {
@@ -224,22 +257,16 @@ export function ChatTabs({
               }}
               onDragStart={(event) => event.preventDefault()}
               onClick={() => onOpen(id)}
-              onContextMenu={
-                canShowAgents && !dragging
-                  ? (event) => {
-                      event.preventDefault();
-                      subagents.open(id, event.currentTarget);
-                    }
-                  : undefined
-              }
+              onContextMenu={(event) => {
+                if (dragging) return;
+                event.preventDefault();
+                openTabMenu(id, event.currentTarget, canShowAgents);
+              }}
               onKeyDown={(event) => {
                 if (dragging) return;
-                if (
-                  canShowAgents &&
-                  (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))
-                ) {
+                if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                   event.preventDefault();
-                  if (!event.repeat) subagents.open(id, event.currentTarget);
+                  if (!event.repeat) openTabMenu(id, event.currentTarget, canShowAgents);
                 } else if (event.key === "Delete" && !event.repeat) {
                   event.preventDefault();
                   if (closeAvailable) void closeTab(id);
@@ -298,6 +325,22 @@ export function ChatTabs({
           </div>
         );
       })}
+      {context && contextTab && !dragging && (
+        <TabContextMenu
+          key={context.id}
+          anchor={context.anchor}
+          title={contextTab.title}
+          canSnooze={contextTab.snoozeAvailable}
+          canClose={contextTab.closeAvailable}
+          close={() => {
+            setContext(null);
+            void closeTab(context.id);
+          }}
+          snooze={(until) => onSnooze(context.id, until)}
+          dismiss={() => setContext(null)}
+          onSnoozed={() => finishSnooze(context.id, context.anchor)}
+        />
+      )}
       {target && menuTab && !menuUnavailable && !dragging && loadSubagents && onOpenSubagent && (
         <SubagentMenu
           key={target.rootId}

@@ -14,6 +14,7 @@ import { ToolFileMenu } from "./ToolFileMenu.tsx";
 import { ToolInspection } from "./ToolInspection.tsx";
 import { useToolPreview } from "./useToolPreview.ts";
 import { useToolAnchorVisibility } from "./useToolAnchorVisibility.ts";
+import { proposedMcpUrl, type McpConnectionReviewDetail } from "./McpConnectionReview.ts";
 import "./tool-row-interactions.css";
 
 interface ToolRowInteractionContext {
@@ -34,6 +35,12 @@ interface ToolRowInteractionContext {
     label: string,
     payloadFinished: boolean,
   ) => void;
+  readonly reviewMcpConnection: (
+    anchor: HTMLElement,
+    requestId: string,
+    callId: string,
+    signal: AbortSignal,
+  ) => Promise<void>;
   readonly leaveSource: (anchor: HTMLElement) => void;
   readonly openFileMenu: (anchor: HTMLElement, path: string) => void;
   readonly isOpen: (anchor: HTMLElement, kind: ActiveTarget["kind"]) => boolean;
@@ -232,9 +239,38 @@ export function ToolRowInteractionsProvider({
     [active],
   );
 
+  const reviewMcpConnection = useCallback(
+    async (anchor: HTMLElement, requestId: string, callId: string, signal: AbortSignal) => {
+      const revision = revisionRef.current;
+      if (revision === null) throw new Error("Transcript is unavailable.");
+      const transcript = await client.readToolCallTranscript(
+        sessionId,
+        requestId,
+        callId,
+        { expectedHistoryRevision: revision, returned: false, full: true },
+        signal,
+      );
+      if (signal.aborted || !anchor.isConnected) return;
+      if (revisionRef.current !== revision) throw new Error("Transcript changed.");
+      const url =
+        transcript && !transcript.truncated && transcript.projectionFinal
+          ? proposedMcpUrl(transcript.input)
+          : null;
+      if (!url) throw new Error("Invalid connection proposal.");
+      anchor.dispatchEvent(
+        new CustomEvent<McpConnectionReviewDetail>("urd:review-mcp-connection", {
+          bubbles: true,
+          detail: { url },
+        }),
+      );
+    },
+    [client, sessionId],
+  );
+
   const interactions = useMemo(
     () => ({
       openInspection,
+      reviewMcpConnection,
       scheduleInspection,
       leaveSource,
       openFileMenu,
@@ -247,6 +283,7 @@ export function ToolRowInteractionsProvider({
       leaveSource,
       openFileMenu,
       openInspection,
+      reviewMcpConnection,
       scheduleInspection,
       sourceUnmounted,
       sourceChanged,

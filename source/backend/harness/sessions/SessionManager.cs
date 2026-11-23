@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Urd.Core.Storage;
 using Urd.Core.Context;
 using Urd.Core.Execution;
+using Urd.Core.Harness.Mcp;
 using Urd.Core.Providers;
 using Urd.Core.Preferences;
 using Urd.Core.Tools;
@@ -41,7 +42,8 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 #pragma warning restore S3264
 
   public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
-      AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null, ModelSelector? modelSelector = null) {
+      AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null, ModelSelector? modelSelector = null,
+      IRemoteMcpTools? remoteMcpTools = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(createChatClient);
     this.store = store;
@@ -50,6 +52,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     browser = new WebBrowser(progress: BrowserProgress);
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
+    RemoteMcpTools = remoteMcpTools;
     subagentRuns = new SubagentRuns(store, this.preferences, modelSelector, agentQuestions, registry, CreateChild);
     recipients = new AgentRecipients(store, agentQuestions, registry);
     fallbackWorkingDirectory = Path.GetPathRoot(Environment.CurrentDirectory);
@@ -181,14 +184,15 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 
   public async Task<StartingResourceCatalog> ReadStartingResourcesAsync(CancellationToken cancellation = default) {
     ChatProcesses? processes = null;
-    (string directory, ToolCatalog catalog) = await registry.RunOpenAsync(() => {
-      string directory = preferences.Read(fallbackWorkingDirectory).WorkingDirectory!;
+    (UserPreferences defaults, ToolCatalog catalog) = await registry.RunOpenAsync(() => {
+      UserPreferences defaults = preferences.Read(fallbackWorkingDirectory);
       ToolCatalog catalog = CreateToolCatalog(new PendingToolCalls(), true, true, out processes);
-      return (directory, catalog);
+      return (defaults, catalog);
     }, cancellation);
     // Catalog construction starts no processes; still dispose its empty shell owner.
     await using var catalogProcesses = processes;
-    var (skills, instructions) = await store.InstructionDiscovery.FindMetadataAsync(directory, cancellation);
+    var (skills, instructions) = await store.InstructionDiscovery.FindMetadataAsync(
+        defaults.WorkingDirectory!, defaults.SourceIgnores, cancellation);
     return new(catalog.Tools.Select(tool => new StartingResourceOption(tool.Name, tool.Name)).ToArray(),
         skills.Select(skill => new StartingResourceOption(skill.Identity, skill.Name)).ToArray(),
         instructions.Select(path => new StartingResourceOption(path, path)).ToArray());
@@ -234,6 +238,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 
   internal Task<bool> IsSubagentLiveAsync(Guid sessionId) => registry.IsChildAsync(sessionId);
   internal AgentQuestions Questions => agentQuestions;
+  internal IRemoteMcpTools? RemoteMcpTools { get; }
 
   // The lifecycle transition is durable before subscribers see it.
   private static void Notify(Action<Guid>? callbacks, Guid sessionId) {

@@ -104,6 +104,53 @@ function fixture() {
   };
 }
 
+void test("image edits guard target identity and status, persist, and submit image-only drafts", async () => {
+  const f = fixture();
+  const controller = f.controller();
+  const image = { imageId: "image-1", width: 20, height: 10 };
+  const second = { imageId: "image-2", width: 10, height: 20 };
+  await controller.open("session", target, facts, [image]);
+  assert.equal(controller.appendImage("session", { ...target }, second), false);
+  assert.equal(controller.removeImage("session", { ...target }, image.imageId), false);
+  assert.equal(controller.appendImage("session", target, image), false);
+  assert.equal(controller.appendImage("session", target, second), true);
+  assert.equal(controller.removeImage("session", target, image.imageId), true);
+  assert.equal(controller.removeImage("session", target, image.imageId), false);
+  controller.change("session", "  ");
+  const sent: MessageEditSubmission[] = [];
+  f.client.editMessage = async (_id, command) => {
+    sent.push(structuredClone(command));
+    throw new Error("Lost acknowledgement");
+  };
+  await controller.save("session", selection);
+  assert.equal(sent.length, 0);
+  await controller.save("session", { ...selection, supportsImages: true });
+  assert.deepEqual(sent[0]?.imageIds, [second.imageId]);
+  assert.equal(controller.removeImage("session", target, second.imageId), false);
+  f.reload();
+  assert.deepEqual(f.read().messageEdit?.images, [second]);
+  assert.deepEqual(f.read().messageEdit?.submission?.imageIds, [second.imageId]);
+});
+
+void test("removing all images sends an explicit empty list and rejects empty drafts", async () => {
+  const f = fixture();
+  const controller = f.controller();
+  const image = { imageId: "image-1", width: 20, height: 10 };
+  await controller.open("session", target, facts, [image]);
+  assert.equal(controller.removeImage("session", target, image.imageId), true);
+  const sent: MessageEditSubmission[] = [];
+  f.client.editMessage = async (_id, command) => {
+    sent.push(command);
+    throw new Error("Lost acknowledgement");
+  };
+  controller.change("session", " ");
+  await controller.save("session", selection);
+  assert.equal(sent.length, 0);
+  controller.change("session", "text");
+  await controller.save("session", selection);
+  assert.deepEqual(sent[0]?.imageIds, []);
+});
+
 void test("opening reads every page, cancel preserves history and composer draft, and reload retains an edit", async () => {
   const f = fixture();
   let reads = 0;

@@ -35,23 +35,25 @@ internal sealed class PreferencesStorage(Database database) {
       database.Write(transaction => {
         database.Execute(transaction, """
           INSERT INTO preferences (singleton, working_directory, compaction_trigger_token_count,
-              model_choices_json, protected_resources_json, subagent_providers_json, lan_hosting_enabled)
+              model_choices_json, protected_resources_json, subagent_providers_json, lan_hosting_enabled, source_ignores_json)
           VALUES (1, $directory, $compactionTriggerTokenCount, $modelChoices, $protectedResources, $subagentProviders,
-              $lanHostingEnabled)
+              $lanHostingEnabled, $sourceIgnores)
           ON CONFLICT(singleton) DO UPDATE SET
               working_directory = excluded.working_directory,
               compaction_trigger_token_count = excluded.compaction_trigger_token_count,
               model_choices_json = excluded.model_choices_json,
               protected_resources_json = excluded.protected_resources_json,
               subagent_providers_json = excluded.subagent_providers_json,
-              lan_hosting_enabled = excluded.lan_hosting_enabled;
+              lan_hosting_enabled = excluded.lan_hosting_enabled,
+              source_ignores_json = excluded.source_ignores_json;
           """, ("$directory", updated.WorkingDirectory),
             ("$compactionTriggerTokenCount", updated.CompactionTriggerTokenCount),
             ("$modelChoices", JsonSerializer.Serialize(updated.ModelChoices, JsonOptions)),
             ("$protectedResources", JsonSerializer.Serialize(updated.ProtectedResources, JsonOptions)),
             ("$subagentProviders", updated.SubagentProviderConnectionIds is null
                 ? null : JsonSerializer.Serialize(updated.SubagentProviderConnectionIds, JsonOptions)),
-            ("$lanHostingEnabled", updated.LanHostingEnabled));
+            ("$lanHostingEnabled", updated.LanHostingEnabled),
+            ("$sourceIgnores", JsonSerializer.Serialize(updated.SourceIgnores, JsonOptions)));
         return true;
       });
       cachedPreferences = updated;
@@ -65,14 +67,15 @@ internal sealed class PreferencesStorage(Database database) {
 
     UserPreferences persisted = database.Read(transaction => database.QuerySingleOrDefault(transaction, """
         SELECT working_directory, compaction_trigger_token_count, model_choices_json, protected_resources_json,
-            subagent_providers_json, lan_hosting_enabled
+            subagent_providers_json, lan_hosting_enabled, source_ignores_json
         FROM preferences WHERE singleton = 1;
         """, row => new UserPreferences(row.NullableString("working_directory"),
             row.NullableInt("compaction_trigger_token_count")) {
           LanHostingEnabled = row.Bool("lan_hosting_enabled"),
           ModelChoices = Deserialize<AuxiliaryModelPreferences>(row.NullableString("model_choices_json")) ?? new(),
           ProtectedResources = Deserialize<ProtectedResourcePreferences>(row.NullableString("protected_resources_json")) ?? new(),
-          SubagentProviderConnectionIds = Deserialize<Guid[]>(row.NullableString("subagent_providers_json"))
+          SubagentProviderConnectionIds = Deserialize<Guid[]>(row.NullableString("subagent_providers_json")),
+          SourceIgnores = DeserializeSourceIgnores(row.NullableString("source_ignores_json"))
         }) ?? new UserPreferences(null, null));
     cachedPreferences = persisted;
     return persisted;
@@ -81,7 +84,23 @@ internal sealed class PreferencesStorage(Database database) {
   private static T? Deserialize<T>(string? json) =>
       json is null ? default : JsonSerializer.Deserialize<T>(json, JsonOptions);
 
+  private static SourceIgnoreRules DeserializeSourceIgnores(string? json) {
+    SourceIgnoreRules? rules = Deserialize<SourceIgnoreRules>(json);
+    try {
+      return rules?.Normalize() ?? new();
+    } catch (ArgumentException failure) {
+      throw new JsonException("Stored source ignore rules are invalid.", failure);
+    }
+  }
+
   private static UserPreferences Copy(UserPreferences preferences) => preferences with {
+    SourceIgnores = preferences.SourceIgnores with {
+      Instructions = preferences.SourceIgnores.Instructions.ToArray(),
+      Skills = preferences.SourceIgnores.Skills.ToArray(),
+      InstructionIncludes = preferences.SourceIgnores.InstructionIncludes.ToArray(),
+      SkillIncludes = preferences.SourceIgnores.SkillIncludes.ToArray(),
+      Filenames = preferences.SourceIgnores.Filenames.ToArray()
+    },
     ModelChoices = preferences.ModelChoices with {
       Small = preferences.ModelChoices.Small.ToArray(),
       Medium = preferences.ModelChoices.Medium.ToArray(),

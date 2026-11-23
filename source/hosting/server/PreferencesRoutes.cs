@@ -23,6 +23,8 @@ internal static class PreferencesRoutes {
     routes.MapPost("/model-bucket", (Delegate)((HttpContext http) => SetBucketModelsAsync(http, preferences)));
     routes.MapPost("/subagent-providers", (Delegate)((HttpContext http) => SetSubagentProvidersAsync(http, preferences)));
     routes.MapPost("/protected-resources", (Delegate)((HttpContext http) => SetProtectedItemsAsync(http, preferences)));
+    routes.MapPost("/source-preview", (Delegate)((HttpContext http) => PreviewSourcesAsync(http, sessions)));
+    routes.MapPost("/source-ignores", (Delegate)((HttpContext http) => SetSourceIgnoresAsync(http, preferences)));
   }
 
   private static async Task<IResult> SetWorkingDirectoryAsync(HttpContext http, PreferenceManager preferences, UrdStore store) {
@@ -81,6 +83,33 @@ internal static class PreferencesRoutes {
     return Results.Ok(preferences.Read());
   }
 
+  private static async Task<IResult> PreviewSourcesAsync(HttpContext http, SessionManager sessions) {
+    SourcePreviewRequest? body = await http.Request.ReadFromJsonAsync<SourcePreviewRequest>(http.RequestAborted);
+    if (body?.Rules?.Paths is null || body.Rules.Filenames is null)
+      return Results.BadRequest();
+
+    SourceIgnoreRules rules = new() {
+      Instructions = body.Category == "instructions" ? body.Rules.Paths : [],
+      Skills = body.Category == "skills" ? body.Rules.Paths : [],
+      InstructionIncludes = body.Category == "instructions" ? body.Rules.Includes ?? [] : [],
+      SkillIncludes = body.Category == "skills" ? body.Rules.Includes ?? [] : [],
+      Filenames = body.Rules.Filenames
+    };
+    SourcePreview preview = await sessions.PreviewSourcesAsync(body.Category!, rules, http.RequestAborted);
+    return Results.Ok(new {
+      preview.Paths, preview.WorkingDirectory, preview.EligibleCount, preview.EstimatedTokens, preview.Partial,
+      Filenames = body.Category == "instructions" ? SourceIgnoreRules.InstructionFilenames : []
+    });
+  }
+
+  private static async Task<IResult> SetSourceIgnoresAsync(HttpContext http, PreferenceManager preferences) {
+    SourceIgnoresRequest? body = await http.Request.ReadFromJsonAsync<SourceIgnoresRequest>(http.RequestAborted);
+    if (body?.Paths is null || body.Filenames is null)
+      return Results.BadRequest();
+    preferences.SetSourceIgnores(body.Category!, body.Paths, body.Filenames, body.Includes);
+    return Results.Ok(preferences.Read());
+  }
+
   private static async ValueTask<object?> HandleRequestAsync(
       EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
     HttpContext http = invocation.HttpContext;
@@ -110,4 +139,7 @@ internal static class PreferencesRoutes {
       [property: JsonRequired] ConfiguredModel[] Models);
   private sealed record SubagentProvidersRequest([property: JsonRequired] Guid[]? ConnectionIds);
   private sealed record ProtectedItemsRequest(ProtectedResourceCategory Category, string[] Items);
+  private sealed record SourceRulesRequest(string[]? Paths, string[]? Filenames, string[]? Includes = null);
+  private sealed record SourcePreviewRequest(string? Category, SourceRulesRequest? Rules);
+  private sealed record SourceIgnoresRequest(string? Category, string[]? Paths, string[]? Filenames, string[]? Includes = null);
 }

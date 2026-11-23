@@ -93,6 +93,7 @@ internal static class Program {
     IChatClient? client = null;
     SessionManager? manager = null;
     ProviderManager? providers = null;
+    McpConnections? mcp = null;
     ModelPriceCatalog? prices = null;
     SessionEventHub? eventHub = null;
     MessageMarkdownService? markdown = null;
@@ -120,8 +121,10 @@ internal static class Program {
               Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>()
                   .ToDictionary(entry => (string)entry.Key, entry => (string)entry.Value!, StringComparer.OrdinalIgnoreCase))
           : null;
+      mcp = new McpConnections(store, () => new Uri(Volatile.Read(ref servedOrigin)
+          ?? throw new InvalidOperationException("The server is not ready."), "/mcp/auth/callback"), options.DataRoot);
       manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient,
-          tools, preferences, new ModelSelector(providers));
+          tools, preferences, new ModelSelector(providers), mcp);
       if (playwrightSupported)
         manager.ConfigurePlaywright(options.DataRoot,
             () => Volatile.Read(ref servedOrigin)?.Port ?? 0,
@@ -136,6 +139,7 @@ internal static class Program {
       app = CreateApplication([IPAddress.Loopback], options.Port, manager, providers, eventHub, markdown, preferences, store,
           () => Volatile.Read(ref servedOrigin), lanAccess, errorLog, lan: false);
       app.MapSessionBrowserSignInRoutes(manager, playwrightSupported);
+      app.MapMcpConnections(mcp);
       app.MapLanHosting(() => lanHosting, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
@@ -145,19 +149,22 @@ internal static class Program {
           .Features.Get<IServerAddressesFeature>() ?? throw new InvalidOperationException("The server has no bound address.");
       var origin = new Uri(addresses.Addresses.Single());
       lanHosting = new LanHosting(lanAccess, origin.Port, () => LanAccess.AvailableAddresses(), async available => {
+        IDisposable? mcpPause = null;
         IDisposable? browserPause = null;
         WebApplication? lanApp = null;
         try {
+          mcpPause = mcp.PauseAgentToolsForLan();
           browserPause = manager.PausePlaywrightForLan();
           lanApp = CreateApplication(available, origin.Port, manager, providers, eventHub, markdown,
               preferences, store, () => Volatile.Read(ref servedOrigin), lanAccess, errorLog, lan: true);
           await lanApp.StartAsync(stopping);
-          return new LanListener(lanApp, browserPause);
+          return new LanListener(lanApp, browserPause, mcpPause);
         } catch {
           try {
             if (lanApp is not null)
               await lanApp.DisposeAsync();
           } finally {
+            mcpPause?.Dispose();
             browserPause?.Dispose();
           }
           throw;
@@ -194,6 +201,7 @@ internal static class Program {
     eventHub?.Dispose();
     Task drained = Task.WhenAll(manager?.ShutdownSessionsAsync(CancellationToken.None) ?? Task.CompletedTask,
         providers?.ShutdownAsync() ?? Task.CompletedTask,
+        mcp?.ShutdownAsync() ?? Task.CompletedTask,
         prices?.DisposeAsync().AsTask() ?? Task.CompletedTask,
         markdown?.DisposeAsync().AsTask() ?? Task.CompletedTask,
         launcherPipe?.DisposeAsync().AsTask() ?? Task.CompletedTask,
@@ -243,6 +251,7 @@ internal static class Program {
     builder.Logging.SetMinimumLevel(LogLevel.Warning);
     builder.Services.Configure<ConsoleLoggerOptions>(console => console.LogToStandardErrorThreshold = LogLevel.Trace);
     WebApplication app = builder.Build();
+    app.Use(next => new HttpErrorLogging(next, errorLog, lan).InvokeAsync);
     app.Use(next => new LocalBrowserGate(next, servedOrigin, lanAccess).InvokeAsync);
     if (Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"))) {
       app.UseDefaultFiles();
@@ -251,7 +260,6 @@ internal static class Program {
           bool asset = context.Context.Request.Path.StartsWithSegments("/assets");
           context.Context.Response.Headers.CacheControl = asset ? "public, max-age=31536000, immutable" : "no-store";
           context.Context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-    app.Use(next => new HttpErrorLogging(next, errorLog, lan).InvokeAsync);
         }
       });
     }
@@ -270,7 +278,7 @@ internal static class Program {
     return app;
   }
 
-  private sealed class LanListener(WebApplication app, IDisposable? browserPause) : IAsyncDisposable {
+  private sealed class LanListener(WebApplication app, IDisposable? browserPause, IDisposable mcpPause) : IAsyncDisposable {
     public async ValueTask DisposeAsync() {
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
       try {
@@ -282,6 +290,7 @@ internal static class Program {
           await app.DisposeAsync();
         } finally {
           // LAN admission is already closed before the listener is disposed.
+          mcpPause.Dispose();
           browserPause?.Dispose();
         }
       }

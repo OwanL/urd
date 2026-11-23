@@ -1,6 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from "preact/hooks";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
-import { editDraft as updateDraft } from "../chat/ChatState.ts";
+import {
+  editDraft as updateDraft,
+  appendDraftImage as appendImage,
+  removeDraftImage as removeImage,
+} from "../chat/ChatState.ts";
+import type { UserImage } from "../sessions/transcript/Messages.ts";
 
 import type { ChatState } from "../chat/ChatState.ts";
 import { removeWorkspaceSessions, type WorkspaceState } from "./WorkspaceState.ts";
@@ -22,6 +27,8 @@ export interface PersistedWorkspace {
   forgetSessions(ids: ReadonlySet<string>): void;
   isClosed(id: string): boolean;
   editDraft(id: string, text: string): boolean;
+  appendDraftImage(id: string, image: UserImage): boolean;
+  removeDraftImage(id: string, imageId: string): boolean;
   selectModel(id: string, selection: LlmSelection): boolean;
   retryStorage(): void;
 }
@@ -143,6 +150,14 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
     (id: string, text: string) => updateChat(id, (chat) => updateDraft(chat, text), true),
     [updateChat],
   );
+  const appendDraftImage = useCallback(
+    (id: string, image: UserImage) => updateChat(id, (chat) => appendImage(chat, image), true),
+    [updateChat],
+  );
+  const removeDraftImage = useCallback(
+    (id: string, imageId: string) => updateChat(id, (chat) => removeImage(chat, imageId), true),
+    [updateChat],
+  );
   const selectModel = useCallback(
     (id: string, selection: LlmSelection) =>
       updateChat(id, (chat) => ({ ...chat, selection }), false, selection),
@@ -183,6 +198,8 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
     forgetSessions,
     isClosed,
     editDraft,
+    appendDraftImage,
+    removeDraftImage,
     selectModel,
     retryStorage,
   };

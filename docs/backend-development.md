@@ -33,8 +33,10 @@ sessions keep a null request identity; migration does not infer or backfill one.
 index enforces exact `(parent_session_id, owning_call_id, owning_request_id)` associations while
 allowing legacy null identities, and a narrow partial `execution_tools` index supports lookup of
 started `subagent` calls. Legacy lookup is allowed only when it identifies one candidate; ambiguous
-associations remain unresolved, and history edits must not trigger a later legacy resolution. These
-upgrades do not close existing sessions. The current build
+associations remain unresolved, and history edits must not trigger a later legacy resolution.
+Schema 41 adds session-owned user images and ordered per-input image references. Image bytes live
+in the profile’s content-addressed image directory, not in SQLite. These upgrades do not close
+existing sessions. The current build
 rejects unsupported versions and does not remove or reset databases. Every later durable schema
 change must register its SQL step in `DatabaseSchema` and bump the version, including for development
 builds. On startup, `DatabaseMigrations` applies required steps and records the new version in one

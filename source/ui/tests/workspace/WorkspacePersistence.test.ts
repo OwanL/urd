@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { WorkspacePersistence } from "../../workspace/WorkspacePersistence.ts";
-import { beginSubmission, editDraft, newChat } from "../../chat/ChatState.ts";
+import { appendDraftImage, beginSubmission, editDraft, newChat } from "../../chat/ChatState.ts";
 import { emptyWorkspace, removeWorkspaceSessions } from "../../workspace/WorkspaceState.ts";
 import type { ChatState } from "../../chat/ChatState.ts";
 
@@ -45,6 +45,23 @@ function chat(draft = ""): ChatState {
 function persistence(storage: Storage): WorkspacePersistence {
   return new WorkspacePersistence(() => storage, key);
 }
+
+void test("image and text draft overlays reconcile independently", () => {
+  const storage = new MemoryStorage();
+  const saved = persistence(storage);
+  const state = emptyWorkspace();
+  state.tabs = [sessionId];
+  state.activeId = sessionId;
+  state.chats[sessionId] = editDraft(newChat(null), "old");
+  saved.save(state);
+  const image = { imageId: "image", width: 3, height: 4 };
+  saved.saveDraft(sessionId, appendDraftImage(state.chats[sessionId]!, image));
+  state.chats[sessionId] = editDraft(state.chats[sessionId]!, "new");
+  saved.save(state);
+  const restored = saved.load().state.chats[sessionId]!;
+  assert.equal(restored.draft, "new");
+  assert.deepEqual(restored.draftImages, [image]);
+});
 
 void test("ordinary draft writes update one draft record without serializing the workspace", () => {
   const storage = new MemoryStorage();
@@ -246,7 +263,7 @@ void test("workspace writes validate and propagate storage failures", () => {
   const storage = new MemoryStorage();
   const saved = persistence(storage);
   const invalid = emptyWorkspace();
-  invalid.version = 2 as 7;
+  invalid.version = 2 as 8;
   assert.throws(() => saved.save(invalid), /Invalid workspace/);
 
   storage.setItem = () => {

@@ -32,6 +32,10 @@
   border-color: #424242;
 }
 
+.chat-tab.is-context-target {
+  border-color: #505050;
+}
+
 .chat-tab [role="tab"] {
   display: flex;
   align-items: center;
@@ -208,4 +212,31 @@
     animation: none;
     transition: none;
   }
+}
+
+.chat-tab-menu {
+  width: 174px;
+  padding: 4px;
+}
+
+.chat-tab-menu button {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  text-align: start;
+}
+
+.chat-tab-menu button + button {
+  margin-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.chat-tab-menu button:hover:enabled {
+  background: var(--surface-hover);
 }

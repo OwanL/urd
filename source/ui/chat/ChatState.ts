@@ -1,6 +1,7 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { MessageEditDraft } from "../sessions/inputs/MessageEdit.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
+import type { UserImage } from "../sessions/transcript/Messages.ts";
 import type {
   ContinuationReceipt,
   ContinuationSubmission,
@@ -15,6 +16,8 @@ import type {
 export interface ChatState {
   draft: string;
   draftVersion: number;
+  draftImages: readonly UserImage[];
+  draftImagesVersion: number;
   selection: LlmSelection | null;
   pending: PendingSubmission | null;
   pendingContinuation: PendingContinuation | null;
@@ -32,6 +35,7 @@ export type TitleProvenance = "placeholder" | "generated";
 export interface PendingSubmission {
   original: UserMessageSubmission;
   draftVersion: number;
+  draftImagesVersion: number;
   status: "sending" | "uncertain";
   preserveDraft?: boolean;
 }
@@ -74,6 +78,8 @@ export function newChat(selection: LlmSelection | null): ChatState {
   return {
     draft: "",
     draftVersion: 0,
+    draftImages: [],
+    draftImagesVersion: 0,
     selection,
     pending: null,
     pendingContinuation: null,
@@ -89,6 +95,29 @@ export function editDraft(chat: ChatState, text: string): ChatState {
   return { ...chat, draft: text, draftVersion: chat.draftVersion + 1 };
 }
 
+export function appendDraftImage(chat: ChatState, image: UserImage): ChatState {
+  if (!isUserImage(image)) throw new TypeError("Invalid image.");
+  if (chat.draftImages.some((item) => item.imageId === image.imageId)) return chat;
+  if (!isRevision(chat.draftImagesVersion + 1))
+    throw new TypeError("Image version is out of range.");
+  return {
+    ...chat,
+    draftImages: [...chat.draftImages, { ...image }],
+    draftImagesVersion: chat.draftImagesVersion + 1,
+  };
+}
+
+export function removeDraftImage(chat: ChatState, imageId: string): ChatState {
+  if (!chat.draftImages.some((image) => image.imageId === imageId)) return chat;
+  if (!isRevision(chat.draftImagesVersion + 1))
+    throw new TypeError("Image version is out of range.");
+  return {
+    ...chat,
+    draftImages: chat.draftImages.filter((image) => image.imageId !== imageId),
+    draftImagesVersion: chat.draftImagesVersion + 1,
+  };
+}
+
 export function beginSubmission(
   chat: ChatState,
   original: UserMessageSubmission,
@@ -100,6 +129,7 @@ export function beginSubmission(
     pending: {
       original: copySubmission(original),
       draftVersion: chat.draftVersion,
+      draftImagesVersion: chat.draftImagesVersion,
       status: "sending",
       ...(preserveDraft ? { preserveDraft: true } : {}),
     },
@@ -150,6 +180,12 @@ export function applyReceipt(chat: ChatState, sessionId: string, receipt: unknow
   return {
     ...chat,
     draft: clearDraft ? "" : chat.draft,
+    draftImages:
+      pending.preserveDraft !== true &&
+      accepted &&
+      pending.draftImagesVersion === chat.draftImagesVersion
+        ? []
+        : chat.draftImages,
     pending: null,
     knownExecutionId: receipt.executionId,
     error: receipt.refusalReason === null ? null : refusalErrors[receipt.refusalReason],
@@ -162,6 +198,19 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function isId(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+export function isUserImage(value: unknown): value is UserImage {
+  return (
+    isRecord(value) &&
+    isId(value.imageId) &&
+    typeof value.width === "number" &&
+    Number.isSafeInteger(value.width) &&
+    value.width > 0 &&
+    typeof value.height === "number" &&
+    Number.isSafeInteger(value.height) &&
+    value.height > 0
+  );
 }
 
 function isRevision(value: unknown): value is number {
@@ -239,6 +288,7 @@ function isSubmission(value: unknown): value is UserMessageSubmission {
     isId(value.submissionId) &&
     isRevision(value.expectedHistoryRevision) &&
     typeof value.text === "string" &&
+    (value.imageIds == null || (Array.isArray(value.imageIds) && value.imageIds.every(isId))) &&
     isSelection(value.llmSelection)
   );
 }
@@ -286,6 +336,8 @@ function sameSubmission(left: UserMessageSubmission, right: UserMessageSubmissio
     left.submissionId === right.submissionId &&
     left.expectedHistoryRevision === right.expectedHistoryRevision &&
     left.text === right.text &&
+    (left.imageIds ?? []).length === (right.imageIds ?? []).length &&
+    (left.imageIds ?? []).every((id, index) => id === right.imageIds?.[index]) &&
     sameSelection(left.llmSelection, right.llmSelection)
   );
 }
@@ -294,6 +346,7 @@ function copySubmission(original: UserMessageSubmission): UserMessageSubmission 
   const selection = original.llmSelection;
   return {
     ...original,
+    ...(original.imageIds ? { imageIds: [...original.imageIds] } : {}),
     llmSelection:
       selection === null ? null : { ...selection, connection: { ...selection.connection } },
   };
@@ -309,6 +362,10 @@ function isMessageEdit(value: unknown): value is MessageEditDraft | undefined {
     target.kind !== "user" ||
     !isRevision(target.historyRevision) ||
     typeof value.text !== "string" ||
+    (value.images !== undefined &&
+      (!Array.isArray(value.images) ||
+        !value.images.every(isUserImage) ||
+        new Set(value.images.map((image) => image.imageId)).size !== value.images.length)) ||
     !isNullableString(value.error) ||
     !["loading", "editing", "saving", "uncertain"].includes(String(value.status))
   )
@@ -319,6 +376,13 @@ function isMessageEdit(value: unknown): value is MessageEditDraft | undefined {
   return (
     isId(original.operationId) &&
     original.text === value.text &&
+    (original.imageIds == null ||
+      (Array.isArray(original.imageIds) &&
+        original.imageIds.every(isId) &&
+        original.imageIds.length === (Array.isArray(value.images) ? value.images.length : 0) &&
+        original.imageIds.every(
+          (id, index) => id === (value.images as UserImage[] | undefined)?.[index]?.imageId,
+        ))) &&
     original.message.executionId === target.executionId &&
     original.message.messageId === target.entryId &&
     original.message.role === "user" &&
@@ -329,7 +393,15 @@ function isMessageEdit(value: unknown): value is MessageEditDraft | undefined {
 }
 
 export function isChat(value: unknown): value is ChatState {
-  if (!isRecord(value) || !isRevision(value.draftVersion)) return false;
+  if (
+    !isRecord(value) ||
+    !isRevision(value.draftVersion) ||
+    !isRevision(value.draftImagesVersion) ||
+    !Array.isArray(value.draftImages) ||
+    !value.draftImages.every(isUserImage) ||
+    new Set(value.draftImages.map((image) => image.imageId)).size !== value.draftImages.length
+  )
+    return false;
   const pending = value.pending;
   return (
     typeof value.draft === "string" &&
@@ -351,6 +423,8 @@ export function isChat(value: unknown): value is ChatState {
         isSubmission(pending.original) &&
         isRevision(pending.draftVersion) &&
         pending.draftVersion <= value.draftVersion &&
+        isRevision(pending.draftImagesVersion) &&
+        pending.draftImagesVersion <= value.draftImagesVersion &&
         (pending.preserveDraft === undefined || typeof pending.preserveDraft === "boolean") &&
         (pending.status === "sending" || pending.status === "uncertain")))
   );

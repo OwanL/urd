@@ -8,10 +8,13 @@ import type {
 import type {
   TranscriptEntryRef,
   TranscriptTextFacts,
+  UserImage,
 } from "../../sessions/transcript/Messages.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import type { MessageEditingAccess } from "./MessageEditingAccess.ts";
 import { submissionTextError } from "../../sessions/inputs/UserMessageSubmission.ts";
+import { isUserImage } from "../ChatState.ts";
+import { maxUserImages } from "../user-images/ImagePaste.ts";
 
 // Owns inline drafts and the exact Save journal independently of transcript row lifetimes.
 export class MessageEditing {
@@ -35,7 +38,12 @@ export class MessageEditing {
     this.refresh = refresh;
   }
 
-  async open(id: string, target: TranscriptEntryRef, facts: TranscriptTextFacts): Promise<void> {
+  async open(
+    id: string,
+    target: TranscriptEntryRef,
+    facts: TranscriptTextFacts | undefined,
+    images: readonly UserImage[] = [],
+  ): Promise<void> {
     const chat = this.access.read().chats[id];
     if (
       !chat ||
@@ -49,10 +57,17 @@ export class MessageEditing {
     if (
       !this.access.updateChat(id, (previous) => ({
         ...previous,
-        messageEdit: { target, text: "", status: "loading", error: null },
+        messageEdit: {
+          target,
+          text: "",
+          images: [...images],
+          status: facts ? "loading" : "editing",
+          error: null,
+        },
       }))
     )
       return;
+    if (!facts) return;
     const controller = new AbortController();
     this.reads.set(id, controller);
     try {
@@ -83,7 +98,12 @@ export class MessageEditing {
         previous.messageEdit?.target === target
           ? {
               ...previous,
-              messageEdit: { target, text: pieces.join(""), status: "editing", error: null },
+              messageEdit: {
+                ...previous.messageEdit,
+                text: pieces.join(""),
+                status: "editing",
+                error: null,
+              },
             }
           : previous,
       );
@@ -93,7 +113,7 @@ export class MessageEditing {
         previous.messageEdit?.target === target
           ? {
               ...previous,
-              messageEdit: { target, text: "", status: "loading", error: description(cause) },
+              messageEdit: { ...previous.messageEdit, error: description(cause) },
             }
           : previous,
       );
@@ -113,6 +133,49 @@ export class MessageEditing {
     );
   }
 
+  appendImage(id: string, target: TranscriptEntryRef, image: UserImage): boolean {
+    if (!isUserImage(image)) return false;
+    let changed = false;
+    this.access.updateChat(id, (chat) => {
+      const edit = chat.messageEdit;
+      if (
+        edit?.target !== target ||
+        edit.status !== "editing" ||
+        edit.images?.some((item) => item.imageId === image.imageId)
+      )
+        return chat;
+      changed = true;
+      return {
+        ...chat,
+        messageEdit: { ...edit, images: [...(edit.images ?? []), image], error: null },
+      };
+    });
+    return changed;
+  }
+
+  removeImage(id: string, target: TranscriptEntryRef, imageId: string): boolean {
+    let changed = false;
+    this.access.updateChat(id, (chat) => {
+      const edit = chat.messageEdit;
+      if (
+        edit?.target !== target ||
+        edit.status !== "editing" ||
+        !edit.images?.some((image) => image.imageId === imageId)
+      )
+        return chat;
+      changed = true;
+      return {
+        ...chat,
+        messageEdit: {
+          ...edit,
+          images: edit.images.filter((image) => image.imageId !== imageId),
+          error: null,
+        },
+      };
+    });
+    return changed;
+  }
+
   cancel(id: string): void {
     this.reads.get(id)?.abort();
     this.access.updateChat(id, (chat) =>
@@ -126,9 +189,11 @@ export class MessageEditing {
     if (
       !edit ||
       edit.status !== "editing" ||
-      !edit.text.trim() ||
+      (!edit.text.trim() && !edit.images?.length) ||
+      (edit.images?.length ?? 0) > maxUserImages ||
       submissionTextError(edit.text) ||
       !selection ||
+      (selection.supportsImages === false && !!edit.images?.length) ||
       chat.pending ||
       chat.pendingContinuation ||
       !this.access.canPersist()
@@ -143,6 +208,7 @@ export class MessageEditing {
         historyRevision: edit.target.historyRevision,
       },
       text: edit.text,
+      imageIds: (edit.images ?? []).map((image) => image.imageId),
       llmSelection: structuredClone(selection),
     };
     if (

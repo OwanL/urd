@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { RequestError } from "../../http/RequestError.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import type { TranscriptHistoryPage } from "../../sessions/transcript/Messages.ts";
+import { UserQuestions } from "../ask-user/UserQuestions.tsx";
 import { MessageEditingContext } from "../message-editing/EditableMessage.tsx";
 import { Transcript, type ReadingPosition } from "../transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "../transcript/TranscriptDisplay.ts";
@@ -18,6 +19,7 @@ interface SubagentViewProps {
   display: TranscriptDisplay | undefined;
   streamId: string | null;
   connected: boolean;
+  notice: string | null;
 }
 
 const positions = new Map<string, ReadingPosition>();
@@ -39,6 +41,7 @@ export function SubagentView({
   display,
   streamId,
   connected,
+  notice: rootNotice,
 }: SubagentViewProps) {
   const child = path[path.length - 1];
   const id = child?.id;
@@ -163,6 +166,7 @@ export function SubagentView({
           </MessageEditingContext.Provider>
         </SubagentNavigationContext.Provider>
       )}
+      <UserQuestions client={client} sessionId={rootId} connected={connected} notice={rootNotice} />
     </section>
   );
 }

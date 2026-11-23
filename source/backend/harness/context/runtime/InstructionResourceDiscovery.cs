@@ -1,3 +1,4 @@
+using Urd.Core.Preferences;
 using Urd.Core.Tools;
 
 namespace Urd.Core.Context;
@@ -21,15 +22,121 @@ internal sealed class InstructionResourceDiscovery {
     this.packagedDirectory = Path.GetFullPath(packagedDirectory);
   }
 
+  internal Task<DiscoveredInstructionResources> FindAsync(string workingDirectory, CancellationToken cancellation) =>
+      FindAsync(workingDirectory, new SourceIgnoreRules(), cancellation);
+
   internal async Task<DiscoveredInstructionResources> FindAsync(
-      string workingDirectory,
-      CancellationToken cancellation) {
-    var (skills, paths, index) = await FindResourcesAsync(workingDirectory, cancellation);
+      string workingDirectory, SourceIgnoreRules rules, CancellationToken cancellation) {
+    workingDirectory = Path.GetFullPath(workingDirectory);
+    InstructionResourceCatalogResult served = await catalog.FindPathsAsync(workingDirectory, cancellation);
+    string[] paths = ProjectPaths(served, workingDirectory);
+    DiscoveredSkill[] skills = ReadSkills(SkillPaths(paths, cancellation)
+        .Where(path => !rules.IsIgnored(path, skill: true)), workingDirectory, cancellation);
+    DiscoveredInstructionDocument[] instructions = await ReadInstructionsAsync(paths.Where(IsInstructionDocument)
+        .Where(path => !rules.IsIgnored(path, skill: false)), workingDirectory, cancellation);
+    cancellation.ThrowIfCancellationRequested();
+    return new(Array.AsReadOnly(skills), Array.AsReadOnly(instructions), served.State);
+  }
+
+  internal Task<(IReadOnlyList<DiscoveredSkill> Skills, IReadOnlyList<string> Instructions)> FindMetadataAsync(
+      string workingDirectory, CancellationToken cancellation) => FindMetadataAsync(workingDirectory, new SourceIgnoreRules(), cancellation);
+
+  // The legacy protection picker needs skill names, not instruction bodies.
+  internal async Task<(IReadOnlyList<DiscoveredSkill> Skills, IReadOnlyList<string> Instructions)> FindMetadataAsync(
+      string workingDirectory, SourceIgnoreRules rules, CancellationToken cancellation) {
+    workingDirectory = Path.GetFullPath(workingDirectory);
+    string[] paths = ProjectPaths(await catalog.FindPathsAsync(workingDirectory, cancellation), workingDirectory);
+    DiscoveredSkill[] skills = ReadSkills(SkillPaths(paths, cancellation)
+        .Where(path => !rules.IsIgnored(path, skill: true)), workingDirectory, cancellation);
+    var instructions = new List<string>();
+    foreach (string path in paths.Where(IsInstructionDocument)) {
+      cancellation.ThrowIfCancellationRequested();
+      if (rules.IsIgnored(path, skill: false))
+        continue;
+      try {
+        using FileStream? stream = OpenResourceFile(path, workingDirectory);
+        if (stream is not null)
+          instructions.Add(path);
+      } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) {
+        // A removed or unreadable resource is unavailable for this discovery.
+      }
+    }
+    cancellation.ThrowIfCancellationRequested();
+    return (Array.AsReadOnly(skills), instructions.AsReadOnly());
+  }
+
+  internal async Task<SourcePreview> PreviewAsync(string workingDirectory, bool skills, SourceIgnoreRules rules,
+      IReadOnlyList<string> protectedResources, CancellationToken cancellation) {
+    workingDirectory = Path.TrimEndingDirectorySeparator(Path.GetFullPath(workingDirectory));
+    InstructionResourceCatalogResult served = await catalog.FindPathsAsync(workingDirectory, cancellation);
+    string[] projectPaths = ProjectPaths(served, workingDirectory);
+    IEnumerable<string> categoryPaths = skills ? SkillPaths(projectPaths, cancellation)
+        : projectPaths.Where(IsInstructionDocument);
+    string[] paths = categoryPaths.Where(path => {
+      cancellation.ThrowIfCancellationRequested();
+      // A stale index may contain a removed path or a path now reached through a link.
+      // This check uses only file metadata, even for an ignored source.
+      return InstructionResourceCatalogWatch.Entry(path) == FileAttributes.Normal;
+    }).ToArray();
+
+    // Protected sources skip the selector. They remain visible in the tree, just like ignored sources.
+    var protectedPaths = StartingContextBuilder.ProtectedPaths(protectedResources);
+    var eligible = paths.Where(path => !rules.IsIgnored(path, skill: skills) && !protectedPaths.Contains(path));
+    int count;
+    int estimatedTokens;
+    if (skills) {
+      DiscoveredSkill[] candidates = ReadSkills(eligible, workingDirectory, cancellation);
+      count = candidates.Length;
+      estimatedTokens = StartingResourcePruner.EstimateManifestTokens(candidates);
+    } else {
+      DiscoveredInstructionDocument[] candidates = await ReadInstructionsAsync(eligible, workingDirectory, cancellation);
+      count = candidates.Length;
+      estimatedTokens = StartingResourcePruner.EstimateManifestTokens(candidates);
+    }
+    cancellation.ThrowIfCancellationRequested();
+    return new(paths.Order(StringComparer.Ordinal).ToArray(), workingDirectory, count, estimatedTokens,
+        served.State.Phase != InstructionResourceIndexPhase.Complete);
+  }
+
+  internal bool IsPackagedSkill(DiscoveredSkill skill) => IsWithinDirectory(skill.Path, packagedDirectory);
+
+  private static string[] ProjectPaths(InstructionResourceCatalogResult served, string workingDirectory) =>
+      served.Paths.Select(Path.GetFullPath).Where(path => IsWithinDirectory(path, workingDirectory))
+          .Distinct(pathComparer).Order(StringComparer.Ordinal).ToArray();
+
+  private IEnumerable<string> SkillPaths(string[] projectPaths, CancellationToken cancellation) =>
+      projectPaths.Where(FdResourceScanner.IsSkillPath).Concat(PackagedSkillPaths(cancellation)).Distinct(pathComparer);
+
+  private IEnumerable<string> PackagedSkillPaths(CancellationToken cancellation) {
+    cancellation.ThrowIfCancellationRequested();
+    if (InstructionResourceCatalogWatch.Entry(packagedDirectory) != FileAttributes.Directory)
+      return [];
+
+    return Directory.EnumerateFiles(packagedDirectory, "SKILL.md", new EnumerationOptions {
+      RecurseSubdirectories = true,
+      AttributesToSkip = FileAttributes.ReparsePoint,
+      MatchCasing = MatchCasing.CaseInsensitive,
+    }).Order(StringComparer.Ordinal);
+  }
+
+  private DiscoveredSkill[] ReadSkills(IEnumerable<string> paths, string workingDirectory, CancellationToken cancellation) {
+    var skills = new List<DiscoveredSkill>();
+    foreach (string path in paths) {
+      cancellation.ThrowIfCancellationRequested();
+      string directory = IsWithinDirectory(path, workingDirectory) ? workingDirectory : packagedDirectory;
+      if (ReadSkill(path, directory) is { } skill)
+        skills.Add(skill);
+    }
+    return skills.ToArray();
+  }
+
+  private static async Task<DiscoveredInstructionDocument[]> ReadInstructionsAsync(
+      IEnumerable<string> paths, string workingDirectory, CancellationToken cancellation) {
     var instructions = new List<DiscoveredInstructionDocument>();
     foreach (string path in paths) {
       cancellation.ThrowIfCancellationRequested();
       try {
-        using FileStream? stream = OpenProjectFile(path, workingDirectory);
+        using FileStream? stream = OpenResourceFile(path, workingDirectory);
         if (stream is null)
           continue;
         using var reader = new StreamReader(stream);
@@ -39,75 +146,14 @@ internal sealed class InstructionResourceDiscovery {
         // A removed or unreadable resource is unavailable for this discovery.
       }
     }
-    cancellation.ThrowIfCancellationRequested();
-    return new(skills, Array.AsReadOnly(instructions.OrderBy(instruction => instruction.ScopeDepth)
-        .ThenBy(instruction => instruction.Path, StringComparer.Ordinal).ToArray()), index);
+    return instructions.OrderBy(document => document.ScopeDepth).ThenBy(document => document.Path, StringComparer.Ordinal).ToArray();
   }
 
-  // The settings picker needs paths and skill frontmatter, not instruction bodies.
-  internal async Task<(IReadOnlyList<DiscoveredSkill> Skills, IReadOnlyList<string> Instructions)> FindMetadataAsync(
-      string workingDirectory,
-      CancellationToken cancellation) {
-    var (skills, instructions, _) = await FindResourcesAsync(workingDirectory, cancellation);
-    return (skills, instructions);
-  }
-
-  internal async Task<(IReadOnlyList<DiscoveredSkill> Skills, IReadOnlyList<string> Instructions,
-      InstructionResourceIndexState Index)> FindResourcesAsync(
-      string workingDirectory,
-      CancellationToken cancellation) {
-    cancellation.ThrowIfCancellationRequested();
-    workingDirectory = Path.GetFullPath(workingDirectory);
-    InstructionResourceCatalogResult served = await catalog.FindPathsAsync(workingDirectory, cancellation);
-    IReadOnlyList<string> paths = served.Paths;
-    var skills = new List<DiscoveredSkill>();
-    var instructions = new List<string>();
-    foreach (string path in paths.Select(Path.GetFullPath).Distinct(pathComparer).Order(StringComparer.Ordinal)) {
-      cancellation.ThrowIfCancellationRequested();
-      if (!IsWithinDirectory(path, workingDirectory))
-        continue;
-      if (Path.GetFileName(path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase)) {
-        DiscoveredSkill? skill = ReadSkill(path, workingDirectory);
-        if (skill is not null)
-          skills.Add(skill);
-      } else if (IsInstructionDocument(path)) {
-        try {
-          using FileStream? stream = OpenProjectFile(path, workingDirectory);
-          if (stream is not null)
-            instructions.Add(path);
-        } catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) {
-          // A removed or unreadable resource is unavailable for this discovery.
-        }
-      }
-    }
-    skills.AddRange(PackagedSkills(cancellation));
-    cancellation.ThrowIfCancellationRequested();
-    return (Array.AsReadOnly(skills.DistinctBy(skill => skill.Identity, pathComparer).ToArray()),
-        Array.AsReadOnly(instructions.ToArray()), served.State);
-  }
-
-  internal bool IsPackagedSkill(DiscoveredSkill skill) => IsWithinDirectory(skill.Path, packagedDirectory);
-
-  private IEnumerable<DiscoveredSkill> PackagedSkills(CancellationToken cancellation) {
-    if (!Directory.Exists(packagedDirectory))
-      yield break;
-
-    foreach (string file in Directory.EnumerateFiles(packagedDirectory, "SKILL.md", SearchOption.AllDirectories)
-                 .Order(StringComparer.Ordinal)) {
-      cancellation.ThrowIfCancellationRequested();
-      DiscoveredSkill? skill = ReadSkill(file);
-      if (skill is not null)
-        yield return skill;
-    }
-  }
-
-  private static DiscoveredSkill? ReadSkill(string file, string? workingDirectory = null) {
+  private static DiscoveredSkill? ReadSkill(string file, string directory) {
     Dictionary<string, string> fields;
     long sizeBytes;
     try {
-      using FileStream? stream = workingDirectory is null
-          ? File.OpenRead(file)
-          : OpenProjectFile(file, workingDirectory);
+      using FileStream? stream = OpenResourceFile(file, directory);
       if (stream is null)
         return null;
       sizeBytes = stream.Length;
@@ -120,12 +166,12 @@ internal sealed class InstructionResourceDiscovery {
       return null;
 
     string name = fields.GetValueOrDefault("name") ?? Path.GetFileName(Path.GetDirectoryName(file)!);
-    return new(name, description, Path.GetFullPath(file)) { SizeBytes = sizeBytes };
+    return new(name, description, file) { SizeBytes = sizeBytes };
   }
 
   // Validate the opened object, not the pathname that may have changed since indexing.
-  // Unsupported platforms fail closed rather than reading an unverified project resource.
-  private static FileStream? OpenProjectFile(string path, string directory) {
+  // Unsupported platforms fail closed rather than reading an unverified resource.
+  private static FileStream? OpenResourceFile(string path, string directory) {
     if (InstructionResourceCatalogWatch.Entry(path) != FileAttributes.Normal)
       return null;
     var stream = File.OpenRead(path);
@@ -149,26 +195,7 @@ internal sealed class InstructionResourceDiscovery {
          !relative.StartsWith($"..{Path.AltDirectorySeparatorChar}", StringComparison.Ordinal));
   }
 
-  private static bool IsInstructionDocument(string relativePath) {
-    string[] segments = relativePath.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
-    if (segments.Any(segment => harnessConfigurationDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase)))
-      return false;
-
-    string name = Path.GetFileName(relativePath);
-    if (name.Equals("CLAUDE.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("GEMINI.md", StringComparison.OrdinalIgnoreCase) ||
-        name.EndsWith(".instructions.md", StringComparison.OrdinalIgnoreCase) ||
-        name.StartsWith("copilot-", StringComparison.OrdinalIgnoreCase))
-      return false;
-
-    return name.Equals("AGENTS.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("APPEND_SYSTEM.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("APPEND-SYSTEM.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("AGENT_INSTRUCTIONS.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("AGENT-INSTRUCTIONS.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("AGENT_INSTRUCTION.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("AGENT-INSTRUCTION.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("INSTRUCTIONS_FOR_AGENTS.md", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("INSTRUCTIONS-FOR-AGENTS.md", StringComparison.OrdinalIgnoreCase);
-  }
+  private static bool IsInstructionDocument(string path) => FdResourceScanner.IsInstructionPath(path) &&
+      !path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries)
+          .Any(segment => harnessConfigurationDirectories.Contains(segment, StringComparer.OrdinalIgnoreCase));
 }

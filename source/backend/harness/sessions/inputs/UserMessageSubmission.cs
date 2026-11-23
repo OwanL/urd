@@ -2,9 +2,9 @@ using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
-// Original decoded user message submission. Retries must repeat every member unchanged.
+// Retries must repeat the text, selection and ordered attachments. Omitted attachments mean none.
 public sealed record UserMessageSubmission(Guid SubmissionId, long ExpectedHistoryRevision, string Text,
-    LlmSelection? LlmSelection = null);
+    LlmSelection? LlmSelection = null, IReadOnlyList<Guid>? ImageIds = null);
 
 // First saved acceptance/refusal for an exact original submission. Acceptance associates
 // the submission with an execution; it does not mean an LLM request has started or an answer has succeeded.

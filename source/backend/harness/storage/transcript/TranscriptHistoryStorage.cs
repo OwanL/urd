@@ -49,6 +49,7 @@ internal sealed class TranscriptHistoryStorage(
         CASE WHEN t.call_id IS NOT NULL THEN t.arguments_excerpt ELSE NULL END AS arguments_excerpt,
         c.reason AS compaction_reason, c.tokens_before, c.tokens_after,
         i.input_id AS question_input_id, sender_title.title AS sender_title,
+        d.image_ids_json,
         CASE WHEN m.role <> 4 AND NOT EXISTS (SELECT 1 FROM execution_messages first
             WHERE first.session_id = m.session_id AND first.history_revision = m.history_revision
                 AND first.run_id = m.run_id AND first.role <> 4 AND first.ordinal < m.ordinal)
@@ -82,6 +83,7 @@ internal sealed class TranscriptHistoryStorage(
     LEFT JOIN execution_inputs i ON m.role = 0 AND i.session_id = m.session_id AND i.input_id = m.input_id
         AND i.provenance = {{(int)InputProvenance.AgentQuestion}}
     LEFT JOIN session_prepass_title sender_title ON sender_title.session_id = i.sender_session_id
+    LEFT JOIN input_decisions d ON m.role = 0 AND d.session_id = m.session_id AND d.input_id = m.input_id
     ORDER BY m.ordinal {{(ascending ? "ASC" : "DESC")}};
     """;
 
@@ -158,9 +160,26 @@ internal sealed class TranscriptHistoryStorage(
     return anchored;
   }
 
-  private List<TranscriptHistoryRow> Window(long boundary, bool ascending, int count) =>
-      database.Query(transaction, WindowSql(ascending), ReadRow,
-          ("$session", sessionId), ("$revision", revision), ("$boundary", boundary), ("$limit", count));
+  private List<TranscriptHistoryRow> Window(long boundary, bool ascending, int count) {
+    var imageIds = new Dictionary<long, IReadOnlyList<Guid>>();
+    List<TranscriptHistoryRow> rows = database.Query(transaction, WindowSql(ascending), reader => {
+      TranscriptHistoryRow row = ReadRow(reader);
+      if (UserImageIds.Read(reader.NullableString("image_ids_json")) is { Count: > 0 } ids)
+        imageIds.Add(row.Ordinal, ids);
+      return row;
+    }, ("$session", sessionId), ("$revision", revision), ("$boundary", boundary), ("$limit", count));
+    if (imageIds.Count == 0)
+      return rows;
+    for (int index = 0; index < rows.Count; index++) {
+      TranscriptHistoryRow row = rows[index];
+      if (!imageIds.TryGetValue(row.Ordinal, out IReadOnlyList<Guid>? ids))
+        continue;
+      UserImage[] metadata = ids.Select(id => UserImageStorage.Find(database, transaction, sessionId, id)
+          ?? throw new InvalidDataException("A stored user image is missing.")).ToArray();
+      rows[index] = row with { Descriptor = row.Descriptor with { Images = Array.AsReadOnly(metadata) } };
+    }
+    return rows;
+  }
 
   private TranscriptHistoryRow ReadRow(SqliteDataReader reader) {
     var reference = new TranscriptEntryRef(reader.Guid("run_id"), reader.Guid("message_id"),

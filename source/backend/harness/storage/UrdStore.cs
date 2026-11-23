@@ -21,7 +21,9 @@ public sealed class UrdStore : IDisposable {
     InstructionDiscovery = new(instructionCatalog, InstructionResourceDiscovery.PackagedDirectory);
     string toolImagesPath = databasePath + ".tool-images";
     string markdownImagesPath = databasePath + ".markdown-images";
-    sessionImages = new(database, toolImagesPath, markdownImagesPath);
+    string userImagesPath = databasePath + ".user-images";
+    sessionImages = new(database, toolImagesPath, markdownImagesPath, userImagesPath);
+    UserImages = new(database, userImagesPath);
     sessionClosure = new(database, sessionImages);
     var toolResults = new ToolResultCodec(new ToolImageStore(toolImagesPath));
     Sessions = new(database);
@@ -45,6 +47,7 @@ public sealed class UrdStore : IDisposable {
     Positions = new(database, History);
     NotSentInputs = new(database);
     Providers = new(database);
+    McpServers = new(database);
     ModelSettings = new(database);
     Preferences = new(database);
     Usage = new(database);
@@ -53,12 +56,14 @@ public sealed class UrdStore : IDisposable {
   internal InstructionResourceDiscovery InstructionDiscovery { get; }
   internal UsageStorage Usage { get; }
   internal ProviderStorage Providers { get; }
+  public McpServerStorage McpServers { get; }
   internal ModelSettingsStorage ModelSettings { get; }
   internal PreferencesStorage Preferences { get; }
   internal SessionStorage Sessions { get; }
   internal StartingContextStorage StartingContexts { get; }
   internal PrepassStorage Prepass { get; }
   internal CompactionStorage Compactions { get; }
+  internal UserImageStorage UserImages { get; }
   internal UserMessageStorage UserMessages { get; }
   internal ContinuationStorage Continuations { get; }
   internal MessageEditStorage MessageEdits { get; }

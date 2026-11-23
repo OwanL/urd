@@ -23,10 +23,9 @@ bucket and directory recovery.
 
 The workspace has closable, reorderable local tabs, transcript, model and reasoning
 selectors, Send, Stop and integrated [provider settings](provider-management.md#browser-settings).
-Tabs take the header's remaining width beside New chat, Settings and Snooze. Each tab fits within
+Tabs take the header's remaining width beside New chat, Settings and Snoozed chats. Each tab fits within
 its scroll strip; activation, title changes and strip resizing reveal the active tab without fighting
-a drag. Tabs have a preferred width of 180px and truncate long titles. Settings and the unavailable
-Snooze action are separate header buttons; Settings has Providers, General, Model buckets and Prepass tabs.
+a drag. Tabs have a preferred width of 180px and truncate long titles.
 The fresh-chat screen shows working-directory controls first, then a
 subtle separator and labeled 24h and 7d API cost totals. These are rolling 24-hour and 168-hour windows,
 not calendar days.
@@ -104,8 +103,14 @@ active run and its pending steering; there is no after-run queue. The composer k
 and reasoning pickers and Send/Continue visible on one row at every width. Stop appears only
 while work is active and is disabled while stopping. More options holds session details; these
 never crowd or wrap the toolbar.
-Snooze remains unavailable. The UI displays a bounded, navigable transcript with compact tool
-rows, on-demand input/output inspection and Markdown rendering. The history API supports
+Right-click a chat tab or press Shift+F10 on it and choose **Snooze…**. The day, hour and minute
+wheels default to 9:00 am local time tomorrow and show the return time before you confirm. Only
+idle chats with no pending work can be snoozed. History, drafts and local tab order are retained.
+The header moon lists snoozed chats and lets you restore them early. The deadline survives a
+restart; a returning tab is not selected or focused, and no work starts.
+
+The UI displays a bounded, navigable transcript with compact tool rows, on-demand input/output
+inspection and Markdown rendering. The history API supports
 anchored pages. Closing an idle chat from its tab permanently deletes its backend session;
 closing the browser does not. Components and effects stay with their feature; hooks are
 extracted for actual responsibilities, not a state framework.
@@ -180,8 +185,8 @@ available through their parent call.
 `ask_user` keeps one pending question visible below the scrollable transcript and above the
 composer. When multiple questions are pending, use the arrows to switch between them. Suggested
 answers submit on click; custom answers are always available without touching the composer draft.
-The primary chat also shows questions from its subagents. Reload and reconnect read pending
-questions from the running server; they do not resubmit an answer.
+Subagent questions are answered from the primary chat or while inspecting a child. Reload and
+reconnect read pending questions from the running server; they do not resubmit an answer.
 
 ## Markdown rendering
 

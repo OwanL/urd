@@ -135,6 +135,45 @@ public sealed class StartingContextPreparationTests {
   }
 
   [Fact]
+  public async Task IgnoredSourcesNeverReachTheSelectorOrStartingContextEvenWhenProtected() {
+    string root = Path.Combine(Path.GetTempPath(), $"urd-context-{Guid.NewGuid():N}");
+    string project = Path.Combine(root, "project");
+    string packaged = Path.Combine(root, "packaged");
+    try {
+      string ignoredInstruction = Write(project, "CLAUDE.md", "Ignored instruction.");
+      string protectedInstruction = Write(project, "AGENTS.md", "Protected instruction.");
+      string ignoredSkill = Write(packaged, "secret/SKILL.md", "---\nname: secret\ndescription: Ignored skill.\n---\n");
+      string localSkill = Write(project, "local/SKILL.md", "---\nname: local\ndescription: Eligible skill.\n---\n");
+      var auxiliary = new ScriptedChatClient(token => TextUpdates(["{\"keptIds\":[\"s1\"]}"], token));
+      await using RunningParent parent = await StartParentAsync();
+      var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution),
+          _ => Task.CompletedTask, "Use the resources.");
+      await using var catalog = Catalog(root, [ignoredInstruction, protectedInstruction, localSkill]);
+      var builder = new StartingContextBuilder(new ToolCatalog([]), new InstructionResourceDiscovery(catalog, packaged));
+      var preferences = new UserPreferences(project, null) {
+        SourceIgnores = new() { Skills = [packaged] },
+        ProtectedResources = new() { Instructions = [ignoredInstruction, protectedInstruction], Skills = [ignoredSkill] },
+      };
+
+      StartingContext context = await builder.PrepareAsync(
+          new(SessionKind.Primary, ModelFamily.Other, project), Guid.NewGuid(), "Use the resources.",
+          preferences, new HashSet<string>(StringComparer.Ordinal), pruner, CancellationToken.None)
+          .WaitAsync(TestTimeout);
+
+      string text = string.Join("\n", context.Instructions.Select(message => message.Text));
+      Assert.DoesNotContain("Ignored", text, StringComparison.Ordinal);
+      Assert.Contains("Protected instruction.", text, StringComparison.Ordinal);
+      Assert.Contains("Eligible skill.", text, StringComparison.Ordinal);
+      Assert.Equal(1, auxiliary.Calls);
+      Assert.DoesNotContain("Ignored", auxiliary.LastRequest[^1].Text, StringComparison.Ordinal);
+    } finally {
+      if (Directory.Exists(root))
+        Directory.Delete(root, recursive: true);
+    }
+  }
+
+  [Fact]
   public async Task PreparationWarnsWhenSkillAndInstructionCandidatesComeFromAPartialIndex() {
     string root = Path.Combine(Path.GetTempPath(), $"urd-context-{Guid.NewGuid():N}");
     string project = Path.Combine(root, "project");

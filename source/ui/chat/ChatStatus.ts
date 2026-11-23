@@ -47,7 +47,7 @@ export function deriveChatStatus(
     active ||
     chat.pending ||
     chat.pendingContinuation ||
-    chat.messageEdit ||
+    chat.messageEdit?.submission ||
     pendingCommand ||
     stopId ||
     snapshot?.stopRequested ||
@@ -77,7 +77,13 @@ export function deriveChatStatus(
       snapshot.lastSettlement?.executionId === chat.knownExecutionId),
   );
   const canSend = Boolean(
-    ready && snapshot && selection && chat.draft.trim() && !textError && canResendNotSent,
+    ready &&
+    snapshot &&
+    selection &&
+    (chat.draft.trim() || chat.draftImages.length > 0) &&
+    !(chat.draftImages.length > 0 && selection.supportsImages === false) &&
+    !textError &&
+    canResendNotSent,
   );
   const continuationAvailable = Boolean(
     snapshot?.canContinue === true && snapshot.lastSettlement?.executionId,

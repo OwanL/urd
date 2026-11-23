@@ -5,9 +5,10 @@ export function useWorkspaceRetention(
   activeId: string | null,
   tabIds: readonly string[],
   retainedTabLimit: number | null,
+  uploading: ReadonlySet<string>,
 ): readonly string[] {
   const retained = useRef<string[]>([]);
-  if (retainedTabLimit === null) return activeId ? [activeId] : [];
+  if (retainedTabLimit === null) return tabIds.filter((id) => id === activeId || uploading.has(id));
 
   if (activeId) {
     const selection = document.getSelection();
@@ -22,7 +23,9 @@ export function useWorkspaceRetention(
       activeId,
       ...retained.current.filter((id) => id !== activeId && tabIds.includes(id)),
     ];
-    retained.current = ordered.filter((id, index) => index < retainedTabLimit || pinned.has(id));
+    retained.current = ordered.filter(
+      (id, index) => index < retainedTabLimit || pinned.has(id) || uploading.has(id),
+    );
   }
   return retained.current.filter((id) => tabIds.includes(id));
 }

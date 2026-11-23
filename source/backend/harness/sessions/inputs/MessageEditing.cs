@@ -7,7 +7,7 @@ namespace Urd.Core.Sessions;
 internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncLock sessionLock,
     ActiveExecution activeExecution) {
   private Task<MessageEditReceipt>? editTask;
-  private MessageEditSubmission? editSubmission;
+  private string? editSubmissionHash;
 
   internal bool IsEditing => editTask is not null;
 
@@ -29,23 +29,24 @@ internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncL
 
   internal async Task<MessageEditReceipt> ReplaceAsync(MessageEditSubmission submission) {
     MessageEditStorage.Validate(submission);
+    if (submission.ImageIds is { } ids)
+      submission = submission with { ImageIds = Array.AsReadOnly(ids.ToArray()) };
+    string submissionHash = MessageEditStorage.Hash(submission);
     Task<MessageEditReceipt> work;
     TaskCompletionSource? released = null;
     using (await sessionLock.AcquireAsync()) {
       session.ThrowIfClosed();
-      MessageEditReceipt? receipt = store.MessageEdits.ReadReceiptOrValidate(session.Id, submission);
-      if (receipt is not null)
-        return receipt;
-      if (editTask is not null) {
-        if (editSubmission != submission)
-          throw new UserMessageConflictException(submission.OperationId);
+      if (editTask is not null && editSubmissionHash == submissionHash) {
         work = editTask;
       } else {
-        if (!session.CanAcceptEdits)
+        MessageEditReceipt? receipt = store.MessageEdits.ReadReceiptOrValidate(session.Id, submission, submissionHash);
+        if (receipt is not null)
+          return receipt;
+        if (editTask is not null || !session.CanAcceptEdits)
           throw new UserMessageConflictException(submission.OperationId);
         released = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        editSubmission = submission;
-        work = editTask = ReplaceAfterStopAsync(submission, released.Task);
+        editSubmissionHash = submissionHash;
+        work = editTask = ReplaceAfterStopAsync(submission, submissionHash, released.Task);
         session.PublishChange();
       }
     }
@@ -53,7 +54,7 @@ internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncL
     return await work;
   }
 
-  private async Task<MessageEditReceipt> ReplaceAfterStopAsync(MessageEditSubmission submission, Task admitted) {
+  private async Task<MessageEditReceipt> ReplaceAfterStopAsync(MessageEditSubmission submission, string hash, Task admitted) {
     await admitted;
     TaskCompletionSource? executionStart = null;
     try {
@@ -61,14 +62,14 @@ internal sealed class MessageEditing(SessionBase session, UrdStore store, AsyncL
       using var _ = await sessionLock.AcquireAsync();
       if (!session.CanAcceptEdits)
         throw new UserMessageConflictException(submission.OperationId);
-      MessageEditReceipt receipt = session.WriteToStore(() => store.MessageEdits.Replace(session.Id, submission));
+      MessageEditReceipt receipt = session.WriteToStore(() => store.MessageEdits.Replace(session.Id, submission, hash));
       session.ReplaceHistoryRevision(receipt.HistoryRevision);
       executionStart = session.StartExecutionAfterUnlock(receipt.ExecutionId, submission.LlmSelection);
       return receipt;
     } finally {
       using (await sessionLock.AcquireAsync()) {
         editTask = null;
-        editSubmission = null;
+        editSubmissionHash = null;
         executionStart ??= session.StartQueuedCompaction();
         session.PublishChange();
       }

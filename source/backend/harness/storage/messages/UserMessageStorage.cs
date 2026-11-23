@@ -9,6 +9,7 @@ internal enum InputProvenance { Human, AgentQuestion, InheritedContext, AgentAss
 
 // Retains idempotent message acceptances/refusals and submits each accepted message with its execution.
 internal sealed class UserMessageStorage(Database database) {
+  private const int MaxImagesPerMessage = 8;
   internal (UserMessageReceipt Receipt, bool NewlyAccepted) Submit(
       Guid sessionId, long historyRevision, UserMessageSubmission submission, bool accepting, Guid proposedExecutionId,
       Guid? activeExecutionId = null, InputProvenance provenance = InputProvenance.Human, Guid? senderSessionId = null) {
@@ -27,6 +28,7 @@ internal sealed class UserMessageStorage(Database database) {
     }
 
     Validate(sessionId, submission);
+    ValidateImages(transaction, sessionId, submission.ImageIds, submission.LlmSelection!);
     long actualRevision = ReadRevision(transaction, sessionId);
     MessageRefusalReason? refusal = DecideRefusal(
         transaction, sessionId, actualRevision, historyRevision, submission, accepting, activeExecutionId);
@@ -91,19 +93,21 @@ internal sealed class UserMessageStorage(Database database) {
 
   private UserMessageReceipt? ReadReceipt(Guid sessionId, Guid submissionId, SqliteTransaction? transaction) =>
       database.QuerySingleOrDefault(transaction, """
-        SELECT expected_history_revision, original_text_utf8, decision, run_id, refusal_reason, llm_selection_json, superseded
+        SELECT expected_history_revision, original_text_utf8, decision, run_id, refusal_reason, llm_selection_json,
+            superseded, image_ids_json
         FROM input_decisions
         WHERE session_id = $session AND input_id = $input;
         """, row => {
-          if (row.Bool("superseded"))
-            throw new UserMessageConflictException(submissionId);
-          LlmSelection selection = LlmSelectionJson.Read(row.String("llm_selection_json"))
-              ?? throw new InvalidOperationException("The retained receipt has no LLM selection.");
-          var original = new UserMessageSubmission(submissionId, row.Long("expected_history_revision"),
-              StorageText.StrictUtf8.GetString((byte[])row["original_text_utf8"]), selection);
-          return new UserMessageReceipt(sessionId, original, (MessageAcceptance)row.Int("decision"),
-              (MessageRefusalReason?)row.NullableInt("refusal_reason"), row.NullableGuid("run_id"));
-        }, ("$session", sessionId), ("$input", submissionId));
+        if (row.Bool("superseded"))
+          throw new UserMessageConflictException(submissionId);
+        LlmSelection selection = LlmSelectionJson.Read(row.String("llm_selection_json"))
+            ?? throw new InvalidOperationException("The retained receipt has no LLM selection.");
+        var original = new UserMessageSubmission(submissionId, row.Long("expected_history_revision"),
+            StorageText.StrictUtf8.GetString((byte[])row["original_text_utf8"]), selection,
+            UserImageIds.Read(row.NullableString("image_ids_json")));
+        return new UserMessageReceipt(sessionId, original, (MessageAcceptance)row.Int("decision"),
+            (MessageRefusalReason?)row.NullableInt("refusal_reason"), row.NullableGuid("run_id"));
+      }, ("$session", sessionId), ("$input", submissionId));
 
   private long ReadRevision(SqliteTransaction transaction, Guid sessionId) =>
       database.Scalar<long?>(transaction, "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
@@ -151,8 +155,8 @@ internal sealed class UserMessageStorage(Database database) {
     if (database.Execute(transaction, """
       INSERT INTO input_decisions (
           session_id, input_id, expected_history_revision, original_text_utf8, decision, run_id, refusal_reason,
-          llm_selection_json)
-      SELECT session_id, $input, $revision, $text, $decision, $run, $reason, $selection
+          llm_selection_json, image_ids_json)
+      SELECT session_id, $input, $revision, $text, $decision, $run, $reason, $selection, $images
       FROM sessions WHERE session_id = $session;
       """,
         ("$session", receipt.SessionId),
@@ -162,13 +166,35 @@ internal sealed class UserMessageStorage(Database database) {
         ("$decision", (int)receipt.Acceptance),
         ("$run", receipt.ExecutionId),
         ("$reason", receipt.RefusalReason is { } reason ? (int)reason : null),
-        ("$selection", LlmSelectionJson.Write(receipt.Submission.LlmSelection))) == 0)
+        ("$selection", LlmSelectionJson.Write(receipt.Submission.LlmSelection)),
+        ("$images", UserImageIds.Write(receipt.Submission.ImageIds))) == 0)
       throw new KeyNotFoundException($"Session {receipt.SessionId} does not exist.");
   }
 
   private static void EnsureSameSubmission(UserMessageReceipt retained, UserMessageSubmission submission) {
-    if (retained.Submission != submission)
+    UserMessageSubmission original = retained.Submission;
+    if (original with { ImageIds = null } != submission with { ImageIds = null }
+        || !(original.ImageIds ?? []).SequenceEqual(submission.ImageIds ?? []))
       throw new UserMessageConflictException(submission.SubmissionId);
+  }
+
+  internal void ValidateImages(SqliteTransaction transaction, Guid sessionId,
+      IReadOnlyList<Guid>? imageIds, LlmSelection selection) {
+    if (imageIds is not { Count: > 0 })
+      return;
+    if (!selection.SupportsImages)
+      throw new ArgumentException("The selected model does not support images.", nameof(selection));
+    if (imageIds.Count > MaxImagesPerMessage)
+      throw new ArgumentException($"A message can include at most {MaxImagesPerMessage} images.", nameof(imageIds));
+    if (imageIds.Distinct().Count() != imageIds.Count)
+      throw new ArgumentException("An image ID may only appear once per message.", nameof(imageIds));
+
+    foreach (Guid imageId in imageIds) {
+      if (imageId == Guid.Empty || !database.Scalar<bool>(transaction, """
+          SELECT EXISTS (SELECT 1 FROM user_images WHERE session_id = $session AND image_id = $image);
+          """, ("$session", sessionId), ("$image", imageId)))
+        throw new ArgumentException("An image does not belong to this session.", nameof(imageIds));
+    }
   }
 
   private static void Validate(Guid sessionId, UserMessageSubmission submission) {

@@ -7,7 +7,7 @@ import type {
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import { entryKey } from "./viewport/TranscriptRows.ts";
 import { EditableMessage } from "../message-editing/EditableMessage.tsx";
-import { isTextEntry } from "../../sessions/transcript/Messages.ts";
+import { TranscriptUserImages, transcriptMessageContent } from "./TranscriptUserImages.tsx";
 import { CompactionMarker } from "./CompactionMarker.tsx";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import {
@@ -87,7 +87,7 @@ export function VirtualEntry({
   }, [descriptor, rank, onMeasure]);
 
   const role = descriptor.entry.kind === "user" ? "user" : "assistant";
-  const text = isTextEntry(descriptor.entry) ? descriptor.text : null;
+  const { text, images } = transcriptMessageContent(descriptor);
   const richBody =
     text !== null ? (
       <display.MessageBody
@@ -131,14 +131,20 @@ export function VirtualEntry({
       style={{ top: `${top}px` }}
     >
       {status.before}
-      {richBody !== null && text !== null ? (
-        descriptor.agentQuestion ? (
+      {richBody !== null || images.length > 0 ? (
+        descriptor.agentQuestion && richBody !== null ? (
           <AgentQuestionExchange
             senderTitle={descriptor.agentQuestion.senderTitle}
             body={richBody}
           />
         ) : (
-          <EditableMessage entry={descriptor.entry} text={text}>
+          <EditableMessage entry={descriptor.entry} text={text ?? undefined} images={images}>
+            <TranscriptUserImages
+              sessionId={sessionId}
+              images={images}
+              root={root}
+              paused={paused}
+            />
             {richBody}
           </EditableMessage>
         )

@@ -19,7 +19,7 @@ import { SubagentRow } from "./tool-calls/SubagentRow.tsx";
 import { TranscriptContentReader } from "./reading/TranscriptContentReader.ts";
 import { boundaryResponseStatus } from "../prepass/PrepassRows.tsx";
 import type { ResponseStatusContext } from "../prepass/PrepassRows.tsx";
-import { isTextEntry } from "../../sessions/transcript/Messages.ts";
+import { TranscriptUserImages, transcriptMessageContent } from "./TranscriptUserImages.tsx";
 import type { TranscriptNavigationState } from "./navigation/TranscriptNavigationStorage.ts";
 import { VirtualTranscript } from "./VirtualTranscript.tsx";
 import type {
@@ -264,6 +264,7 @@ function PlainTranscript({
                 ? toolCallLabel(descriptor.tool, visibleHistory?.toolLabels ?? {})
                 : null;
               const agentExchange = isAgentExchange(descriptor, label);
+              const { text, images } = transcriptMessageContent(descriptor);
               const body = (text: TranscriptTextFacts) =>
                 display && RichBody ? (
                   <RichBody
@@ -301,15 +302,21 @@ function PlainTranscript({
                   }
                 >
                   {status.before}
-                  {isTextEntry(entry) && descriptor.text ? (
-                    descriptor.agentQuestion ? (
+                  {text || images.length > 0 ? (
+                    descriptor.agentQuestion && text ? (
                       <AgentQuestionExchange
                         senderTitle={descriptor.agentQuestion.senderTitle}
-                        body={body(descriptor.text)}
+                        body={body(text)}
                       />
                     ) : (
-                      <EditableMessage entry={entry} text={descriptor.text}>
-                        {body(descriptor.text)}
+                      <EditableMessage entry={entry} text={text ?? undefined} images={images}>
+                        <TranscriptUserImages
+                          sessionId={sessionId}
+                          images={images}
+                          root={root}
+                          paused={!visible || documentHidden}
+                        />
+                        {text ? body(text) : null}
                       </EditableMessage>
                     )
                   ) : descriptor.compaction ? (

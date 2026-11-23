@@ -13,7 +13,7 @@ namespace Urd.Core.Sessions;
 
 // Owns session identity, admission and execution lifetime. Collaborators share its session lock;
 // transcript source assembly, LLM work and cleanup joins run outside it.
-public abstract class SessionBase {
+public abstract partial class SessionBase {
   private readonly UrdStore store;
   private readonly PreferenceManager preferences;
   private readonly ModelSelector? modelSelector;
@@ -39,6 +39,7 @@ public abstract class SessionBase {
     status = new SessionStatus(record.HistoryRevision);
     Transcript = new SessionTranscript(Id, store, sessionLock);
     HistoryRevision = record.HistoryRevision;
+    snoozedUntil = record.SnoozedUntil;
     WorkingDirectory = record.WorkingDirectory;
     this.store = store;
     this.preferences = preferences ?? new PreferenceManager(store);
@@ -50,6 +51,18 @@ public abstract class SessionBase {
         tools ?? new ToolCatalog([]), pending ?? new PendingToolCalls(), subagents);
     messageEditing = new MessageEditing(this, store, sessionLock, activeExecution);
     this.processes = processes;
+  }
+
+  private protected async Task<UserImage> SaveImageAsync(Guid imageId, byte[] data, CancellationToken cancellation) {
+    using var _ = await sessionLock.AcquireAsync(cancellation);
+    ThrowIfClosed();
+    return await store.UserImages.SaveAsync(Id, imageId, data, cancellation);
+  }
+
+  private protected async Task<DataContent?> ReadImageAsync(Guid imageId, CancellationToken cancellation) {
+    using var _ = await sessionLock.AcquireAsync(cancellation);
+    ThrowIfClosed();
+    return store.UserImages.Read(Id, imageId);
   }
 
   public Guid Id { get; }
@@ -65,11 +78,11 @@ public abstract class SessionBase {
   internal long HistoryRevision { get; private set; }
 
   // Caller holds the session lock.
-  internal bool IsAcceptingWork => !closed && acceptingUserMessages && !messageEditing.IsEditing;
+  internal bool IsAcceptingWork => !closed && acceptingUserMessages && !messageEditing.IsEditing && !IsSnoozed;
   // Caller holds the session lock.
   internal bool CanStartWork => IsAcceptingWork && !needsAttention;
   // Caller holds the session lock.
-  internal bool CanAcceptEdits => !closed && acceptingUserMessages && !needsAttention;
+  internal bool CanAcceptEdits => !closed && acceptingUserMessages && !needsAttention && !IsSnoozed;
 
   internal void ThrowIfClosed() {
     if (closed)

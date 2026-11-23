@@ -8,7 +8,7 @@ namespace Urd.Core.Storage;
 // question is never offered back as the user's own message.
 internal sealed class NotSentInputReader(Database database) {
   internal static readonly string PageSql = $"""
-    SELECT i.input_id, i.run_id, i.ordinal,
+    SELECT i.input_id, i.run_id, i.ordinal, d.image_ids_json IS NOT NULL AS has_images,
         coalesce(substr(d.original_text_utf8, 1, {StorageText.PreviewByteLimit}), X'') AS preview
     FROM execution_inputs i
     JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
@@ -30,8 +30,10 @@ internal sealed class NotSentInputReader(Database database) {
       var inputs = new List<NotSentInput>(60);
       long lastOrdinal = 0;
       while (inputs.Count < 60 && reader.Read()) {
-        inputs.Add(new(reader.Guid("input_id"), reader.Guid("run_id"),
-            StorageText.ReadPreview((byte[])reader.GetValue(reader.GetOrdinal("preview")))));
+        string preview = StorageText.ReadPreview((byte[])reader.GetValue(reader.GetOrdinal("preview")));
+        if (string.IsNullOrWhiteSpace(preview) && reader.Bool("has_images"))
+          preview = "Image attachment";
+        inputs.Add(new(reader.Guid("input_id"), reader.Guid("run_id"), preview));
         lastOrdinal = reader.Long("ordinal");
       }
 

@@ -71,7 +71,8 @@
   color: var(--text-secondary);
   white-space: nowrap;
 }
-.settings-tabs button[aria-selected="true"] {
+.settings-tabs button[aria-selected="true"],
+.settings-tabs button[aria-pressed="true"] {
   border-bottom-color: var(--accent);
   color: var(--text-primary);
   font-weight: 600;

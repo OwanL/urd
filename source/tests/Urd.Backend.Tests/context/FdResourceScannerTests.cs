@@ -9,7 +9,10 @@ public sealed class FdResourceScannerTests {
   [InlineData("AGENT-INSTRUCTION.md", true)]
   [InlineData("INSTRUCTIONS_FOR_AGENTS.md", true)]
   [InlineData("SKILL.md", true)]
-  [InlineData("CLAUDE.md", false)]
+  [InlineData("CLAUDE.md", true)]
+  [InlineData("cLaUdE.Md", true)]
+  [InlineData("GEMINI.md", true)]
+  [InlineData("gEmInI.mD", true)]
   [InlineData("my-AGENTS.md", false)]
   public void MatchesResourceBasenames(string name, bool expected) =>
       Assert.Equal(expected, FdResourceScanner.IsResourcePath(Path.Combine("somewhere", name)));
@@ -22,11 +25,14 @@ public sealed class FdResourceScannerTests {
       await File.WriteAllTextAsync(Path.Combine(root, ".gitignore"), "*\n");
       await File.WriteAllTextAsync(Path.Combine(root, ".hidden", "skill.MD"), "");
       await File.WriteAllTextAsync(Path.Combine(root, "AGENTS.md"), "");
-      await File.WriteAllTextAsync(Path.Combine(root, "CLAUDE.md"), "");
+      await File.WriteAllTextAsync(Path.Combine(root, "cLaUdE.Md"), "");
+      await File.WriteAllTextAsync(Path.Combine(root, "gEmInI.mD"), "");
       var paths = await new FdResourceScanner().FindPathsAsync(root, CancellationToken.None);
-      Assert.Equal(2, paths.Length);
+      Assert.Equal(4, paths.Length);
       Assert.Contains(Path.Combine(root, ".hidden", "skill.MD"), paths);
       Assert.Contains(Path.Combine(root, "AGENTS.md"), paths);
+      Assert.Contains(Path.Combine(root, "cLaUdE.Md"), paths);
+      Assert.Contains(Path.Combine(root, "gEmInI.mD"), paths);
     } finally {
       Directory.Delete(root, recursive: true);
     }

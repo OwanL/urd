@@ -4,7 +4,45 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 40;
+  private const int SchemaVersion = 44;
+
+  private const string SnoozedSessionsIndex = """
+      CREATE INDEX sessions_snoozed_until ON sessions(snoozed_until_ms) WHERE snoozed_until_ms IS NOT NULL;
+      """;
+
+  private const string McpServersTable = """
+      CREATE TABLE mcp_servers (
+          server_id TEXT PRIMARY KEY NOT NULL,
+          name TEXT NOT NULL,
+          url TEXT NOT NULL,
+          authentication TEXT NOT NULL CHECK (authentication IN ('automatic', 'bearerToken', 'customHeader')),
+          header_name TEXT,
+          credential TEXT,
+          oauth_tokens TEXT,
+          tools_json TEXT NOT NULL,
+          CHECK (
+              (authentication = 'automatic' AND header_name IS NULL AND credential IS NULL)
+              OR (authentication = 'bearerToken' AND header_name IS NULL AND credential IS NOT NULL)
+              OR (authentication = 'customHeader' AND header_name IS NOT NULL
+                  AND length(trim(header_name)) > 0 AND credential IS NOT NULL)
+          )
+      ) STRICT;
+      """;
+
+  private const string UserImagesTable = """
+      CREATE TABLE user_images (
+          session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
+          image_id TEXT NOT NULL,
+          source_hash TEXT NOT NULL,
+          file_hash TEXT NOT NULL,
+          media_type TEXT NOT NULL CHECK (media_type IN ('image/png', 'image/jpeg', 'image/webp')),
+          byte_length INTEGER NOT NULL CHECK (byte_length > 0),
+          width INTEGER NOT NULL CHECK (width > 0),
+          height INTEGER NOT NULL CHECK (height > 0),
+          PRIMARY KEY (session_id, image_id)
+      ) STRICT;
+      CREATE INDEX user_images_file ON user_images(file_hash);
+      """;
 
   private const string ClosedUsageSchema = """
       CREATE TABLE closed_session_usage (
@@ -118,7 +156,13 @@ internal static class DatabaseSchema {
     [39] = """
         ALTER TABLE preferences ADD COLUMN lan_hosting_enabled INTEGER NOT NULL DEFAULT 0
             CHECK (lan_hosting_enabled IN (0, 1));
-        """
+        """,
+    [40] = UserImagesTable + "\nALTER TABLE input_decisions ADD COLUMN image_ids_json TEXT;",
+    [41] = McpServersTable,
+    [42] = "ALTER TABLE preferences ADD COLUMN source_ignores_json TEXT;",
+    [43] = """
+        ALTER TABLE sessions ADD COLUMN snoozed_until_ms INTEGER CHECK (snoozed_until_ms IS NULL OR kind = 0);
+        """ + "\n" + SnoozedSessionsIndex
   };
 
   internal static void Initialize(SqliteConnection connection) {
@@ -188,11 +232,14 @@ internal static class DatabaseSchema {
           completed_working_ms INTEGER NOT NULL DEFAULT 0 CHECK (completed_working_ms >= 0),
           working_time_incomplete INTEGER NOT NULL DEFAULT 0 CHECK (working_time_incomplete IN (0, 1)),
           position_version INTEGER NOT NULL DEFAULT 0 CHECK (position_version >= 0),
+          snoozed_until_ms INTEGER CHECK (snoozed_until_ms IS NULL OR kind = 0),
           CHECK ((kind = 0 AND parent_session_id IS NULL AND owning_call_id IS NULL)
               OR (kind = 1 AND parent_session_id IS NOT NULL AND parent_session_id <> session_id
                   AND owning_call_id IS NOT NULL AND length(owning_call_id) > 0))
       ) STRICT;
       {{SessionTreeIndex}}
+      {{SnoozedSessionsIndex}}
+      {{UserImagesTable}}
       CREATE UNIQUE INDEX sessions_owning_request
           ON sessions(parent_session_id, owning_call_id, owning_request_id)
           WHERE owning_call_id IS NOT NULL;
@@ -258,6 +305,7 @@ internal static class DatabaseSchema {
           input_id TEXT NOT NULL,
           expected_history_revision INTEGER NOT NULL CHECK (expected_history_revision >= 0),
           original_text_utf8 BLOB NOT NULL,
+          image_ids_json TEXT,
           superseded INTEGER NOT NULL DEFAULT 0 CHECK (superseded IN (0, 1)),
           decision INTEGER NOT NULL CHECK (decision IN (1, 2)),
           run_id TEXT,
@@ -582,6 +630,7 @@ internal static class DatabaseSchema {
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
           host_id TEXT NOT NULL
       ) STRICT;
+      {{McpServersTable}}
       CREATE TABLE setup_completion (
           singleton INTEGER PRIMARY KEY CHECK (singleton = 1)
       ) STRICT;
@@ -594,7 +643,8 @@ internal static class DatabaseSchema {
           model_choices_json TEXT,
           subagent_providers_json TEXT,
           protected_resources_json TEXT,
-          lan_hosting_enabled INTEGER NOT NULL DEFAULT 0 CHECK (lan_hosting_enabled IN (0, 1))
+          lan_hosting_enabled INTEGER NOT NULL DEFAULT 0 CHECK (lan_hosting_enabled IN (0, 1)),
+          source_ignores_json TEXT
       ) STRICT;
       CREATE INDEX execution_runs_history_order ON execution_runs(session_id, history_revision, ordinal DESC);
       CREATE INDEX continuation_omitted_requests ON execution_runs(session_id, history_revision, continuation_omitted_request_id)

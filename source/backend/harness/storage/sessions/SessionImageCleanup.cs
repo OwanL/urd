@@ -5,7 +5,7 @@ namespace Urd.Core.Storage;
 
 // Content-addressed files may be shared. Check references after deleting the owning rows,
 // then unlink only after commit while image publication is still blocked by the database gate.
-internal sealed class SessionImageCleanup(Database database, string toolDirectory, string markdownDirectory) {
+internal sealed class SessionImageCleanup(Database database, string toolDirectory, string markdownDirectory, string userDirectory) {
   private const string ToolHash = "json_extract(CASE WHEN j.type = 'object' THEN j.value END, '$.hash')";
   private const string ResultImages = "json_each(CASE WHEN json_valid(t.result_json) THEN t.result_json END, '$.images') j";
   private const string ToolHashes = $"""
@@ -17,6 +17,8 @@ internal sealed class SessionImageCleanup(Database database, string toolDirector
   internal void CollectCandidates(SqliteTransaction transaction) => database.Execute(transaction, $"""
       CREATE TEMP TABLE closing_tool_images (hash TEXT PRIMARY KEY NOT NULL) WITHOUT ROWID;
       CREATE TEMP TABLE closing_markdown_images (hash TEXT PRIMARY KEY NOT NULL) WITHOUT ROWID;
+      CREATE TEMP TABLE closing_user_images (hash TEXT PRIMARY KEY NOT NULL) WITHOUT ROWID;
+      INSERT OR IGNORE INTO closing_user_images SELECT file_hash FROM user_images WHERE session_id IN closing_sessions;
       INSERT OR IGNORE INTO closing_tool_images
       SELECT {ToolHash} FROM execution_runs r JOIN execution_tools t ON r.run_id = t.run_id, {ResultImages}
       WHERE r.session_id IN closing_sessions
@@ -29,7 +31,7 @@ internal sealed class SessionImageCleanup(Database database, string toolDirector
       WHERE m.session_id IN closing_sessions;
       """);
 
-  internal (List<string> Tool, List<string> Markdown) ReadOrphans(SqliteTransaction transaction) {
+  internal (List<string> Tool, List<string> Markdown, List<string> User) ReadOrphans(SqliteTransaction transaction) {
     List<string> tool = database.Scalar<bool>(transaction, "SELECT EXISTS(SELECT 1 FROM closing_tool_images);")
         ? database.Query(transaction, $"""
             SELECT hash FROM closing_tool_images
@@ -39,13 +41,18 @@ internal sealed class SessionImageCleanup(Database database, string toolDirector
         SELECT c.hash FROM closing_markdown_images c
         WHERE NOT EXISTS (SELECT 1 FROM markdown_images WHERE file_hash = c.hash);
         """, row => row.String("hash"));
-    database.Execute(transaction, "DROP TABLE closing_tool_images; DROP TABLE closing_markdown_images;");
-    return (tool, markdown);
+    List<string> user = database.Query(transaction, """
+        SELECT c.hash FROM closing_user_images c
+        WHERE NOT EXISTS (SELECT 1 FROM user_images WHERE file_hash = c.hash);
+        """, row => row.String("hash"));
+    database.Execute(transaction, "DROP TABLE closing_tool_images; DROP TABLE closing_markdown_images; DROP TABLE closing_user_images;");
+    return (tool, markdown, user);
   }
 
-  internal void Delete(List<string> tool, List<string> markdown) {
+  internal void Delete(List<string> tool, List<string> markdown, List<string> user) {
     DeleteFiles(toolDirectory, tool, null);
     DeleteFiles(markdownDirectory, markdown, null);
+    DeleteFiles(userDirectory, user, null);
   }
 
   // Startup has the exclusive profile lease and there are no live imports. This also retries
@@ -56,6 +63,8 @@ internal sealed class SessionImageCleanup(Database database, string toolDirector
         """, row => row.String("hash")).ToHashSet(StringComparer.Ordinal));
     DeleteFiles(markdownDirectory, null, () => database.Query(null,
         "SELECT DISTINCT file_hash FROM markdown_images;", row => row.String("file_hash")).ToHashSet(StringComparer.Ordinal));
+    DeleteFiles(userDirectory, null, () => database.Query(null,
+        "SELECT DISTINCT file_hash FROM user_images;", row => row.String("file_hash")).ToHashSet(StringComparer.Ordinal));
     return true;
   });
 

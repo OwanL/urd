@@ -16,17 +16,21 @@ The ASP.NET Core host serves the Preact browser workspace and its HTTP APIs. It 
 loopback by default; optional LAN hosting binds private IPv4 addresses separately, is off by
 default, and has no sign-in. Enable it only on a trusted network. The UI has local tabs, drafts,
 model/reasoning selection, Send/Stop and provider settings.
+Paste screenshots directly into chat with an image-capable model. Images can be added or removed
+in drafts and inline edits, and appear in the transcript. Reference other files by path in the prompt.
 User messages can be edited inline: Save stops current work, replaces the later conversation
 and starts a new response. Editing does not undo tool effects. Schema 36 is the first database
 version supported for automatic upgrades in future builds. Older experimental schemas are
 not supported; see [backend development](docs/backend-development.md).
 History metadata, not-sent inputs and one shared event stream support transcript updates.
 Closing an idle chat from its tab permanently deletes its conversation and tool history.
-Closing the browser or quitting Urd does not delete open chats.
+Closing the browser or quitting Urd does not delete open chats. Right-click an idle tab to snooze
+it until later without losing history or drafts. The header moon shows snoozed chats and can
+restore them early. Restoring a chat does not select it or start work.
 
 Windows file/shell tools, browser navigation through older history and on-demand tool-body
 inspection are available. Host startup records interrupted executions without replay; broader
-recovery remains unfinished. An explicit after-run queue and Snooze are unavailable. Transcript
+recovery remains unfinished. An explicit after-run queue is unavailable. Transcript
 virtualization, images and storage caching are active work; transcript records distinguish approved
 requirements from delivered behavior. Reopening does not replay work.
 

@@ -172,6 +172,26 @@
   color: var(--text-secondary);
 }
 
+.tool-row-review {
+  flex: none;
+  padding: 2px 6px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tool-row-review:hover {
+  color: var(--text-primary);
+}
+.tool-row-review:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.tool-row-review:disabled {
+  cursor: wait;
+}
+
 .tool-row-trailing {
   display: flex;
   flex: 0 1 auto;

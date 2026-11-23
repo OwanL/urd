@@ -60,40 +60,41 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
               CASE WHEN i.provenance = {(int)InputProvenance.AgentQuestion} THEN (SELECT t.title
                   FROM session_prepass_title t WHERE t.session_id = i.sender_session_id) END AS name, NULL AS json,
               NULL AS background, i.sender_session_id AS origin_request_id, NULL AS outcome, i.provenance AS input_provenance,
-              CASE WHEN i.provenance = {(int)InputProvenance.AgentQuestion} THEN i.input_id END AS question_id
+              CASE WHEN i.provenance = {(int)InputProvenance.AgentQuestion} THEN i.input_id END AS question_id,
+              d.image_ids_json AS image_ids_json
           FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id
           JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.Text}, o.chunk_index, o.text_utf8,
-              NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
+              NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_output o ON o.request_id = q.request_id
           WHERE q.include_response = 1 AND q.omit_assistant = 0
               AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolCall}, t.call_index, NULL,
-              t.call_id, t.name, t.arguments_json, NULL, NULL, NULL, NULL, NULL
+              t.call_id, t.name, t.arguments_json, NULL, NULL, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
           WHERE q.include_response = 1 AND q.omit_assistant = 0
               AND NOT EXISTS (SELECT 1 FROM execution_provider_context c WHERE c.request_id = q.request_id)
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolResult}, t.call_index, NULL,
-              t.call_id, t.name, t.result_json, t.background, t.request_id, t.outcome, NULL, NULL
+              t.call_id, t.name, t.result_json, t.background, t.request_id, t.outcome, NULL, NULL, NULL
           FROM requests q JOIN execution_tools t ON t.request_id = q.request_id
           WHERE q.include_response = 1 AND (t.result_json IS NOT NULL OR (t.background = 1 AND t.started = 1))
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ProviderResponse}, 0, NULL, NULL, NULL,
-              c.response_json, NULL, NULL, NULL, NULL, NULL
+              c.response_json, NULL, NULL, NULL, NULL, NULL, NULL
           FROM requests q JOIN execution_provider_context c ON c.request_id = q.request_id
           WHERE q.include_response = 1
           UNION ALL
           SELECT q.run_ordinal, q.request_index, q.request_id, {(int)ContextRowKind.ToolCompletion}, c.ordinal, NULL,
-              t.call_id, t.name, t.result_json, NULL, c.request_id, t.outcome, NULL, NULL
+              t.call_id, t.name, t.result_json, NULL, c.request_id, t.outcome, NULL, NULL, NULL
           FROM requests q JOIN execution_tool_completions c ON c.claimed_request_id = q.request_id
           JOIN execution_tools t ON t.request_id = c.request_id AND t.call_id = c.call_id
           WHERE c.session_id = $session AND c.history_revision = $revision
       ) SELECT c.request_id, c.kind, c.text_utf8, c.call_id, c.name, c.json, c.background,
           c.origin_request_id, c.outcome, c.input_provenance, c.question_id, c.run_ordinal, c.request_index,
-          q.usage_json, q.compaction_id, q.omit_assistant
+          q.usage_json, q.compaction_id, q.omit_assistant, c.image_ids_json
       FROM contents c JOIN requests q ON q.request_id = c.request_id
       ORDER BY c.run_ordinal, c.request_index, c.kind, c.content_index;
       """,
@@ -105,6 +106,7 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
     var messages = new List<ChatMessage>();
     var entries = new List<HistoryMessage>();
     var inputMessages = new Dictionary<ChatMessage, Guid?>();
+    var imageInputs = new Dictionary<ChatMessage, string>();
     ContextRow? previous = null;
     long? observedTokens = null;
     int observedThrough = 0;
@@ -139,10 +141,18 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
         case ContextRowKind.User:
           // A presented question is agent-authored data labelled with its sender, never human input.
           // User rows carry the asking session's final title in the name column.
+          string? imageIds = reader.NullableString("image_ids_json");
+          string? inputText = row.InputProvenance == InputProvenance.AgentQuestion && !forDelegation
+              ? AgentQuestionContext.Describe(row.Name, row.Text!) : row.Text;
           var input = new ChatMessage(ChatRole.User,
-              row.InputProvenance == InputProvenance.AgentQuestion && !forDelegation
-                  ? AgentQuestionContext.Describe(row.Name, row.Text!) : row.Text);
+              imageIds is not null && string.IsNullOrWhiteSpace(inputText) ? null : inputText);
           messages.Add(input);
+          if (imageIds is not null) {
+            if (forDelegation)
+              input.Contents.Add(new TextContent(SubagentContext.UserImageOmitted));
+            else
+              imageInputs.Add(input, imageIds);
+          }
           inputMessages.Add(input, row.QuestionId);
           if (forDelegation) {
             if (row.OriginRequestId is { } sender)
@@ -169,6 +179,23 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
     }
 
     FinishGroup();
+    reader.Close();
+    if (imageInputs.Count > 0) {
+      var images = new UserImageStorage(database, transaction.Connection!.DataSource + ".user-images");
+      var loaded = new Dictionary<Guid, DataContent>();
+      foreach (ChatMessage message in entries.Select(entry => entry.Message)) {
+        if (!imageInputs.TryGetValue(message, out string? json))
+          continue;
+        foreach (Guid id in UserImageIds.Read(json)!) {
+          if (!loaded.TryGetValue(id, out DataContent? image)) {
+            image = images.Read(transaction, sessionId, id)
+                ?? throw new InvalidDataException("A stored user image is missing.");
+            loaded.Add(id, image);
+          }
+          message.Contents.Add(new DataContent(image.Data, image.MediaType));
+        }
+      }
+    }
     if (observedTokens is { } known)
       observedTokens = ContextTokenBudget.AddSaturating(known,
           ContextTokenBudget.EstimateMessages(entries.Skip(observedThrough).Select(entry => entry.Message)));

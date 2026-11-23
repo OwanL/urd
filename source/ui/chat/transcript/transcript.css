@@ -71,6 +71,14 @@
   color: #171717;
 }
 
+.transcript-user-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .message-assistant {
   padding: 1px 0;
 }

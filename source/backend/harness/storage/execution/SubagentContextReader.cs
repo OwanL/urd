@@ -58,7 +58,7 @@ internal sealed class SubagentContextReader(Database database, ToolResultCodec t
           WHERE r.session_id = $session AND r.history_revision = $revision AND q.attempt = 2
               AND (r.ordinal, q.request_index) <= ($ordinal, $index)
         )
-        SELECT q.request_id, d.original_text_utf8, i.provenance
+        SELECT q.request_id, d.original_text_utf8, d.image_ids_json IS NOT NULL AS has_images, i.provenance
         FROM requests q JOIN execution_inputs i ON i.request_id = q.request_id AND i.session_id = $session
         JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
         WHERE i.provenance IN (0, 2) AND i.not_sent = 0 AND d.superseded = 0
@@ -70,7 +70,11 @@ internal sealed class SubagentContextReader(Database database, ToolResultCodec t
     string text = StorageText.StrictUtf8.GetString((byte[])row["original_text_utf8"]);
     if ((InputProvenance)row.Int("provenance") == InputProvenance.InheritedContext)
       return SubagentContext.ReadInherited(text).Where(entry => entry.Source == "human input");
-    return [new("human input", text, row.Guid("request_id"))];
+    Guid requestId = row.Guid("request_id");
+    if (!row.Bool("has_images"))
+      return [new("human input", text, requestId)];
+    return string.IsNullOrWhiteSpace(text) ? [new("human input", SubagentContext.UserImageOmitted, requestId)]
+        : [new("human input", text, requestId), new("human input", SubagentContext.UserImageOmitted, requestId)];
   }
 
   private sealed record Invocation(long RunOrdinal, int RequestIndex, HistoryMessageLocation? FirstRetained);

@@ -34,7 +34,8 @@ internal sealed class SessionStorage(Database database) {
             owning_call_id, owning_request_id, subagent_providers_json)
         VALUES ($id, 0, $directory, $kind, $parent, $call, $request, $providers);
         INSERT INTO session_creation (session_id) VALUES ($id);
-        SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id, owning_request_id
+        SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id,
+            owning_request_id, snoozed_until_ms
         FROM sessions WHERE session_id = $id;
         """, ReadRecord, ("$id", sessionId), ("$directory", workingDirectory), ("$kind", (int)kind),
         ("$parent", parentSessionId), ("$call", owningCallId), ("$request", owningRequestId),
@@ -86,9 +87,28 @@ internal sealed class SessionStorage(Database database) {
 
   internal SessionRecord? Read(Guid sessionId) => database.RunLocked(() => database.QuerySingleOrDefault(null,
       """
-      SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id, owning_request_id
+      SELECT session_id, history_revision, working_directory, kind, parent_session_id, owning_call_id,
+          owning_request_id, snoozed_until_ms
       FROM sessions WHERE session_id = $id;
       """, ReadRecord, ("$id", sessionId)));
+
+  internal IReadOnlyList<SnoozedSession> ReadSnoozed(DateTimeOffset now) => database.RunLocked(() =>
+      database.Query(null, """
+          SELECT s.session_id, s.snoozed_until_ms, t.title
+          FROM sessions s LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
+          WHERE s.snoozed_until_ms > $now
+          ORDER BY s.snoozed_until_ms, s.session_id;
+          """, row => new SnoozedSession(row.Guid("session_id"),
+              DateTimeOffset.FromUnixTimeMilliseconds(row.Long("snoozed_until_ms")), row.NullableString("title")),
+          ("$now", now.ToUnixTimeMilliseconds())));
+
+  internal void SetSnoozedUntil(Guid sessionId, DateTimeOffset? until) => database.Write(transaction => {
+    if (database.Execute(transaction, """
+        UPDATE sessions SET snoozed_until_ms = $until WHERE session_id = $session AND kind = $kind;
+        """, ("$until", until?.ToUnixTimeMilliseconds()), ("$session", sessionId), ("$kind", (int)SessionKind.Primary)) == 0)
+      throw new KeyNotFoundException($"Primary session '{sessionId}' does not exist.");
+    return true;
+  });
 
   // All descendants consult the primary's current policy, not a stale copy taken at delegation.
   internal Guid[]? ReadSubagentProviders(Guid sessionId) => database.RunLocked(() => {
@@ -197,5 +217,6 @@ internal sealed class SessionStorage(Database database) {
   private static SessionRecord ReadRecord(SqliteDataReader row)
       => new(row.Guid("session_id"), row.Long("history_revision"), row.NullableString("working_directory"),
           (SessionKind)row.Int("kind"), row.NullableGuid("parent_session_id"), row.NullableString("owning_call_id"),
-          row.NullableGuid("owning_request_id"));
+          row.NullableGuid("owning_request_id"), row.NullableLong("snoozed_until_ms") is long until
+              ? DateTimeOffset.FromUnixTimeMilliseconds(until) : null);
 }

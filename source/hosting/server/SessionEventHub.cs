@@ -15,6 +15,7 @@ internal sealed class SessionEventHub : IDisposable {
   internal SessionEventHub(SessionManager sessions) {
     this.sessions = sessions;
     sessions.SessionCreated += OnSessionCreated;
+    sessions.SessionSnoozeChanged += OnSessionSnoozeChanged;
     sessions.BrowserProvisioningChanged += OnBrowserProvisioningChanged;
   }
 
@@ -39,7 +40,13 @@ internal sealed class SessionEventHub : IDisposable {
       return pages.TryGetValue(streamId, out page!);
   }
 
-  private void OnSessionCreated(Guid sessionId) {
+  private void OnSessionCreated(Guid sessionId) =>
+      Broadcast(new SessionSseEvent("session-created", sessionId, new { session = sessionId }));
+
+  // An invalidation, not a replayable state transition. One queued notice covers all chats.
+  private void OnSessionSnoozeChanged(Guid _) => Broadcast(new SessionSseEvent("snooze-changed", null, new { }));
+
+  private void Broadcast(SessionSseEvent message) {
     SessionEventPage[] current;
     lock (gate) {
       if (disposed)
@@ -47,7 +54,6 @@ internal sealed class SessionEventHub : IDisposable {
       current = pages.Values.ToArray();
     }
 
-    var message = new SessionSseEvent("session-created", sessionId, new { session = sessionId });
     foreach (SessionEventPage page in current)
       page.EnqueueBroadcast(message);
   }
@@ -90,6 +96,7 @@ internal sealed class SessionEventHub : IDisposable {
     }
 
     sessions.SessionCreated -= OnSessionCreated;
+    sessions.SessionSnoozeChanged -= OnSessionSnoozeChanged;
     sessions.BrowserProvisioningChanged -= OnBrowserProvisioningChanged;
     foreach (SessionEventPage page in current)
       page.Close();

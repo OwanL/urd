@@ -5,6 +5,7 @@ export interface UserMessageSubmission {
   readonly submissionId: string;
   readonly expectedHistoryRevision: number;
   readonly text: string;
+  readonly imageIds?: readonly string[] | null;
   readonly llmSelection: LlmSelection | null;
 }
 

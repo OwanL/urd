@@ -1,17 +1,16 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Text.RegularExpressions;
+using Urd.Core.Preferences;
 
 namespace Urd.Core.Context;
 
 internal sealed class FdResourceScanner {
   private readonly string baseDirectory = AppContext.BaseDirectory;
-  private const string Pattern = "^(AGENTS|APPEND[_-]SYSTEM|AGENT[_-]INSTRUCTIONS?|INSTRUCTIONS[_-]FOR[_-]AGENTS|SKILL)\\.md$";
-  private static readonly HashSet<string> ResourceNames = new(StringComparer.OrdinalIgnoreCase) {
-    "AGENTS.md", "APPEND_SYSTEM.md", "APPEND-SYSTEM.md", "AGENT_INSTRUCTIONS.md",
-    "AGENT-INSTRUCTIONS.md", "AGENT_INSTRUCTION.md", "AGENT-INSTRUCTION.md",
-    "INSTRUCTIONS_FOR_AGENTS.md", "INSTRUCTIONS-FOR-AGENTS.md", "SKILL.md"
-  };
+  private static readonly HashSet<string> instructionNames = new(SourceIgnoreRules.InstructionFilenames
+      .SelectMany(name => name.Contains('_') ? new[] { name, name.Replace('_', '-') } : [name]), StringComparer.OrdinalIgnoreCase);
+  private static readonly string pattern = $"^(?:{string.Join("|", instructionNames.Append("SKILL.md").Select(Regex.Escape))})$";
 
   // Junk directories below the working directory would otherwise dominate filename scans and
   // watcher pending-event limits: the recycle bin, package stores, build outputs and disposable
@@ -21,7 +20,9 @@ internal sealed class FdResourceScanner {
   private static readonly StringComparison nameComparison = OperatingSystem.IsWindows()
       ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-  public static bool IsResourcePath(string path) => ResourceNames.Contains(Path.GetFileName(path));
+  internal static bool IsInstructionPath(string path) => instructionNames.Contains(Path.GetFileName(path));
+  internal static bool IsSkillPath(string path) => Path.GetFileName(path).Equals("SKILL.md", StringComparison.OrdinalIgnoreCase);
+  public static bool IsResourcePath(string path) => IsInstructionPath(path) || IsSkillPath(path);
 
   // fd prunes unanchored globs against every entry name below the scan root; a glob containing
   // a separator is anchored to the scan root, so a nested copy of the same path stays visible.
@@ -122,7 +123,7 @@ internal sealed class FdResourceScanner {
       start.ArgumentList.Add("--exclude");
       start.ArgumentList.Add(exclusion);
     }
-    foreach (string argument in new[] { "--", Pattern, scan.Root })
+    foreach (string argument in new[] { "--", pattern, scan.Root })
       start.ArgumentList.Add(argument);
 
     using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start the bundled fd scanner.");

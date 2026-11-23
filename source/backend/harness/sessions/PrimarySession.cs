@@ -19,6 +19,12 @@ public sealed partial class PrimarySession : SessionBase {
   internal Task<(SessionCloseStatus Status, IReadOnlyList<Guid>? DeletedSessions)> CloseIfIdleAsync(Action ensureManagerOpen, CancellationToken cancellation) =>
       DeleteIfIdleAsync(ensureManagerOpen, cancellation);
 
+  public Task<UserImage> SaveUserImageAsync(Guid imageId, byte[] data, CancellationToken cancellationToken = default) =>
+      SaveImageAsync(imageId, data, cancellationToken);
+
+  public Task<DataContent?> ReadUserImageAsync(Guid imageId, CancellationToken cancellationToken = default) =>
+      ReadImageAsync(imageId, cancellationToken);
+
   // Returns a saved acceptance/refusal, without waiting for the LLM answer.
   public Task<UserMessageReceipt> SubmitUserMessageAsync(UserMessageSubmission submission) => AdmitUserMessageAsync(submission);
 

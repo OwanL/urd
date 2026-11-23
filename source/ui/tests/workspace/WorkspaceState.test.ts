@@ -114,7 +114,7 @@ function sending(submission = original) {
 
 function workspace(): WorkspaceState {
   return {
-    version: 7,
+    version: 8,
     tabs: [sessionId],
     activeId: sessionId,
     chats: { [sessionId]: sending() },
@@ -124,7 +124,7 @@ function workspace(): WorkspaceState {
 
 void test("new state is independent, empty and does not invent a selection", () => {
   assert.deepEqual(emptyWorkspace(), {
-    version: 7,
+    version: 8,
     tabs: [],
     activeId: null,
     chats: {},
@@ -184,7 +184,12 @@ void test("draft edits increment the version without mutating earlier state", ()
 void test("beginSubmission saves the full original and version and clears an old error", () => {
   const chat = { ...editDraft(newChat(null), original.text), error: "Previous refusal" };
   const pending = beginSubmission(chat, original);
-  assert.deepEqual(pending.pending, { original, draftVersion: 1, status: "sending" });
+  assert.deepEqual(pending.pending, {
+    original,
+    draftVersion: 1,
+    draftImagesVersion: 0,
+    status: "sending",
+  });
   assert.equal(pending.error, null);
   assert.equal(pending.draft, original.text);
   assert.equal(chat.pending, null);
@@ -437,7 +442,8 @@ void test("corrupt saved structure throws instead of resetting or discarding dra
     { ...workspace(), version: 4 },
     { ...workspace(), version: 5 },
     { ...workspace(), version: 6 },
-    { ...workspace(), version: 8 },
+    { ...workspace(), version: 7 },
+    { ...workspace(), version: 9 },
     { ...workspace(), tabs: [sessionId, sessionId] },
     { ...workspace(), tabs: ["missing"] },
     { ...workspace(), tabs: [1] },

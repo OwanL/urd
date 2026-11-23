@@ -10,6 +10,7 @@ export interface SessionEventCallbacks {
   disconnected(): void;
   error?(message: string): void;
   provisioning?(stage: BrowserProvisioningStage, detail: string | null): void;
+  snoozeChanged?(): void;
 }
 
 // Host-wide browser provisioning stages; detail carries the installer's report while downloading.
@@ -213,6 +214,11 @@ export class SessionEvents {
       this.call(() =>
         this.callbacks.provisioning?.(event.state as BrowserProvisioningStage, detail),
       );
+      return;
+    }
+
+    if (message.event === "snooze-changed") {
+      this.call(() => this.callbacks.snoozeChanged?.());
       return;
     }
 

@@ -141,7 +141,7 @@ export async function runTranscriptBaseline() {
     await installProbe(page);
     const streamId = ids[5]!;
     const workspace = encodeWorkspace({
-      version: 7,
+      version: 8,
       tabs: ids,
       activeId: streamId,
       chats: Object.fromEntries(ids.map((id) => [id, newChat(null)])),

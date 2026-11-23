@@ -150,7 +150,11 @@ provider calls.
 | --- | --- |
 | POST `/api/sessions` | Empty JSON object `{}` → 201 `{sessionId}`; Location names its snapshot |
 | POST `/api/sessions/{sessionId}/close` | Empty JSON object `{}` → 204 after permanent closure; 404 if absent, 409 if work is active or cannot be confirmed stopped. Does not stop an active execution. |
-| GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`, optional first-page `latestLlmSelection`) |
+| GET `/api/sessions?cursor=...` | Optional opaque string cursor → 200 `SessionIdPage` (`sessionIds`, `nextCursor`, optional first-page `latestLlmSelection`); includes snoozed chats |
+| GET `/api/sessions/snoozed` | 200 `{now, sessions}` with server time and unexpired `{sessionId, until, title}` entries in deadline order |
+| POST `/api/sessions/{sessionId}/snooze` | `{until}` snoozes an idle primary chat; `{expectedUntil}` restores the observed snooze early. 204 on success, 409 for busy or conflicting state. |
+| PUT `/api/sessions/{sessionId}/user-images/{imageId}` | Raw PNG, JPEG, or WebP (up to 10 MiB) → 200 `{imageId,width,height}`. The same ID and bytes may be retried. |
+| GET `/api/sessions/{sessionId}/user-images/{imageId}` | 200 stored raster bytes, or 404 if not found in that session |
 | POST `/api/sessions/{sessionId}/message-submissions` | `UserMessageSubmission` → 200 `UserMessageReceipt`, Accepted **or** Refused |
 | GET `/api/sessions/{sessionId}/message-submissions/{submissionId}` | 200 receipt or literal JSON `null`; 409 if an edit removed the input |
 | POST `/api/sessions/{sessionId}/message-edits` | `MessageEditSubmission` → 200 `MessageEditReceipt` after Stop/settlement and committed replacement |
@@ -177,6 +181,10 @@ provider calls.
 | GET `/api/sessions/{sessionId}/positions/entries/{executionId}/{entryId}` | `expectedHistoryRevision`, `kind` → 200 positioned entry window |
 | GET `/api/sessions/{sessionId}/positions/prompts` | `expectedHistoryRevision`, optional `afterRank` and `limit` (1–60) → 200 `TranscriptPromptPage` |
 | GET `/api/sessions/{sessionId}/positions/prompts/{executionId}/{entryId}` | `expectedHistoryRevision` → 200 positioned user-prompt window |
+
+Message submissions and edits can include up to eight ordered `imageIds` from their session.
+Omitting `imageIds` on an edit preserves the original attachments; `[]` removes them from the replacement.
+User transcript entries expose the image IDs and dimensions without embedding image bytes.
 
 [`SessionRoutes.cs`](../source/hosting/server/SessionRoutes.cs) owns the route inventory;
 [`SessionClient.ts`](../source/ui/sessions/SessionClient.ts) supplies the browser query shapes.

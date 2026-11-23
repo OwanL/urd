@@ -64,6 +64,9 @@ internal sealed class SessionInputs(SessionBase session, UrdStore store, AsyncLo
   }
 
   internal async Task<UserMessageReceipt> AdmitUserMessageAsync(UserMessageSubmission submission) {
+    ArgumentNullException.ThrowIfNull(submission);
+    submission = submission with { ImageIds = submission.ImageIds is { Count: > 0 } ids
+        ? Array.AsReadOnly(ids.ToArray()) : null };
     // A new execution starts only after the lock is released.
     TaskCompletionSource? executionStart = null;
     UserMessageReceipt receipt;

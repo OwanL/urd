@@ -6,16 +6,22 @@ import type { MessageEditDraft } from "../../sessions/inputs/MessageEdit.ts";
 import type {
   TranscriptEntryRef,
   TranscriptTextFacts,
+  UserImage,
 } from "../../sessions/transcript/Messages.ts";
 import type { MessageEditing } from "./MessageEditing.ts";
 import { submissionTextError } from "../../sessions/inputs/UserMessageSubmission.ts";
 
+import { DraftImagePreviews } from "../user-images/DraftImagePreviews.tsx";
+import { imageLimitError, imageModelError, maxUserImages } from "../user-images/ImagePaste.ts";
+import type { ImageUploads } from "../user-images/useImageUploads.ts";
 import "./message-editing.css";
 
 export interface MessageEditingContextValue {
   controller: MessageEditing;
   sessionId: string;
   draft: MessageEditDraft | undefined;
+  uploads: ImageUploads;
+  active: boolean;
   selection: LlmSelection | null;
   canEdit: boolean;
 }
@@ -25,10 +31,12 @@ export const MessageEditingContext = createContext<MessageEditingContextValue | 
 export function EditableMessage({
   entry,
   text,
+  images,
   children,
 }: {
   entry: TranscriptEntryRef;
-  text: TranscriptTextFacts;
+  text?: TranscriptTextFacts | undefined;
+  images?: readonly UserImage[] | null | undefined;
   children: ComponentChildren;
 }) {
   const context = useContext(MessageEditingContext);
@@ -45,7 +53,7 @@ export function EditableMessage({
   const begin = () => {
     if (!context.canEdit || context.draft) return;
     height.current = shell.current?.getBoundingClientRect().height;
-    void context.controller.open(context.sessionId, entry, text);
+    void context.controller.open(context.sessionId, entry, text, images ?? []);
   };
   return (
     <div
@@ -111,13 +119,42 @@ export function InlineMessageEditor({
   const editor = useRef<HTMLDivElement>(null);
   const editing = draft.status === "editing";
   const textError = submissionTextError(draft.text);
-  useLayoutEffect(() => editor.current?.focus({ preventScroll: true }), []);
+  const images = draft.images ?? [];
+  const modelError =
+    images.length > maxUserImages
+      ? imageLimitError
+      : (images.length || context.uploads.images.length) &&
+          context.selection?.supportsImages === false
+        ? imageModelError
+        : null;
+  const canSave = Boolean(
+    context.canEdit &&
+    editing &&
+    (draft.text.trim() || images.length) &&
+    !textError &&
+    !modelError &&
+    context.selection &&
+    !context.uploads.images.length,
+  );
   useLayoutEffect(() => {
-    if (!editing || !input.current) return;
+    const element = editor.current;
+    if (!element?.closest<HTMLElement>("[data-chat-session]")?.hidden)
+      element?.focus({ preventScroll: true });
+  }, []);
+  useLayoutEffect(() => {
+    if (
+      !editing ||
+      !input.current ||
+      input.current.closest<HTMLElement>("[data-chat-session]")?.hidden
+    )
+      return;
+    if (document.activeElement !== editor.current && document.activeElement !== document.body)
+      return;
     input.current.focus({ preventScroll: true });
     input.current.setSelectionRange(input.current.value.length, input.current.value.length);
   }, [editing]);
   const save = () => {
+    if (!canSave || context.uploads.pending()) return;
     const element = editor.current;
     const panel = element?.closest<HTMLElement>("[data-chat-session]");
     void context.controller.save(context.sessionId, context.selection).then(() => {
@@ -149,6 +186,18 @@ export function InlineMessageEditor({
       data-message-editor=""
       aria-busy={draft.status === "saving"}
     >
+      <DraftImagePreviews
+        sessionId={context.sessionId}
+        images={images}
+        uploads={context.uploads}
+        input={input}
+        onRemove={(imageId) =>
+          context.controller.removeImage(context.sessionId, draft.target, imageId)
+        }
+        modelError={modelError}
+        paused={!context.active}
+        readOnly={!editing}
+      />
       <textarea
         ref={input}
         aria-label="Edit message"
@@ -167,11 +216,7 @@ export function InlineMessageEditor({
         <button type="button" disabled={Boolean(draft.submission)} onClick={onCancel}>
           Cancel
         </button>
-        <button
-          type="button"
-          disabled={!editing || !draft.text.trim() || Boolean(textError) || !context.selection}
-          onClick={save}
-        >
+        <button type="button" disabled={!canSave} onClick={save}>
           Save
         </button>
       </div>

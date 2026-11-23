@@ -59,7 +59,12 @@ function pendingChat(status: "sending" | "uncertain"): ChatState {
   };
   return {
     ...chat,
-    pending: { original, draftVersion: chat.draftVersion, status },
+    pending: {
+      original,
+      draftVersion: chat.draftVersion,
+      draftImagesVersion: chat.draftImagesVersion,
+      status,
+    },
   };
 }
 
@@ -77,6 +82,14 @@ void test("an empty composer submits Continue only when explicitly eligible", ()
     label: "Send",
   });
   assert.deepEqual(composerSubmissionState("draft", false, true, true), {
+    action: null,
+    label: "Send",
+  });
+  assert.deepEqual(composerSubmissionState("", true, true, true, true), {
+    action: "send",
+    label: "Send",
+  });
+  assert.deepEqual(composerSubmissionState("", false, true, true, true), {
     action: null,
     label: "Send",
   });

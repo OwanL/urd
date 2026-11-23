@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { editDraft } from "../../chat/ChatState.ts";
+import { appendDraftImage, removeDraftImage, editDraft } from "../../chat/ChatState.ts";
 import type { UserMessageSubmission } from "../../sessions/inputs/UserMessageSubmission.ts";
 import {
   sessionId,
@@ -14,6 +14,89 @@ import {
   emptyClient,
   withVisibleDocument,
 } from "./WorkspaceCommandsFixture.ts";
+
+void test("image sends journal ordered refs and preserve newer text and image edits", async () => {
+  const workspace = fixture();
+  const first = { imageId: "first", width: 10, height: 20 };
+  const second = { imageId: "second", width: 20, height: 30 };
+  workspace.access.updateChat(sessionId, (chat) =>
+    appendDraftImage(
+      appendDraftImage({ ...chat, selection: { ...selection, supportsImages: true } }, first),
+      second,
+    ),
+  );
+  const coordinator = commands(
+    workspace.access,
+    emptyClient(async (_id, original) => {
+      assert.deepEqual(original.imageIds, ["first", "second"]);
+      assert.deepEqual(
+        workspace.durable().chats[sessionId]?.pending?.original.imageIds,
+        original.imageIds,
+      );
+      workspace.access.updateChat(sessionId, (chat) =>
+        appendDraftImage(removeDraftImage(editDraft(chat, "new"), "first"), {
+          imageId: "third",
+          width: 1,
+          height: 1,
+        }),
+      );
+      return receipt(original);
+    }),
+  );
+  await coordinator.send(sessionId, snapshot(), false, true);
+  assert.equal(workspace.read().chats[sessionId]?.draft, "new");
+  assert.deepEqual(
+    workspace.read().chats[sessionId]?.draftImages.map((image) => image.imageId),
+    ["second", "third"],
+  );
+});
+
+void test("image-only send retries the same journal after reload", async () => {
+  const workspace = fixture();
+  workspace.access.updateChat(sessionId, (chat) =>
+    appendDraftImage(
+      editDraft({ ...chat, selection: { ...selection, supportsImages: true } }, ""),
+      { imageId: "image", width: 4, height: 5 },
+    ),
+  );
+  const first = commands(
+    workspace.access,
+    emptyClient(async () => {
+      throw new Error("lost");
+    }),
+  );
+  await first.send(sessionId, snapshot(), false, true);
+  workspace.reload();
+  const original = workspace.read().chats[sessionId]!.pending!.original;
+  assert.deepEqual(original.imageIds, ["image"]);
+  const retry = commands(
+    workspace.access,
+    emptyClient(async (_id, submission) => {
+      assert.deepEqual(submission, original);
+      return receipt(submission);
+    }),
+  );
+  await retry.retryOriginalSubmission(sessionId);
+  assert.deepEqual(workspace.read().chats[sessionId]?.draftImages, []);
+});
+
+void test("a text-only selection cannot dispatch a draft with images", async () => {
+  const { access, read } = fixture();
+  const image = { imageId: "retained", width: 4, height: 5 };
+  access.updateChat(sessionId, (chat) => appendDraftImage({ ...chat, selection }, image));
+  let sends = 0;
+  const coordinator = commands(
+    access,
+    emptyClient(async (_id, submission) => {
+      sends++;
+      return receipt(submission);
+    }),
+  );
+  await coordinator.send(sessionId, snapshot(), false, true);
+  assert.equal(sends, 0);
+  assert.deepEqual(read().chats[sessionId]?.draftImages, [image]);
+  assert.equal(read().chats[sessionId]?.pending, null);
+});
 
 void test("Send freezes the inherited model and remembers it for subsequent empty chats", async () => {
   const { access, read, durable } = fixture();

@@ -8,8 +8,9 @@ export function composerSubmissionState(
   canSend: boolean,
   canContinue: boolean,
   continuationAvailable: boolean,
+  hasImages = false,
 ): ComposerSubmissionState {
-  const hasMessage = Boolean(text.trim());
+  const hasMessage = hasImages || Boolean(text.trim());
   return {
     action: hasMessage ? (canSend ? "send" : null) : canContinue ? "continue" : null,
     label: !hasMessage && continuationAvailable ? "Continue" : "Send",

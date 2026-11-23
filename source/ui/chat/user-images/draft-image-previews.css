@@ -1,0 +1,79 @@
+.draft-image-previews {
+  padding-block: 3px 6px;
+}
+
+.draft-image-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-block-size: 148px;
+  overflow: auto;
+  margin: 0;
+  padding: 3px;
+  list-style: none;
+}
+
+.draft-image-card {
+  position: relative;
+  flex: 0 0 64px;
+  block-size: 64px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-popover);
+}
+
+.draft-image-card > .stored-user-image {
+  inline-size: 100%;
+  block-size: 100%;
+}
+
+.draft-image-card img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.draft-image-card button {
+  position: absolute;
+  right: 2px;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid #ffffff40;
+  border-radius: 5px;
+  background: #171717e8;
+  color: #fff;
+}
+
+.draft-image-card button:hover {
+  background: #333;
+}
+
+.draft-image-card .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.draft-image-remove {
+  top: 2px;
+}
+
+.draft-image-retry {
+  bottom: 2px;
+}
+
+.draft-image-feedback {
+  font-size: 12px;
+}
+
+.draft-image-feedback:empty {
+  display: none;
+}
+
+.draft-image-feedback span {
+  display: block;
+}

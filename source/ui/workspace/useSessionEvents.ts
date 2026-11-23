@@ -26,6 +26,7 @@ export function useSessionEvents(
   ready: boolean,
   open: readonly string[],
   active: string | null,
+  refreshSnoozed: () => void,
 ) {
   const [notices, setNotices] = useState<Record<string, string>>({});
   const [activity, setActivity] = useState(emptySessionActivity);
@@ -91,6 +92,7 @@ export function useSessionEvents(
         setStreamId(nextStreamId);
         setConnectionState("connected");
         setHasConnected(true);
+        refreshSnoozed();
         setError(null);
         discovery?.abort();
         discovery = new AbortController();
@@ -114,6 +116,7 @@ export function useSessionEvents(
         if (titled !== state) access.save(titled);
       },
       created: add,
+      snoozeChanged: refreshSnoozed,
       disconnected() {
         streamConnected = false;
         setStreamId(null);
@@ -173,7 +176,7 @@ export function useSessionEvents(
       window.removeEventListener("pageshow", activate);
       window.removeEventListener("focus", activate);
     };
-  }, [client, access, discovered, forget, isClosed, ready]);
+  }, [client, access, discovered, forget, isClosed, ready, refreshSnoozed]);
 
   useEffect(() => {
     if (watched !== active) {

@@ -1,5 +1,6 @@
 using System.Text;
 using Urd.Core.Context;
+using Urd.Core.Preferences;
 using Xunit;
 
 namespace Urd.Backend.Tests.Context;
@@ -60,6 +61,98 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
   }
 
   [Fact]
+  public async Task InstructionPreviewRetainsIgnoredPathsAndOptInDoesNotCrossHarnessBoundaries() {
+    string claude = Write("CLAUDE.md", "Claude instructions");
+    string gemini = Write("nested/Gemini.md", "Gemini instructions");
+    string agents = Write("nested/deep/AGENTS.md", "Project instructions");
+    Write(".claude/CLAUDE.md", "Not a project instruction");
+    Write(".gemini/GEMINI.md", "Not a project instruction");
+    await using var catalog = CreateCatalog();
+    var discovery = new InstructionResourceDiscovery(catalog, Packaged);
+
+    SourcePreview defaults = await discovery.PreviewAsync(Project, false, new(), [], CancellationToken.None);
+    Assert.Equal(new[] { claude, gemini, agents }.Order(StringComparer.Ordinal), defaults.Paths);
+    Assert.Equal(Project, defaults.WorkingDirectory);
+    Assert.Equal(1, defaults.EligibleCount);
+    Assert.True(defaults.EstimatedTokens > 0);
+    Assert.False(defaults.Partial);
+
+    var rules = new SourceIgnoreRules { Filenames = [], Instructions = [Path.Combine(Project, "nested", "deep")] };
+    SourcePreview changed = await discovery.PreviewAsync(Project, false, rules, [], CancellationToken.None);
+    Assert.Equal(defaults.Paths, changed.Paths);
+    Assert.Equal(2, changed.EligibleCount);
+    DiscoveredInstructionResources resources = await discovery.FindAsync(Project, rules, CancellationToken.None);
+    Assert.Equal([claude, gemini], resources.Instructions.Select(document => document.Path));
+  }
+
+  [Fact]
+  public async Task SkillPreviewIncludesIgnoredPackagedAndProjectDescendantsButCountsOnlySelectorCandidates() {
+    string ignored = Write("ignored/deep/SKILL.md", Skill("project", "Project skill."));
+    string eligible = Write("ignored-other/SKILL.md", Skill("eligible", "Eligible skill."));
+    string invalid = Write("invalid/SKILL.md", "no frontmatter");
+    string packaged = WriteTo(Packaged, "nested/deep/SKILL.md", Skill("packaged", "Packaged skill."));
+    string protectedSkill = WriteTo(Packaged, "protected/SKILL.md", Skill("protected", "Protected skill."));
+    await using var catalog = CreateCatalog();
+    var discovery = new InstructionResourceDiscovery(catalog, Packaged);
+    var rules = new SourceIgnoreRules { Skills = [Path.Combine(Project, "ignored"), Path.Combine(Packaged, "nested")] };
+
+    SourcePreview preview = await discovery.PreviewAsync(Project, true, rules, [protectedSkill], CancellationToken.None);
+    Assert.Equal(new[] { ignored, eligible, invalid, packaged, protectedSkill }.Order(StringComparer.Ordinal), preview.Paths);
+    Assert.Equal(1, preview.EligibleCount);
+    var resources = await discovery.FindAsync(Project, rules, CancellationToken.None);
+    Assert.Equal([eligible, protectedSkill], resources.Skills.Select(skill => skill.Path));
+    Assert.Equal(StartingResourcePruner.EstimateManifestTokens(new[] { resources.Skills[0] }), preview.EstimatedTokens);
+
+    SourcePreview allIgnored = await discovery.PreviewAsync(Project, true,
+        new() { Skills = [Project, Packaged] }, [], CancellationToken.None);
+    Assert.Equal(preview.Paths, allIgnored.Paths);
+    Assert.Equal(0, allIgnored.EligibleCount);
+    Assert.Equal(0, allIgnored.EstimatedTokens);
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task IncludedDescendantsAreDiscoveredWithoutExposingSiblings(bool skill) {
+    string filename = skill ? "SKILL.md" : "AGENTS.md";
+    string text = skill ? Skill("included", "Included skill.") : "Instructions";
+    string included = Write($"tree/included/{filename}", text);
+    Write($"tree/sibling/{filename}", text);
+    Write($"tree/included/excluded/{filename}", text);
+    string tree = Path.Combine(Project, "tree");
+    string exception = Path.Combine(tree, "included");
+    string excluded = Path.Combine(exception, "excluded");
+    var rules = new SourceIgnoreRules {
+      Instructions = [tree, excluded], Skills = [tree, excluded],
+      InstructionIncludes = [exception], SkillIncludes = [exception], Filenames = []
+    };
+    await using var catalog = CreateCatalog();
+    var discovery = new InstructionResourceDiscovery(catalog, Packaged);
+    SourcePreview preview = await discovery.PreviewAsync(Project, skill, rules, [], CancellationToken.None);
+    Assert.Equal(3, preview.Paths.Length);
+    Assert.Equal(1, preview.EligibleCount);
+    DiscoveredInstructionResources resources = await discovery.FindAsync(Project, rules, CancellationToken.None);
+    Assert.Equal(included, skill ? Assert.Single(resources.Skills).Path : Assert.Single(resources.Instructions).Path);
+  }
+
+  [Fact]
+  public async Task PreviewReportsPartialIndexEvenWhenItsOnlyMatchIsIgnored() {
+    string ignored = Write("CLAUDE.md", "Claude instructions");
+    await using var catalog = new InstructionResourceCatalog(Path.Combine(root, "catalog.sqlite"),
+        (_, matched, cancellation) => {
+          matched(ignored);
+          return new TaskCompletionSource<string[]>().Task.WaitAsync(cancellation);
+        }, (_, _, _) => null);
+    var discovery = new InstructionResourceDiscovery(catalog, Packaged);
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+    SourcePreview preview = await discovery.PreviewAsync(Project, false, new(), [], deadline.Token);
+    Assert.True(preview.Partial);
+    Assert.Equal([ignored], preview.Paths);
+    Assert.Equal(0, preview.EligibleCount);
+  }
+
+  [Fact]
   public async Task DiscoversProjectAndPackagedSkillsIncludingDuplicateNames() {
     string projectSkillText = Skill("diagnose", "Project diagnose λ.");
     string packagedSkillText = Skill("notes", "Take notes λ.");
@@ -86,6 +179,20 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
     DiscoveredInstructionResources scoped = await discovery.FindAsync(Path.Combine(Project, "a"), CancellationToken.None);
     Assert.Contains(scoped.Skills, skill => skill.Name == "deploy");
     Assert.Contains(scoped.Skills, skill => skill.Name == "diagnose" && skill.Description == "Packaged diagnose.");
+  }
+
+  [Fact]
+  public async Task PackagedSkillPreviewDoesNotFollowLinkedDirectories() {
+    Directory.CreateDirectory(Packaged);
+    string outside = Path.Combine(root, "outside");
+    WriteTo(outside, "SKILL.md", Skill("outside", "Not packaged."));
+    CreateDirectoryLink(Path.Combine(Packaged, "link"), outside);
+    await using var catalog = CreateCatalog();
+    var discovery = new InstructionResourceDiscovery(catalog, Packaged);
+
+    SourcePreview preview = await discovery.PreviewAsync(Project, true, new(), [], CancellationToken.None);
+    Assert.Empty(preview.Paths);
+    Assert.Empty((await discovery.FindAsync(Project, CancellationToken.None)).Skills);
   }
 
   [Fact]
@@ -236,7 +343,7 @@ public sealed class InstructionResourceDiscoveryTests : IDisposable {
   private void WritePackaged(string relativePath, string text) => WriteTo(Packaged, relativePath, text);
 
   private static string WriteTo(string directory, string relativePath, string text) {
-    string path = Path.Combine(directory, relativePath);
+    string path = Path.GetFullPath(Path.Combine(directory, relativePath));
     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
     File.WriteAllText(path, text);
     return path;

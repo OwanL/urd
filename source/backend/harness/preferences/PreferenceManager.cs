@@ -112,6 +112,33 @@ public sealed class PreferenceManager {
     });
   }
 
+  public void SetSourceIgnores(SourceIgnoreRules rules) {
+    ArgumentNullException.ThrowIfNull(rules);
+    SourceIgnoreRules normalized = rules.Normalize();
+    store.Preferences.Update(preferences => preferences with { SourceIgnores = normalized });
+  }
+
+  public void SetSourceIgnores(string category, string[] paths, string[] filenames, string[]? includes = null) {
+    ArgumentNullException.ThrowIfNull(paths);
+    ArgumentNullException.ThrowIfNull(filenames);
+    if (category is not ("instructions" or "skills"))
+      throw new ArgumentException("Source category must be 'instructions' or 'skills'.", nameof(category));
+
+    SourceIgnoreRules normalized = new SourceIgnoreRules {
+      Instructions = category == "instructions" ? paths : [],
+      Skills = category == "skills" ? paths : [],
+      InstructionIncludes = category == "instructions" ? includes ?? [] : [],
+      SkillIncludes = category == "skills" ? includes ?? [] : [],
+      Filenames = filenames
+    }.Normalize();
+    store.Preferences.Update(preferences => preferences with {
+      SourceIgnores = category == "instructions"
+          ? preferences.SourceIgnores with { Instructions = normalized.Instructions,
+              InstructionIncludes = normalized.InstructionIncludes, Filenames = normalized.Filenames }
+          : preferences.SourceIgnores with { Skills = normalized.Skills, SkillIncludes = normalized.SkillIncludes }
+    });
+  }
+
   internal static Guid[]? NormalizeSubagentProviders(IReadOnlyList<Guid>? ids) {
     if (ids is null)
       return null;

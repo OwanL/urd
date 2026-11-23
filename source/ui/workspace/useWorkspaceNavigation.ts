@@ -33,6 +33,7 @@ export function useWorkspaceNavigation(
     isClosed,
   }: Pick<PersistedWorkspace, "state" | "loaded" | "access" | "forgetSessions" | "isClosed">,
   create: () => Promise<void>,
+  isSnoozed: (id: string) => boolean,
 ) {
   const [ready, setReady] = useState(false);
   const [lastUsedSelection, setLastUsedSelection] = useState<LlmSelection | null>(null);
@@ -52,7 +53,7 @@ export function useWorkspaceNavigation(
   );
   const open = useCallback(
     (id: string) => {
-      if (isClosed(id)) return;
+      if (isClosed(id) || isSnoozed(id)) return;
       const workspace = access.read();
       if (workspace.activeId === id) return;
       access.save({
@@ -62,7 +63,7 @@ export function useWorkspaceNavigation(
         chats: { ...workspace.chats, [id]: workspace.chats[id] ?? newChat(null) },
       });
     },
-    [access, isClosed],
+    [access, isClosed, isSnoozed],
   );
   const reorder = useCallback(
     (id: string, beforeId: string | null) => {
@@ -95,14 +96,14 @@ export function useWorkspaceNavigation(
         const hash = hashSessionId();
         const candidates = [...Object.keys(access.read().chats), ...(hash ? [hash] : [])];
         forget(candidates.filter((id) => !listed.has(id)));
-        if (hash && discovered.current.has(hash)) open(hash);
+        if (hash && discovered.current.has(hash) && !isSnoozed(hash)) open(hash);
         else if (loaded!.first) {
           const tabs = initialPage.sessionIds.filter((id) => !isClosed(id));
           if (tabs.length) {
             access.save({
               ...access.read(),
               tabs,
-              activeId: tabs[0] ?? null,
+              activeId: tabs.find((id) => !isSnoozed(id)) ?? null,
               chats: Object.fromEntries(tabs.map((id) => [id, newChat(null)])),
             });
           } else if (!hash && initialPage.nextCursor === null) await create();
@@ -115,7 +116,7 @@ export function useWorkspaceNavigation(
     }
     void discover();
     return () => controller.abort();
-  }, [client, loaded, access, forget, isClosed, open, create]);
+  }, [client, loaded, access, forget, isClosed, isSnoozed, open, create]);
 
   useEffect(() => {
     if (ready) syncHash(state.activeId);
@@ -126,7 +127,7 @@ export function useWorkspaceNavigation(
     async function hashChanged() {
       checking?.abort();
       const id = hashSessionId();
-      if (!id || isClosed(id)) {
+      if (!id || isClosed(id) || isSnoozed(id)) {
         syncHash(access.read().activeId);
         return;
       }
@@ -151,7 +152,7 @@ export function useWorkspaceNavigation(
       checking?.abort();
       window.removeEventListener("hashchange", checkHash);
     };
-  }, [client, access, forget, isClosed, open, ready]);
+  }, [client, access, forget, isClosed, isSnoozed, open, ready]);
 
   return {
     ready,

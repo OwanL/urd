@@ -13,6 +13,8 @@ import { ReasoningPicker } from "./ReasoningPicker.tsx";
 interface ComposerProps {
   input: RefObject<HTMLTextAreaElement | null>;
   text: string;
+  hasImages: boolean;
+  imagePreviews: ComponentChildren;
   onTextChange: (text: string) => void;
   models: readonly ModelPickerOption[];
   modelKey: string | null;
@@ -49,6 +51,8 @@ function resizeInput(input: HTMLTextAreaElement) {
 export function Composer({
   input,
   text,
+  hasImages,
+  imagePreviews,
   onTextChange,
   models,
   modelKey,
@@ -87,7 +91,13 @@ export function Composer({
   const [overflowOpen, setOverflowOpen] = useState(false);
   const composing = useRef(false);
   const locked = selectionLocked || working || stopping;
-  const submission = composerSubmissionState(text, canSend, canContinue, continuationAvailable);
+  const submission = composerSubmissionState(
+    text,
+    canSend,
+    canContinue,
+    continuationAvailable,
+    hasImages,
+  );
   const canSubmit = submission.action !== null;
   function submit() {
     if (submission.action === "send") onSend();
@@ -186,6 +196,7 @@ export function Composer({
         if (canSubmit) submit();
       }}
     >
+      {imagePreviews}
       <textarea
         class="composer-input"
         ref={input}

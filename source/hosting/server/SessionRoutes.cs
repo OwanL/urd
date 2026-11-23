@@ -66,6 +66,8 @@ internal static class SessionRoutes {
           string? cursor = http.Request.Query.TryGetValue("cursor", out var supplied) ? supplied.ToString() : null;
           return Results.Ok(await session.ReadNotSentInputsAsync(cursor, http.RequestAborted));
         }));
+    routes.MapSessionUserImageRoutes(sessions);
+    routes.MapSessionSnoozeRoutes(sessions);
     routes.MapSessionTranscriptRoutes(sessions);
     routes.MapSessionPrepassRoutes(sessions);
     routes.MapSessionUserQuestionRoutes(sessions);

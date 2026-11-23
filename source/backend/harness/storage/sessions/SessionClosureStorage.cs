@@ -11,11 +11,11 @@ internal sealed class SessionClosureStorage(Database database, SessionImageClean
     if (deleted is not { } orphaned)
       return null;
 
-    images.Delete(orphaned.Tool, orphaned.Markdown);
+    images.Delete(orphaned.Tool, orphaned.Markdown, orphaned.User);
     return orphaned.Sessions;
   });
 
-  private (List<string> Tool, List<string> Markdown, List<Guid> Sessions)? DeletePrimary(SqliteTransaction transaction, Guid sessionId,
+  private (List<string> Tool, List<string> Markdown, List<string> User, List<Guid> Sessions)? DeletePrimary(SqliteTransaction transaction, Guid sessionId,
       Guid? drainedRun, CancellationToken cancellationToken) {
     if (!database.Scalar<bool>(transaction, """
         SELECT EXISTS(SELECT 1 FROM sessions WHERE session_id = $session AND kind = $primary);
@@ -45,7 +45,7 @@ internal sealed class SessionClosureStorage(Database database, SessionImageClean
     var orphaned = images.ReadOrphans(transaction);
     database.Execute(transaction, "DROP TABLE closing_sessions;");
     cancellationToken.ThrowIfCancellationRequested();
-    return (orphaned.Tool, orphaned.Markdown, sessions);
+    return (orphaned.Tool, orphaned.Markdown, orphaned.User, sessions);
   }
 
   private void CompactUsage(SqliteTransaction transaction, Guid sessionId) => database.Execute(transaction, """

@@ -43,6 +43,13 @@ export interface TranscriptEntryDescriptor {
   readonly preparation?: readonly PrepassSummary[];
   // Present on user entries that present another agent's question.
   readonly agentQuestion?: { readonly senderTitle: string | null } | null;
+  readonly images?: readonly UserImage[] | null;
+}
+
+export interface UserImage {
+  readonly imageId: string;
+  readonly width: number;
+  readonly height: number;
 }
 
 export interface TranscriptCompactionFacts {

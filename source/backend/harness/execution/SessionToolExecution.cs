@@ -9,7 +9,7 @@ namespace Urd.Core.Execution;
 internal sealed class SessionToolExecution {
   private readonly SessionBase session;
   private readonly SessionExecutionRecorder recorder;
-  private readonly IReadOnlyList<AgentTool> tools; // Frozen offered capabilities for this execution.
+  private IReadOnlyList<AgentTool> tools; // Frozen after remote discovery, before the first request.
   private readonly PendingToolCalls pendingToolCalls; // Shared registry; only this execution's entries are managed here.
   private readonly CancellationToken stopToken; // Borrowed; SessionExecution owns cancellation and disposal.
   private readonly bool supportsImages;
@@ -25,6 +25,8 @@ internal sealed class SessionToolExecution {
     this.stopToken = stopToken;
     this.supportsImages = supportsImages;
   }
+
+  internal void AddRemoteTools(IReadOnlyList<AgentTool> remote) => tools = [.. tools, .. remote];
 
   private Guid ExecutionId => recorder.Identity.ExecutionId;
   private bool IsStopping => stopToken.IsCancellationRequested;

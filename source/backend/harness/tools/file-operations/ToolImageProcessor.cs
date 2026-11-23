@@ -14,7 +14,10 @@ internal static class ToolImageProcessor {
   private static readonly SemaphoreSlim slots = new(2);
   private static readonly int[] jpegQualities = [80, 85, 70, 55, 40];
 
-  internal static async Task<ToolOutput> ProcessAsync(ReadOnlyMemory<byte> bytes, string mediaType,
+  internal static Task<ToolOutput> ProcessUserImageAsync(ReadOnlyMemory<byte> bytes, CancellationToken cancellation) =>
+      ProcessAsync(bytes, mediaType: null, modelAcceptsImages: true, cancellation);
+
+  internal static async Task<ToolOutput> ProcessAsync(ReadOnlyMemory<byte> bytes, string? mediaType,
       bool modelAcceptsImages, CancellationToken cancellation) {
     await slots.WaitAsync(cancellation).ConfigureAwait(false);
     try {
@@ -24,13 +27,13 @@ internal static class ToolImageProcessor {
     }
   }
 
-  private static ToolOutput Process(ReadOnlyMemory<byte> bytes, string mediaType,
+  private static ToolOutput Process(ReadOnlyMemory<byte> bytes, string? mediaType,
       bool modelAcceptsImages, CancellationToken cancellation) {
     cancellation.ThrowIfCancellationRequested();
-    string declared = mediaType.Split(';')[0].Trim().ToLowerInvariant();
+    string? declared = mediaType?.Split(';')[0].Trim().ToLowerInvariant();
     if (declared == "image/jpg")
       declared = "image/jpeg";
-    if (declared is not ("image/png" or "image/jpeg" or "image/gif" or "image/webp" or "image/bmp"))
+    if (declared is not (null or "image/png" or "image/jpeg" or "image/gif" or "image/webp" or "image/bmp"))
       return Error("unsupported image format.");
     try {
       using var data = SKData.CreateCopy(bytes.Span);
@@ -45,7 +48,7 @@ internal static class ToolImageProcessor {
     }
   }
 
-  private static ToolOutput ProcessCodec(SKCodec codec, ReadOnlyMemory<byte> bytes, string declared,
+  private static ToolOutput ProcessCodec(SKCodec codec, ReadOnlyMemory<byte> bytes, string? declared,
       bool modelAcceptsImages, CancellationToken cancellation) {
     string? detected = codec.EncodedFormat switch {
       SKEncodedImageFormat.Png => "image/png",
@@ -55,7 +58,7 @@ internal static class ToolImageProcessor {
       SKEncodedImageFormat.Bmp => "image/bmp",
       _ => null
     };
-    if (detected is null || detected != declared)
+    if (detected is null || (declared is null ? detected is not ("image/png" or "image/jpeg" or "image/webp") : detected != declared))
       return Error("image data does not match its supported media type.");
     SKImageInfo info = codec.Info;
     if (info.Width <= 0 || info.Height <= 0)
@@ -65,7 +68,8 @@ internal static class ToolImageProcessor {
     SKSizeI target = Fit(original);
     // JPEG supports native downsampling. Other codecs may return the full size here.
     SKSizeI decodeSize = codec.GetScaledDimensions(Math.Min(1f, (float)maxDimension / Math.Max(info.Width, info.Height)));
-    if (decodeSize.Width <= 0 || decodeSize.Height <= 0 || (long)decodeSize.Width * decodeSize.Height > maxDecodedPixels)
+    if (decodeSize.Width <= 0 || decodeSize.Height <= 0 || (long)decodeSize.Width * decodeSize.Height > maxDecodedPixels
+        || (declared is null && Math.Max(decodeSize.Width, decodeSize.Height) > 16_384))
       return Error("image exceeds the 16-million-pixel decode limit after supported downsampling.");
     using var decoded = new SKBitmap();
     if (!decoded.TryAllocPixels(new SKImageInfo(decodeSize.Width, decodeSize.Height, SKColorType.Bgra8888, SKAlphaType.Premul)))

@@ -2,6 +2,7 @@ using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.AI;
 using Urd.Core.Context;
 using Urd.Core.Compaction;
+using Urd.Core.Harness.Mcp;
 using Urd.Core.Sessions;
 using Urd.Core.Providers;
 using Urd.Core.Preferences;
@@ -20,6 +21,9 @@ internal sealed class SessionExecution : IDisposable {
   private readonly LlmSelection selection;
   private readonly StartingContextBuilder startingContextBuilder;
   private StartingContext? startingContext;
+  private readonly IRemoteMcpTools? remoteMcpTools;
+  private readonly int maxRemoteToolCount;
+  private IReadOnlyList<AIFunctionDeclaration>? remoteMcpDeclarations;
   private IChatClient? chatClient;
   private readonly ChatGptSocketRun? socketRun;
   private readonly SessionToolExecution toolExecution;
@@ -40,13 +44,16 @@ internal sealed class SessionExecution : IDisposable {
   internal SessionExecution(SessionExecutionRecorder recorder, SessionBase session,
       Func<ProviderConnection, IChatClient> createChatClient, LlmSelection selection,
       StartingContextBuilder startingContextBuilder, IReadOnlyList<AgentTool>? tools = null,
-      PendingToolCalls? pendingToolCalls = null, ManualCompactionRequest? compaction = null, string? compactionSkipReason = null) {
+      PendingToolCalls? pendingToolCalls = null, ManualCompactionRequest? compaction = null, string? compactionSkipReason = null,
+      IRemoteMcpTools? remoteMcpTools = null) {
     this.recorder = recorder;
     this.session = session;
     this.createChatClient = createChatClient;
     this.selection = selection;
     socketRun = selection.Connection.Route == ProviderRoute.ChatGpt ? new ChatGptSocketRun() : null;
     this.startingContextBuilder = startingContextBuilder;
+    this.remoteMcpTools = remoteMcpTools;
+    maxRemoteToolCount = Math.Max(0, 128 - (tools?.Count ?? 0));
     pending = pendingToolCalls ?? new PendingToolCalls();
     toolExecution = new SessionToolExecution(session, recorder, tools ?? [], pending, selection.SupportsImages, stop.Token);
     if (tools?.OfType<AnswerAgentTool>().SingleOrDefault() is { } answerTool)
@@ -211,8 +218,8 @@ internal sealed class SessionExecution : IDisposable {
     UserPreferences captured = session.ReadPreferences();
     string[] newMessages = request.Context is { } history
         ? history.Messages.Where(message => message.Location.RequestId == request.RequestId && message.StartsUserTurn)
-            .Select(message => message.Message.Text).ToArray()
-        : request.Messages.Where(message => message.Role == ChatRole.User).Select(message => message.Text).ToArray();
+            .Select(message => PrepassPrompt(message.Message)).ToArray()
+        : request.Messages.Where(message => message.Role == ChatRole.User).Select(PrepassPrompt).ToArray();
     string task = boundary == Guid.Empty ? string.Join("\n\n", newMessages)
         : request.Context!.PreviousCompaction!.Summary;
     if (boundary != Guid.Empty && automaticBoundary != boundary && newMessages.Length > 0)
@@ -236,6 +243,9 @@ internal sealed class SessionExecution : IDisposable {
         captured, protectedTools, pruner, stop.Token);
     stop.Token.ThrowIfCancellationRequested();
   }
+
+  private static string PrepassPrompt(ChatMessage message) => string.IsNullOrWhiteSpace(message.Text)
+      && message.Contents.Any(content => content is DataContent) ? "Image attachment" : message.Text;
 
   private async Task SavePruningStatusAsync(Guid boundary, StartingResourcePruningStatus status) {
     try {
@@ -339,6 +349,32 @@ internal sealed class SessionExecution : IDisposable {
     }
   }
 
+  private async Task PrepareRemoteMcpToolsAsync() {
+    if (remoteMcpTools is null || remoteMcpDeclarations is not null)
+      return;
+    IReadOnlyList<SavedMcpTool> discovered = await remoteMcpTools.DiscoverAsync(stop.Token);
+    var tools = new List<RemoteMcpAgentTool>();
+    var names = new HashSet<string>(StringComparer.Ordinal);
+    int remainingSchema = 128 * 1024;
+    foreach (SavedMcpTool saved in discovered) {
+      if (tools.Count >= maxRemoteToolCount)
+        break;
+      if (string.IsNullOrWhiteSpace(saved.Tool.Name) || !RemoteMcpAgentTool.HasSupportedSchema(saved.Tool.InputSchema))
+        continue;
+      int size = saved.Tool.InputSchema.GetRawText().Length;
+      if (size > 16 * 1024 || size > remainingSchema)
+        continue;
+      var tool = new RemoteMcpAgentTool(remoteMcpTools, saved);
+      if (!names.Add(tool.Name))
+        continue;
+      tools.Add(tool);
+      remainingSchema -= size;
+    }
+    remoteMcpDeclarations = tools.Select(AgentToolDeclaration.Create).ToArray();
+    if (tools.Count > 0)
+      toolExecution.AddRemoteTools(tools);
+  }
+
   private async Task<(LlmRequestResult Result, IReadOnlyList<AIFunctionDeclaration> OfferedTools)> SendLlmRequestAsync(
       LlmRequest request, bool allowAutomaticCompaction = true) {
     IChatClient client;
@@ -350,12 +386,14 @@ internal sealed class SessionExecution : IDisposable {
       if (allowAutomaticCompaction)
         request = await CompactHistoryAsync(request.RequestId, CompactionReason.Threshold, currentHistory: request.Context) ?? request;
       await PrepareStartingContextAsync(request);
+      await PrepareRemoteMcpToolsAsync();
       client = chatClient ??= createChatClient(selection.Connection);
       StartingContext context = startingContext!;
       await StartRequestAsync(request.RequestId, context);
       (bool presented, ChatMessage? reminder) = session.Questions.ReadQuestionForRequest(request);
       // Provider policy can change between requests without rebuilding the saved starting context.
-      offeredTools = context.Tools;
+      // Remote tools are a live execution snapshot, not part of the persisted starting context.
+      offeredTools = remoteMcpDeclarations is { Count: > 0 } remote ? [.. context.Tools, .. remote] : context.Tools;
       if (offeredTools.Any(tool => tool.Name == SubagentTool.ToolName)
           && !await session.HasSubagentProvidersAsync(stop.Token))
         offeredTools = offeredTools.Where(tool => tool.Name != SubagentTool.ToolName).ToArray();

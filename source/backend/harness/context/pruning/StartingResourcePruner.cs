@@ -2,10 +2,12 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
+using Urd.Core.Compaction;
 using Urd.Core.Execution;
 using Urd.Core.Preferences;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Context;
 
@@ -78,8 +80,8 @@ internal sealed class StartingResourcePruner(
       throw new ArgumentException("Pruning candidate identities must be nonempty and unique.", nameof(candidates));
 
     string[] modelIds = candidates.Select((_, index) => purpose switch {
-      AuxiliaryModelPurpose.Skills => $"s{index + 1}",
-      AuxiliaryModelPurpose.Instructions => $"i{index + 1}",
+      AuxiliaryModelPurpose.Skills => CandidateId('s', index),
+      AuxiliaryModelPurpose.Instructions => CandidateId('i', index),
       _ => identities[index]
     }).ToArray();
     PrepassResource[] resources = candidates.Select(createResource).ToArray();
@@ -174,9 +176,25 @@ internal sealed class StartingResourcePruner(
         {taskInput}
 
         Candidates:
-        {JsonSerializer.Serialize(metadata)}
+        {SerializeManifest(metadata)}
         """)
   ];
+
+  internal static int EstimateManifestTokens(IReadOnlyList<DiscoveredSkill> candidates) => candidates.Count == 0 ? 0 :
+      EstimateManifestTokens(SkillManifest(candidates.Select((skill, index) => (skill, CandidateId('s', index)))));
+
+  internal static int EstimateManifestTokens(IReadOnlyList<DiscoveredInstructionDocument> candidates) => candidates.Count == 0 ? 0 :
+      EstimateManifestTokens(InstructionManifest(candidates.Select((document, index) => (document, CandidateId('i', index)))));
+
+  // Count the candidate JSON only: this preview does not have a user task, model or provider framing.
+  private static int EstimateManifestTokens(object[] metadata) {
+    string manifest = SerializeManifest(metadata);
+    return (int)Math.Min(int.MaxValue,
+        O200kTokens.Estimate(manifest, manifest.Length) ?? ContextTokenBudget.EstimateText(manifest));
+  }
+
+  private static string SerializeManifest(object[] metadata) => JsonSerializer.Serialize(metadata);
+  private static string CandidateId(char prefix, int index) => $"{prefix}{index + 1}";
 
   private static string[] ReadKeptIds(string answer, IReadOnlyList<string> candidateIds) {
     using JsonDocument document = JsonDocument.Parse(answer);

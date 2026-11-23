@@ -27,10 +27,15 @@ import { defaultModelSelection } from "./DefaultModelSelection.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
 import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
+import { SnoozeClient } from "./snooze/SnoozeClient.ts";
+import { SnoozedChatsButton } from "./snooze/SnoozedChatsButton.tsx";
+import { activeVisibleTab, rememberSnoozedChats } from "./snooze/SnoozedWorkspace.ts";
+import { useSnoozedChats } from "./snooze/useSnoozedChats.ts";
 import type { SetupState } from "../setup/SetupDialog.tsx";
 import "./workspace.css";
 
 const sessions = new SessionClient(new URL(window.location.href));
+const snoozeClient = new SnoozeClient(new URL(window.location.href));
 const loadSubagents = (rootId: string, signal: AbortSignal) =>
   sessions.getLiveSubagents(rootId, signal);
 const providers = new ProviderClient(new URL(window.location.href));
@@ -81,6 +86,9 @@ export function Workspace({
   );
   const create = useCallback(() => commands.create(isClosed), [commands, isClosed]);
   const setupComplete = setup === "complete";
+  const snoozed = useSnoozedChats(snoozeClient, setupComplete);
+  const { chats: snoozedChats, isSnoozed, refresh: refreshSnoozed } = snoozed;
+  const requestSnoozeRefresh = useCallback(() => void refreshSnoozed(), [refreshSnoozed]);
   const previousSetup = useRef(setup);
   const { providersChanged } = models;
   const { refresh: refreshPreferences } = preferences;
@@ -93,9 +101,17 @@ export function Workspace({
   }, [setup, setupComplete, providersChanged, refreshPreferences]);
   const navigation = useWorkspaceNavigation(
     sessions,
-    { ...workspace, loaded: setupComplete ? workspace.loaded : null },
+    { ...workspace, loaded: setupComplete && snoozed.ready ? workspace.loaded : null },
     create,
+    isSnoozed,
   );
+  const access = workspace.access;
+  useEffect(() => {
+    if (!navigation.ready) return;
+    const state = access.read();
+    const next = rememberSnoozedChats(state, snoozed.chats, isClosed);
+    if (next !== state) access.save(next);
+  }, [access, isClosed, navigation.ready, snoozed.chats, workspace.state]);
 
   // Receipt reconciliation and reading positions belong to the workspace, not a mounted chat.
   useEffect(() => {
@@ -111,6 +127,20 @@ export function Workspace({
   const transcriptPositions = useRef(new Map<string, TranscriptNavigationState>());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
+  const [mcpDraft, setMcpDraft] = useState<{ url: string }>();
+  const workspaceElement = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = workspaceElement.current;
+    const review = (event: Event) => {
+      const detail = (event as CustomEvent<{ url: string }>).detail;
+      if (typeof detail?.url !== "string") return;
+      setMcpDraft({ url: detail.url });
+      setSettingsTab("mcp");
+      setSettingsOpen(true);
+    };
+    element?.addEventListener("urd:review-mcp-connection", review);
+    return () => element?.removeEventListener("urd:review-mcp-connection", review);
+  }, []);
   const openSettings = (tab?: SettingsTab) => {
     if (tab) setSettingsTab(tab);
     void preferences.refresh();
@@ -119,8 +149,14 @@ export function Workspace({
   const settingsAnchor = useRef<HTMLButtonElement>(null);
   const newChatButton = useRef<HTMLButtonElement>(null);
   const { lastSelection, chats } = workspace.state;
-  const tabs = navigation.ready ? workspace.state.tabs : noTabs;
-  const activeId = navigation.ready ? workspace.state.activeId : null;
+  const tabs = useMemo(() => {
+    if (!navigation.ready) return noTabs;
+    const hidden = new Set(snoozedChats.map((chat) => chat.sessionId));
+    return workspace.state.tabs.filter((id) => !hidden.has(id));
+  }, [navigation.ready, snoozedChats, workspace.state.tabs]);
+  const activeId = navigation.ready
+    ? activeVisibleTab(workspace.state.tabs, workspace.state.activeId, isSnoozed)
+    : null;
   const discoveringModels = models.loading || models.refreshing;
   const defaultSelection = useMemo(
     () =>
@@ -149,6 +185,7 @@ export function Workspace({
     navigation.ready,
     tabs,
     activeId,
+    requestSnoozeRefresh,
   );
   const [inspection, setInspection] = useState<{
     rootId: string;
@@ -156,14 +193,24 @@ export function Workspace({
   } | null>(null);
   const inspected = inspection?.rootId === activeId ? inspection : null;
   const inspect = (rootId: string, path: readonly SubagentLink[]) => {
-    if (isClosed(rootId)) return;
+    if (isClosed(rootId) || snoozed.isSnoozed(rootId)) return;
     navigation.open(rootId);
     setInspection(path.length ? { rootId, path } : null);
   };
   useEffect(() => {
     if (inspection && !tabs.includes(inspection.rootId)) setInspection(null);
   }, [inspection, tabs]);
-  const shown = useWorkspaceRetention(activeId, tabs, transcript?.retainedTabs ?? null);
+  const [uploading, setUploading] = useState<ReadonlySet<string>>(() => new Set());
+  const onUploadsPendingChange = useCallback((id: string, pending: boolean) => {
+    setUploading((previous) => {
+      if (previous.has(id) === pending) return previous;
+      const next = new Set(previous);
+      if (pending) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
+  const shown = useWorkspaceRetention(activeId, tabs, transcript?.retainedTabs ?? null, uploading);
   useEffect(() => {
     for (const id of readingPositions.current.keys())
       if (isClosed(id)) readingPositions.current.delete(id);
@@ -182,7 +229,7 @@ export function Workspace({
     transcriptError;
 
   return (
-    <main class="workspace">
+    <main ref={workspaceElement} class="workspace">
       <header class="top-strip">
         <ChatTabs
           tabs={tabs.map((id) => ({
@@ -191,6 +238,11 @@ export function Workspace({
             status: events.statuses[id],
             knownStatus: events.knownStatuses[id],
             closeAvailable: connected && commands.canClose(id, events.statuses[id]),
+            snoozeAvailable:
+              connected &&
+              events.statuses[id] === "idle" &&
+              !uploading.has(id) &&
+              commands.canClose(id, "idle"),
             closing: commandState.closing.has(id),
           }))}
           activeId={activeId}
@@ -203,6 +255,7 @@ export function Workspace({
               navigation.forget([closedId]),
             )
           }
+          onSnooze={(id, until) => snoozed.change(id, { until })}
           onReorder={navigation.reorder}
           emptyFocusTarget={newChatButton}
         />
@@ -239,12 +292,15 @@ export function Workspace({
             else openSettings();
           }}
         />
-        <IconButton
-          icon="moon"
-          label="Snooze"
-          hint="Snooze — not available yet"
-          placement="below"
-          aria-disabled="true"
+        <SnoozedChatsButton
+          enabled={setupComplete}
+          connected={connected}
+          ready={snoozed.ready}
+          chats={snoozed.chats}
+          title={(chat) => chat.title ?? chats[chat.sessionId]?.title ?? "Chat"}
+          error={snoozed.error}
+          restore={(chat) => snoozed.change(chat.sessionId, { expectedUntil: chat.until })}
+          retry={requestSnoozeRefresh}
         />
       </header>
       <Settings
@@ -257,6 +313,7 @@ export function Workspace({
         onClose={() => setSettingsOpen(false)}
         onChanged={models.providersChanged}
         onProviderReady={models.providerReady}
+        mcpDraft={mcpDraft}
       />
       <div
         class={`connection-feedback ${disconnected ? "is-disconnected" : ""}`}
@@ -272,6 +329,11 @@ export function Workspace({
         {navigation.error && (
           <button type="button" onClick={() => window.location.reload()}>
             Retry connection
+          </button>
+        )}
+        {!snoozed.ready && snoozed.error && (
+          <button type="button" onClick={() => void snoozed.refresh()}>
+            Retry loading snoozed chats
           </button>
         )}
       </div>
@@ -298,6 +360,7 @@ export function Workspace({
           display={transcript}
           streamId={events.streamId}
           connected={connected}
+          notice={events.notice}
           onNavigate={(path) => inspect(inspected.rootId, path)}
         />
       )}
@@ -316,6 +379,8 @@ export function Workspace({
               chat={chats[id]!}
               defaultSelection={defaultSelection}
               active={id === activeId && !inspected}
+              pasteEnabled={!settingsOpen}
+              onUploadsPendingChange={onUploadsPendingChange}
               transcript={transcript}
               streamId={events.streamId}
               commands={commands}
@@ -337,6 +402,8 @@ export function Workspace({
               onSetUpProvider={() => openSettings("providers")}
               onChooseModels={() => openSettings("model-buckets")}
               editDraft={workspace.editDraft}
+              appendDraftImage={workspace.appendDraftImage}
+              removeDraftImage={workspace.removeDraftImage}
               selectModel={workspace.selectModel}
               position={readingPositions.current.get(id)}
               onPositionChange={(position) => {

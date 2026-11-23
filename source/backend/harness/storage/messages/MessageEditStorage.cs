@@ -27,8 +27,8 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
     ArgumentNullException.ThrowIfNull(submission);
     if (submission.OperationId == Guid.Empty || submission.Message is not { Role: MessageRole.User } message
         || message.ExecutionId == Guid.Empty || message.MessageId == Guid.Empty || message.HistoryRevision < 0
-        || string.IsNullOrWhiteSpace(submission.Text) || submission.LlmSelection is null)
-      throw new ArgumentException("Editing requires an operation ID, user message, text and model selection.", nameof(submission));
+        || submission.Text is null || submission.LlmSelection is null)
+      throw new ArgumentException("Editing requires an operation ID, user message and model selection.", nameof(submission));
     submission.LlmSelection.Validate();
     _ = StorageText.StrictUtf8.GetByteCount(submission.Text);
   }
@@ -37,19 +37,23 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
       database.Read(transaction => ReadReceipt(transaction, sessionId, operationId, null));
 
   // Check retained operations before target identity: a committed retry necessarily carries an old revision.
-  internal MessageEditReceipt? ReadReceiptOrValidate(Guid sessionId, MessageEditSubmission submission) => database.Read(transaction => {
-    MessageEditReceipt? receipt = ReadReceipt(transaction, sessionId, submission.OperationId, Hash(submission));
-    if (receipt is null)
-      ReadTarget(transaction, sessionId, submission.Message);
+  internal MessageEditReceipt? ReadReceiptOrValidate(Guid sessionId, MessageEditSubmission submission, string hash) => database.Read(transaction => {
+    MessageEditReceipt? receipt = ReadReceipt(transaction, sessionId, submission.OperationId, hash);
+    if (receipt is null) {
+      var target = ReadTarget(transaction, sessionId, submission.Message);
+      ValidateReplacement(transaction, sessionId, submission, submission.ImageIds ?? target.ImageIds);
+    }
     return receipt;
   });
 
-  internal MessageEditReceipt Replace(Guid sessionId, MessageEditSubmission submission) => database.Write(transaction => {
-    string hash = Hash(submission);
+  internal MessageEditReceipt Replace(Guid sessionId, MessageEditSubmission submission, string? hash = null) => database.Write(transaction => {
+    hash ??= Hash(submission);
     MessageEditReceipt? retained = ReadReceipt(transaction, sessionId, submission.OperationId, hash);
     if (retained is not null)
       return retained;
     var target = ReadTarget(transaction, sessionId, submission.Message);
+    IReadOnlyList<Guid>? imageIds = submission.ImageIds ?? target.ImageIds;
+    ValidateReplacement(transaction, sessionId, submission, imageIds);
     if (database.Scalar<bool>(transaction,
         "SELECT EXISTS(SELECT 1 FROM execution_runs WHERE session_id = $session AND outcome IS NULL);", ("$session", sessionId)))
       throw new InvalidOperationException("Editing must await execution settlement.");
@@ -57,7 +61,7 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
     RemoveSuffix(transaction, sessionId, target);
     long revision = checked(submission.Message.HistoryRevision + 1);
     RebuildPositions(transaction, sessionId, revision);
-    var input = new UserMessageSubmission(submission.OperationId, revision, submission.Text, submission.LlmSelection);
+    var input = new UserMessageSubmission(submission.OperationId, revision, submission.Text, submission.LlmSelection, imageIds);
     var admitted = messages.Submit(transaction, sessionId, revision, input, accepting: true, Guid.NewGuid());
     if (!admitted.NewlyAccepted || admitted.Receipt.Acceptance != MessageAcceptance.Accepted)
       throw new UserMessageConflictException(submission.OperationId);
@@ -71,42 +75,50 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
         HistoryRevision: revision, ExecutionId: executionId);
   });
 
+  private void ValidateReplacement(SqliteTransaction transaction, Guid sessionId, MessageEditSubmission submission,
+      IReadOnlyList<Guid>? imageIds) {
+    if (string.IsNullOrWhiteSpace(submission.Text) && imageIds is not { Count: > 0 })
+      throw new ArgumentException("A message requires text or an image.", nameof(submission));
+    messages.ValidateImages(transaction, sessionId, imageIds, submission.LlmSelection);
+  }
+
   private MessageEditReceipt? ReadReceipt(SqliteTransaction transaction, Guid sessionId, Guid operationId, string? hash) =>
       database.QuerySingleOrDefault(transaction, """
         SELECT submission_hash, history_revision, run_id FROM message_edits
         WHERE session_id = $session AND operation_id = $operation;
         """, row => {
-          if (hash is not null && hash != row.String("submission_hash"))
-            throw new UserMessageConflictException(operationId);
-          return new MessageEditReceipt(SessionId: sessionId, OperationId: operationId,
-              HistoryRevision: row.Long("history_revision"), ExecutionId: row.Guid("run_id"));
-        }, ("$session", sessionId), ("$operation", operationId));
+        if (hash is not null && hash != row.String("submission_hash"))
+          throw new UserMessageConflictException(operationId);
+        return new MessageEditReceipt(SessionId: sessionId, OperationId: operationId,
+            HistoryRevision: row.Long("history_revision"), ExecutionId: row.Guid("run_id"));
+      }, ("$session", sessionId), ("$operation", operationId));
 
-  private (long EntryOrdinal, long RunOrdinal, int RequestIndex, long InputOrdinal, long MessageIndex) ReadTarget(
+  private EditTarget ReadTarget(
       SqliteTransaction transaction, Guid sessionId, MessageRef message) {
     long actual = database.Scalar<long?>(transaction,
         "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
         ?? throw new KeyNotFoundException("The session does not exist.");
     if (actual != message.HistoryRevision)
       throw new HistoryRevisionConflictException(message.HistoryRevision, actual);
-    return database.QuerySingleOrDefault<(long, long, int, long, long)?>(transaction, """
+    return database.QuerySingleOrDefault(transaction, """
       SELECT m.ordinal AS entry_ordinal, r.ordinal AS run_ordinal, q.request_index, i.ordinal AS input_ordinal,
+          d.image_ids_json,
           (SELECT count(*) FROM execution_inputs previous WHERE previous.request_id = m.request_id AND previous.ordinal < i.ordinal)
           + (SELECT count(*) FROM execution_tool_completions completed WHERE completed.claimed_request_id = m.request_id) AS message_index
       FROM execution_messages m
       JOIN execution_runs r ON r.run_id = m.run_id
       JOIN execution_requests q ON q.request_id = m.request_id
       JOIN execution_inputs i ON i.session_id = m.session_id AND i.input_id = m.input_id
+      JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
       WHERE m.session_id = $session AND m.history_revision = $revision
           AND m.run_id = $run AND m.message_id = $message AND m.role = 0;
-      """, row => (row.Long("entry_ordinal"), row.Long("run_ordinal"), row.Int("request_index"),
-          row.Long("input_ordinal"), row.Long("message_index")),
+      """, row => new EditTarget(row.Long("entry_ordinal"), row.Long("run_ordinal"), row.Int("request_index"),
+          row.Long("input_ordinal"), row.Long("message_index"), UserImageIds.Read(row.NullableString("image_ids_json"))),
           ("$session", sessionId), ("$revision", actual), ("$run", message.ExecutionId), ("$message", message.MessageId))
         ?? throw new KeyNotFoundException("The user message is no longer in this conversation.");
   }
 
-  private void RemoveSuffix(SqliteTransaction transaction, Guid sessionId,
-      (long EntryOrdinal, long RunOrdinal, int RequestIndex, long InputOrdinal, long MessageIndex) target) {
+  private void RemoveSuffix(SqliteTransaction transaction, Guid sessionId, EditTarget target) {
     // Automatic compaction precedes user placement. Its earlier marker can still
     // summarize an edited input in a multi-input request; compare source positions too.
     database.Execute(transaction, $"""
@@ -115,7 +127,7 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
       DELETE FROM execution_messages WHERE session_id = $session AND (ordinal >= $entry
           OR (role = 4 AND NOT EXISTS (SELECT 1 FROM session_compactions c
               WHERE c.compaction_id = execution_messages.message_id)));
-      UPDATE input_decisions SET original_text_utf8 = X'', superseded = 1
+      UPDATE input_decisions SET original_text_utf8 = X'', image_ids_json = NULL, superseded = 1
       WHERE session_id = $session AND input_id IN (
           SELECT input_id FROM execution_inputs WHERE session_id = $session AND ordinal >= $input);
       DELETE FROM execution_inputs WHERE session_id = $session AND ordinal >= $input;
@@ -159,6 +171,10 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
       """, ("$session", sessionId), ("$revision", revision));
   }
 
-  private static string Hash(MessageEditSubmission submission) =>
+  // Null is omitted so operations journaled before attachments keep their original hash.
+  internal static string Hash(MessageEditSubmission submission) =>
       Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(submission)));
+
+  private sealed record EditTarget(long EntryOrdinal, long RunOrdinal, int RequestIndex, long InputOrdinal,
+      long MessageIndex, IReadOnlyList<Guid>? ImageIds);
 }

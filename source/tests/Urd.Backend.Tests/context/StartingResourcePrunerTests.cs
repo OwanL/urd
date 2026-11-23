@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Compaction;
 using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Preferences;
@@ -400,20 +401,25 @@ public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
     await using RunningParent parent = await StartParentAsync();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
     var pruner = CreatePruner(runner, _ => Task.CompletedTask);
+    int estimatedTokens;
     if (skills) {
       DiscoveredSkill[] candidates = new[] { Skill("large", large) }.Concat(values.Select((value, index) => Skill($"skill-{index}", value)))
           .Concat([Skill("duplicate", values[0]), Skill("large-copy", large)]).ToArray();
+      estimatedTokens = StartingResourcePruner.EstimateManifestTokens(candidates);
       var result = await pruner.PruneAsync(candidates, 0, CancellationToken.None).WaitAsync(TestTimeout);
       Assert.False(result.IsFallback);
       Assert.Equal(new[] { candidates[0], candidates[^1] }, result.Retained);
     } else {
       DiscoveredInstructionDocument[] candidates = new[] { Instruction("large", large) }.Concat(values.Select((value, index) => Instruction($"instruction-{index}", value)))
           .Concat([Instruction("duplicate", values[0]), Instruction("large-copy", large)]).ToArray();
+      estimatedTokens = StartingResourcePruner.EstimateManifestTokens(candidates);
       var result = await pruner.PruneAsync(candidates, 0, CancellationToken.None).WaitAsync(TestTimeout);
       Assert.False(result.IsFallback);
       Assert.Equal(new[] { candidates[0], candidates[^1] }, result.Retained);
     }
     using JsonDocument manifest = ParseCandidates(client.LastRequest);
+    string submitted = manifest.RootElement.GetRawText();
+    Assert.Equal(O200kTokens.Estimate(submitted, submitted.Length) ?? ContextTokenBudget.EstimateText(submitted), estimatedTokens);
     JsonElement[] files = manifest.RootElement.EnumerateArray().SelectMany(group => group.GetProperty("Files").EnumerateArray()).ToArray();
     Assert.Equal(43, files.Length);
     Assert.Equal(43, files.Select(file => file.GetProperty("Id").GetString()).Distinct().Count());

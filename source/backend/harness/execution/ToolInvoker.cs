@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.AI;
+using Urd.Core.Harness.Mcp;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Tools;
@@ -31,7 +32,7 @@ internal static class ToolInvoker {
             ?? throw new InvalidOperationException("Harness tools require a session execution.");
         output = await harnessTool.RunAsync(arguments, context with { RequestId = requestId }, cancellation);
       } else {
-        string directory = workingDirectory ?? (tool is WebSearchTool or WebReadTool or ListPendingCallsTool or CancelPendingCallsTool
+        string directory = workingDirectory ?? (tool is WebSearchTool or WebReadTool or ListPendingCallsTool or CancelPendingCallsTool or RemoteMcpAgentTool
             ? string.Empty : throw new InvalidOperationException("The chat has no saved working folder."));
         // Progress is intentionally inert until transcript progress integration is available.
         var context = new ToolContext(directory, requestId, call.CallId, supportsImages, static _ => { });

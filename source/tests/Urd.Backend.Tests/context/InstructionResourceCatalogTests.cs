@@ -418,6 +418,60 @@ public sealed class InstructionResourceCatalogTests : IDisposable {
   }
 
   [Fact]
+  public async Task VersionTwoCatalogDoesNotServeOldRowsBeforeNewNamesAreDiscovered() {
+    string stale = Path.Combine(Project, "AGENTS.md");
+    Assert.False(File.Exists(stale));
+    string claude = Write("CLAUDE.md");
+    string gemini = Write("GEMINI.md");
+    var entered = Signal();
+    var discoverClaude = Signal();
+    var discoverGemini = Signal();
+    async Task<string[]> Scan(string directory, Action<string> matched, CancellationToken cancellation) {
+      entered.TrySetResult();
+      await discoverClaude.Task.WaitAsync(cancellation);
+      matched(claude);
+      await discoverGemini.Task.WaitAsync(cancellation);
+      matched(gemini);
+      return [claude, gemini];
+    }
+
+    var options = new SqliteConnectionStringBuilder { DataSource = Database, Pooling = false };
+    using (var connection = new SqliteConnection(options.ToString())) {
+      await connection.OpenAsync();
+      StringComparer names = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+      connection.CreateCollation("path_identity", names.Compare);
+      using var command = connection.CreateCommand();
+      command.CommandText = """
+        CREATE TABLE resource_paths(path TEXT PRIMARY KEY COLLATE path_identity) WITHOUT ROWID;
+        CREATE TABLE scanned_roots(path TEXT PRIMARY KEY COLLATE path_identity) WITHOUT ROWID;
+        INSERT INTO resource_paths(path) VALUES ($stale);
+        INSERT INTO scanned_roots(path) VALUES ($root);
+        PRAGMA application_id = 0x55524449;
+        PRAGMA user_version = 2;
+        """;
+      command.Parameters.AddWithValue("$stale", stale);
+      command.Parameters.AddWithValue("$root", Project);
+      await command.ExecuteNonQueryAsync();
+    }
+
+    var watch = new ManualWatch();
+    await using var catalog = new InstructionResourceCatalog(Database, Scan, watch.Open);
+    Task<InstructionResourceCatalogResult> initial = catalog.FindPathsAsync(Project, CancellationToken.None);
+    await entered.Task.WaitAsync(deadline);
+    Assert.False(initial.IsCompleted); // The v2 row must not be served while no current name has been found.
+
+    discoverClaude.SetResult();
+    InstructionResourceCatalogResult partial = await initial.WaitAsync(deadline);
+    Assert.Equal([claude], partial.Paths);
+    Assert.Equal(InstructionResourceIndexPhase.Partial, partial.State.Phase);
+
+    discoverGemini.SetResult();
+    InstructionResourceCatalogResult complete = await SettledAsync(catalog, Project);
+    Assert.Equal([claude, gemini], complete.Paths);
+    Assert.Equal(InstructionResourceIndexPhase.Complete, complete.State.Phase);
+  }
+
+  [Fact]
   public async Task RebuildsOwnedIncompatibleSchemaButDoesNotEraseForeignFiles() {
     string resource = Write("AGENTS.md");
     Task<string[]> Scan(string directory, Action<string> _, CancellationToken cancellation) =>

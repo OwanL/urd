@@ -27,16 +27,25 @@ and similar final actions to the user.
 
 - One persistent Chromium context (`LaunchPersistentContextAsync`) with a `browser-profile`
   directory under the data root. Every chat shares its logins.
-- A chat owns the pages it opens and any popup whose opener it owns (OAuth popups follow their
-  chat). A chat can only list and drive its own pages. Pages run concurrently; there is no
-  browser-wide lock.
-- Launch on first use. Close a chat's pages when the chat closes or after 30 idle minutes; logins
-  survive because they live in the profile. Exit Chromium after 5 minutes with no pages.
-- Limitation: two chats cannot be signed into the same site as different accounts.
+- Each session, chat or helper (subagent), owns the pages it opens and any popup whose opener it
+  owns (OAuth popups follow their session). A session can only list and drive its own pages. Pages
+  run concurrently; there is no browser-wide lock. A helper's pages close when it finishes.
+- Agents hand work over by URL: logins are shared, so the receiving session opens the link in its
+  own page. Live pages never move between sessions; state that only exists in a page (a
+  half-filled form, a used one-time link) means one agent should own the whole flow.
+- Launch on first use (about 1–2 s). A session's pages close when the chat is closed or snoozed,
+  when a helper finishes, or after 30 minutes without agent or viewer activity, but never while
+  one of its questions to the user is pending. Logins survive because they live in the profile.
+  Exit Chromium 5 minutes after the last page closes.
+- Limitation: two chats cannot be signed into the same site as different accounts. The tool
+  description tells agents the profile is shared, so they check which account is active and tell
+  the user rather than signing someone out.
 
 ## Always headless; the user sees the page in Urd
 
-Chromium never shows a window. To watch or take over, the user opens a viewer in the chat:
+Chromium never shows a window. To watch or take over, the user opens a viewer in the chat. Working
+assumption: an expandable panel whose tab strip lists the chat's and its helpers' pages. Placement
+and interaction need their own UI ideation before implementation (open question).
 
 - Frames: `page.Screencast.StartAsync(new() { OnFrame = ... })` delivers JPEG frames, sent over a
   per-viewer WebSocket and drawn on a `<canvas>`. Frames flow only while a viewer is open.
@@ -52,15 +61,19 @@ A disposable probe already showed frame display and click mapping on headless Ch
 
 ## Handoff
 
-- `handoff` with a short message for the user: the chat shows the message and the viewer with
-  **Done**. The tool call waits. **Done** returns a fresh snapshot to the agent; Stop cancels.
-- The user can also open the viewer at any time to watch. Typing or clicking in it takes control:
-  agent actions on that page wait until the user clicks **Done**.
+- There is no dedicated handoff action. The agent uses `ask_user` to say what the user should do
+  ("Solve the captcha, then reply Done"); the question blocks the agent, appears in the chat
+  (including questions from helpers) and Stop cancels it. When the asking session has pages, the
+  question shows **Open browser**. The reply can carry information back to the agent.
+- The viewer is always live and interactive; there is no control mode. If the user acts while the
+  agent is working, the agent's next action may fail or see a changed page, and it re-reads the
+  page. Stop removes the agent.
 
 ## Agent tool
 
-One `browser` tool, shaped like Playwright MCP. Every action returns a fresh snapshot of the active
-page, capped in size with a truncation note.
+One `browser` tool, shaped like Playwright MCP. As there, every action returns a full snapshot of
+the active page, with no browser-specific trimming. Oversized results use the general tool output
+cap (prerequisite below).
 
 | Action | Arguments |
 | --- | --- |
@@ -75,11 +88,16 @@ page, capped in size with a truncation note.
 | `screenshot` | returns an image for vision-capable models |
 | `click_at` | `x`, `y` from the last screenshot (captchas, canvas) |
 | `wait` | `text` or `ms` |
-| `handoff` | `message` |
+| `upload` | `ref`, local file `paths` |
+
+Downloads save to a per-session folder in the OS temp directory, removed when the chat closes;
+the agent moves files elsewhere if they should be kept. The action result gives the path. Headless
+Chromium downloads PDFs rather than displaying them; reading PDFs belongs in the general `read`
+tool, not the browser.
 
 Snapshots use `page.AriaSnapshotAsync(new() { Mode = "ai" })`, which includes page text, iframes and
 `[ref=eN]` references; actions resolve refs with the `aria-ref=` locator. Captchas: the agent may
-try with `screenshot` and `click_at`, then hands off if it fails.
+try with `screenshot` and `click_at`, then asks the user if it fails.
 
 The email-code flow needs no special support: the agent opens Gmail in a second tab, searches, reads
 the code from the snapshot and types it into the first tab.
@@ -115,7 +133,14 @@ first whether the profile preference "Continue where you left off" achieves this
 
 Delete the network proxy (`PlaywrightNetwork*`), profile lease and serialization, the headed
 sign-in relaunch with its routes and UI prompt, the sensitive-field filter, the LAN pause and
-`URD_PLAYWRIGHT_LOCAL_ORIGINS`. Keep browser provisioning for the fallback.
+`URD_PLAYWRIGHT_LOCAL_ORIGINS`. Keep browser provisioning for the fallback. web_read keeps its own browser for now; running it as a
+no-login context in the same Chromium is a later follow-up to save memory.
+
+## Prerequisite: one tool output cap
+
+Only bash and read cap their own output today; other tools, including MCP tools, do not. Before the
+browser work, apply one size cap with spill-to-file (the bash pattern, 50 KB / 2,000 lines) to every
+tool result in the shared tool runner, as a separate change.
 
 ## Qualification order
 

@@ -1,6 +1,6 @@
 # Browser automation
 
-Status: design draft; Google sign-in qualified by spike. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
+Status: design draft under review; Google sign-in qualified by spike. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
 relaunch, network proxy). The earlier design and probes are in Git history before this revision.
 
 ## Goals
@@ -81,6 +81,8 @@ cap (prerequisite below).
 | `snapshot` | |
 | `click` | `ref` |
 | `type` | `ref`, `text`, optional `submit` |
+| `fill_form` | list of `ref` + `value` (text, checkbox, select); one snapshot for the whole form |
+| `hover` | `ref` (real pointer hover; JS cannot trigger CSS `:hover`) |
 | `press` | `key` |
 | `select` | `ref`, `values` |
 | `back` | |
@@ -89,6 +91,13 @@ cap (prerequisite below).
 | `click_at` | `x`, `y` from the last screenshot (captchas, canvas) |
 | `wait` | `text` or `ms` |
 | `upload` | `ref`, local file `paths` |
+| `dialog` | `accept` or `dismiss`, optional prompt text |
+| `evaluate` | JavaScript run in the page; returns its JSON result |
+
+An open dialog (alert, confirm, prompt, leave-page) is reported in the result and waits for
+`dialog` rather than being dismissed silently. Results also list new console errors and failed
+requests, when there are any, for testing web apps. Drag is omitted as rare; the agent asks the
+user instead.
 
 Downloads save to a per-session folder in the OS temp directory, removed when the chat closes;
 the agent moves files elsewhere if they should be kept. The action result gives the path. Headless
@@ -102,20 +111,28 @@ try with `screenshot` and `click_at`, then asks the user if it fails.
 The email-code flow needs no special support: the agent opens Gmail in a second tab, searches, reads
 the code from the snapshot and types it into the first tab.
 
-## Google sign-in under automation
+## Browser and Google sign-in
+
+Urd uses one browser it owns for all browser work: the Chrome for Testing build pinned by its
+Playwright version, already provisioned for web_read. It does not depend on installed Edge or
+Chrome, so every machine runs the same version; it updates when Urd updates Playwright.
 
 Google refuses sign-in when it detects an automated browser ("This browser or app may not be
-secure"). A spike (2026-11-24, Playwright 1.65.1, headless Edge 158, settings below) passed with the
-owner's real account: Google sign-in with 2FA through the screencast viewer, a full browser restart
-with Gmail still signed in, and Sign in with Google on a third-party site. The viewer also worked
-from another laptop over LAN. The page reported `navigator.webdriver = false` and no `Headless`
-marker in the user agent or client-hint brands. Chrome for Testing and phone input were not tested.
-A viewer must receive the latest frame when it connects: unchanged pages produce no new frames.
+secure"). A spike (2026-11-24, Playwright 1.65.1, settings below) passed with the owner's real
+account on both headless Edge 158 and Chrome for Testing 158.0.8127.18, each with a fresh profile:
+Google sign-in with 2FA through the screencast viewer, a full browser restart with Gmail still
+signed in, and Sign in with Google on a third-party site. The viewer also worked from another laptop
+over LAN. Pages reported `navigator.webdriver = false`. Phone input was not tested. A viewer must
+receive the latest frame when it connects: unchanged pages produce no new frames.
+
+Measured on the same machine with fresh profiles, Edge, Chrome and Chrome for Testing were alike:
+launch in about 0.6–0.7 s, about 250 MB private memory with one blank page, and about 75–150 MB
+more per loaded page. Idle shutdown is what keeps resource use low.
 
 - Launch without `--enable-automation`, with `--disable-blink-features=AutomationControlled`, and
   remove the `Headless` marker from the user agent.
-- Prefer a branded browser: Edge is always installed on Windows (`Channel = "msedge"`, no download).
-  Fall back to the provisioned Chrome for Testing elsewhere.
+- Risk: Chrome for Testing identifies as plain Chromium, and a pinned build ages between Urd
+  updates. If Google starts refusing it, revisit using an installed browser.
 - If Google still refuses headless, run headed with an off-screen window; the screencast viewer
   works the same.
 - Headless has no browser-owned dialogs: passkeys and Windows Hello are unavailable, so the user
@@ -133,7 +150,7 @@ first whether the profile preference "Continue where you left off" achieves this
 
 Delete the network proxy (`PlaywrightNetwork*`), profile lease and serialization, the headed
 sign-in relaunch with its routes and UI prompt, the sensitive-field filter, the LAN pause and
-`URD_PLAYWRIGHT_LOCAL_ORIGINS`. Keep browser provisioning for the fallback. web_read keeps its own browser for now; running it as a
+`URD_PLAYWRIGHT_LOCAL_ORIGINS`. Keep browser provisioning. web_read keeps its own browser for now; running it as a
 no-login context in the same Chromium is a later follow-up to save memory.
 
 ## Prerequisite: one tool output cap

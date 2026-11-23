@@ -65,6 +65,9 @@ Its tab strip lists the chat's and its helpers' pages.
   returns to 1280×800, so unattended work uses desktop layouts. The agent targets elements by ref, so
   a resize cannot misdirect clicks; a ref hidden by the new layout fails and the agent re-reads the
   page. `click_at` is rejected if the page size changed since the screenshot it is based on.
+- Phones: the window is full screen only and can be minimized back to the chat. Safe defaults: tap
+  clicks, drag scrolls, a keyboard button opens the phone keyboard and sends text, and the pending
+  question stays visible. Phone input is best-effort and untested; refine after real use.
 
 - Frames: `page.Screencast.StartAsync(new() { OnFrame = ... })` delivers JPEG frames, sent over a
   per-viewer WebSocket (input travels back on the same socket, keeping its order) and drawn on a

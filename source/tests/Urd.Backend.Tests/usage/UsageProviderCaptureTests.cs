@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
@@ -12,21 +13,24 @@ using static Urd.Backend.Tests.Support.OpenAIStreams;
 namespace Urd.Backend.Tests.Usage;
 
 public sealed class UsageProviderCaptureTests {
-  [Fact]
-  public async Task NonStreamingIncompleteResponseKeepsReportedUsage() {
-    string response = IncompleteStream();
+  [Theory]
+  [InlineData(LlmApi.OpenAIResponses)]
+  [InlineData(LlmApi.OpenAIChatCompletions)]
+  public async Task NonStreamingIncompleteResponseKeepsReportedUsage(LlmApi api) {
+    string response = IncompleteStream(api);
     using var database = new TemporaryDatabase("urd-provider-usage-response");
     using UrdStore store = UrdStore.Open(database.Path);
     using var handler = new ScriptedOpenAIHandler(response);
     var manager = Manager(store, handler);
     try {
-      ProviderConnection connection = await manager.AddCustomAsync(Settings());
+      ProviderConnection connection = await manager.AddCustomAsync(Settings(api));
       var selection = TestLlmSelection.Create(connection);
       using var usage = manager.CreateChatClient(connection);
       var options = new ChatOptions { ModelId = selection.ModelId };
       AddContext(options, new(Guid.NewGuid(), Guid.NewGuid(), "conversation"));
-      await Assert.ThrowsAsync<ProviderOperationException>(() => usage.GetResponseAsync(
+      var failure = await Assert.ThrowsAsync<ProviderOperationException>(() => usage.GetResponseAsync(
           [new ChatMessage(ChatRole.User, "hello")], options));
+      Assert.Equal(ProviderFailure.IncompleteResponse, failure.Failure);
 
       UsageRequest captured = Assert.Single(Recent(store));
       Assert.Equal<long?>(18, captured.Tokens!.InputTokens);
@@ -81,16 +85,23 @@ public sealed class UsageProviderCaptureTests {
     }
   }
 
-  [Fact]
-  public async Task ModelDiagnosticCapturesTerminalNativeUsage() {
-    string wire = IncompleteStream().Replace("fixture-model", "GPT-6.2-Sol", StringComparison.Ordinal);
+  [Theory]
+  [InlineData(LlmApi.OpenAIResponses)]
+  [InlineData(LlmApi.OpenAIChatCompletions)]
+  public async Task ModelDiagnosticCapturesTerminalNativeUsage(LlmApi api) {
+    string wire = IncompleteStream(api).Replace("fixture-model", "GPT-6.2-Sol", StringComparison.Ordinal);
     using var database = new TemporaryDatabase("urd-provider-test-usage");
     using UrdStore store = UrdStore.Open(database.Path);
     using var handler = new ScriptedOpenAIHandler(wire);
     var manager = Manager(store, handler);
     try {
-      ProviderConnection connection = await manager.AddCustomAsync(Settings());
-      await Assert.ThrowsAsync<ProviderOperationException>(() => manager.TestModelAsync(connection.Id, "requested-model"));
+      ProviderConnection connection = await manager.AddCustomAsync(Settings(api));
+      var failure = await Assert.ThrowsAsync<ProviderOperationException>(() => manager.TestModelAsync(connection.Id, "requested-model"));
+      Assert.Equal(ProviderFailure.IncompleteResponse, failure.Failure);
+      if (api == LlmApi.OpenAIChatCompletions) {
+        using var sent = JsonDocument.Parse(Assert.Single(handler.Requests).Body);
+        Assert.True(sent.RootElement.GetProperty("stream_options").GetProperty("include_usage").GetBoolean());
+      }
 
       UsageRequest captured = Assert.Single(Recent(store));
       Assert.Equal("provider test", captured.Purpose);
@@ -106,13 +117,52 @@ public sealed class UsageProviderCaptureTests {
     }
   }
 
+  [Theory]
+  [InlineData("{}", null, true, 0.000056)]
+  [InlineData("{\"cached_tokens\":0}", 0, false, 0.000056)]
+  [InlineData("{\"cached_tokens\":-1}", null, true, null)]
+  [InlineData("{\"cached_tokens\":19}", null, true, null)]
+  [InlineData("{\"cached_tokens\":0,\"cache_write_tokens\":\"zero\"}", 0, true, null)]
+  [InlineData("{\"cached_tokens\":0,\"cache_write_tokens\":null}", 0, true, null)]
+  [InlineData("{\"cached_tokens\":0,\"cache_write_tokens\":0,\"cache_write_tokens_details\":{\"ttl_30m_tokens\":0.5}}", 0, true, null)]
+  public async Task CacheCountsDistinguishAbsentZeroAndInvalid(string cache, int? cached, bool estimated, double? cost) {
+    var details = JsonSerializer.Deserialize<JsonElement>(cache);
+    string wire = ChatStream(usage: new { prompt_tokens = 18, completion_tokens = 2, total_tokens = 20, prompt_tokens_details = details })
+        .Replace("fixture-model", "GPT-6.2-Sol", StringComparison.Ordinal);
+    using var database = new TemporaryDatabase("urd-provider-usage-cache-counts");
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var handler = new ScriptedOpenAIHandler(wire);
+    var manager = Manager(store, handler);
+    try {
+      ProviderConnection connection = await manager.AddCustomAsync(Settings(LlmApi.OpenAIChatCompletions));
+      using var client = manager.CreateChatClient(connection);
+      await client.GetResponseAsync([new(ChatRole.User, "hello")], new ChatOptions { ModelId = "GPT-6.2-Sol" });
+
+      var captured = Assert.Single(Recent(store));
+      Assert.Equal((decimal?)cost, captured.CostUsd);
+      Assert.Equal(estimated, captured.IsEstimate);
+      Assert.Equal<long?>(cached, captured.Tokens!.CachedInputTokens);
+      Assert.Equal<long?>(18, captured.Tokens.InputTokens);
+      Assert.Equal<long?>(2, captured.Tokens.OutputTokens);
+      if (cost is null && cached is not null) {
+        Assert.Null(captured.Tokens.CacheWrite30mTokens);
+        Assert.Null(captured.Tokens.CacheWrite12hTokens);
+      }
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
   private static void AddContext(ChatOptions options, UsageContext context) =>
       options.AdditionalProperties = new() { [UsageContext.PropertyName] = context };
 
   private static IReadOnlyList<UsageRequest> Recent(UrdStore store) => store.ReadUsage(null,
       DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddMinutes(1)).Recent;
 
-  private static string IncompleteStream() {
+  private static string IncompleteStream(LlmApi api) {
+    if (api == LlmApi.OpenAIChatCompletions) return ChatStream("length", new {
+      prompt_tokens = 18, completion_tokens = 2, total_tokens = 20, prompt_tokens_details = new { cached_tokens = 5 }
+    });
     string wire = ResponseStream("response.incomplete");
     int terminal = wire.LastIndexOf("event: response.incomplete", StringComparison.Ordinal);
     return wire[..terminal] + wire[terminal..].Replace("\"usage\":null",
@@ -123,8 +173,8 @@ public sealed class UsageProviderCaptureTests {
   private static ProviderManager Manager(UrdStore store, HttpMessageHandler handler) =>
       new(store, () => new Uri("http://localhost:54321/api/providers/callback"), handler);
 
-  private static CustomProviderSettings Settings() =>
-      new("Fixture", LlmApi.OpenAIResponses, new Uri("https://fixture.invalid/v1"), AuthenticationMethod.None);
+  private static CustomProviderSettings Settings(LlmApi api = LlmApi.OpenAIResponses) =>
+      new("Fixture", api, new Uri("https://fixture.invalid/v1"), AuthenticationMethod.None);
 
   private static async Task CloseAsync(ProviderManager manager) {
     await manager.ShutdownAsync().WaitAsync(TestTimeout);

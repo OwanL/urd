@@ -28,9 +28,12 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
   private int completedBytes;
   private int argumentBytes;
 
+  internal bool ChatHitOutputLimit { get; private set; }
+
   internal ChatResponseUpdate? Accept(ChatResponseUpdate update) {
     if (scope.Api == LlmApi.OpenAIResponses) AcceptResponses(update);
     else AcceptChat(update);
+    if (ChatHitOutputLimit) return null;
     foreach (var content in update.Contents) {
       switch (content) {
         case TextContent value:
@@ -127,6 +130,10 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
           "tool call size limit exceeded");
     }
     if (native.FinishReason is not { } finish) return;
+    if (finish == OpenAI.Chat.ChatFinishReason.Length) {
+      ChatHitOutputLimit = true;
+      return;
+    }
     if (finish != OpenAI.Chat.ChatFinishReason.Stop && finish != OpenAI.Chat.ChatFinishReason.ToolCalls)
       throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
     toolFinish = finish == OpenAI.Chat.ChatFinishReason.ToolCalls;
@@ -154,7 +161,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
       native.Patch.TryGetJson(path, out ReadOnlyMemory<byte> json) ? JsonSerializer.Deserialize<string>(json.Span) : null;
 
   internal ChatResponseUpdate Complete() {
-    if (terminal is null) throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
+    if (ChatHitOutputLimit || terminal is null) throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
     var calls = scope.Api == LlmApi.OpenAIResponses ? ResponseCalls() : chatCalls;
     if (scope.Api == LlmApi.OpenAIChatCompletions && chatCallIndexes.Count != calls.Count)
       throw Invalid("tool call count does not match streamed indexes");

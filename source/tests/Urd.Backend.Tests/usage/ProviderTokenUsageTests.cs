@@ -100,8 +100,9 @@ public sealed class ProviderTokenUsageTests {
     UsageDetails usage = Assert.IsType<UsageDetails>(ProviderTokenUsage.Response(Read<ResponseTokenUsage>(json)));
 
     Assert.NotNull(usage.AdditionalCounts);
-    Assert.Equal(-1, usage.AdditionalCounts["cache_write_30m_tokens"]);
-    Assert.Equal(-1, usage.AdditionalCounts["cache_write_12h_tokens"]);
+    Assert.False(usage.AdditionalCounts.ContainsKey("cache_write_30m_tokens"));
+    Assert.False(usage.AdditionalCounts.ContainsKey("cache_write_12h_tokens"));
+    Assert.Equal(1, usage.AdditionalCounts[ProviderTokenUsage.InvalidCacheWrites]);
   }
 
   [Fact]

@@ -90,7 +90,10 @@ the profile cache, not the bundled seed.
 
 Live estimates use local o200k text BPE with approximate message/tool framing.
 Missing cache decisions are provisionally quoted as uncached input, but their
-recorded quantities remain null. Images, unsupported content, hidden reasoning
+recorded quantities remain null. A malformed or contradictory cache count leaves the
+attempt unpriced instead. A Chat Completions output-limit failure can still report
+usage in the next usage-only chunk; reading that chunk does not complete the response
+or authorize a tool call. Images, unsupported content, hidden reasoning
 and unknown tokenizers are not fabricated from character ratios. Streamed output
 is buffered within a fixed limit and tokenized at checkpoints, not on every delta.
 Without observed output, a successful finish or reported usage, no final monetary

@@ -8,6 +8,7 @@ using Urd.Core.Providers;
 using Xunit;
 using static Urd.Backend.Tests.Support.OpenAIStreams;
 using static Urd.Backend.Tests.Support.ProviderModelStreams;
+using static Urd.Backend.Tests.Support.TestAsync;
 
 #pragma warning disable MEAI001
 
@@ -66,6 +67,36 @@ public sealed class OpenAIInferenceClientTests {
   [InlineData(null, ProviderFailure.IncompleteResponse)]
   public async Task ResponsesFailureOrMissingTerminalNeverReleasesCalls(string? terminal, ProviderFailure failure) =>
       await Rejected(Responses([Message, Call], terminal), failure, options: Options(tools: true));
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ChatLengthFinishBoundsTrailerReadAndWithholdsCalls(bool cancel) {
+    string wire = ChatCalls(finish: "length").Replace("data: [DONE]\n\n", "", StringComparison.Ordinal);
+    using var handler = new ScriptedOpenAIHandler(wire) { HoldAtEnd = true };
+    using var http = new HttpClient(handler);
+    using var stop = new CancellationTokenSource(TestTimeout);
+    List<ChatResponseUpdate> observed = [];
+    Task request = ReadAsync();
+    await handler.ReachedEnd.Task.WaitAsync(TestTimeout);
+    if (cancel) {
+      await stop.CancelAsync();
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
+    } else {
+      var failure = await Assert.ThrowsAsync<ProviderOperationException>(() => request);
+      Assert.Equal(ProviderFailure.IncompleteResponse, failure.Failure);
+    }
+    Assert.Equal(1, handler.StreamDisposals);
+    Assert.DoesNotContain(observed.SelectMany(update => update.Contents), content => content is FunctionCallContent);
+    Assert.All(observed, update => Assert.Null(update.FinishReason));
+    Assert.All(observed, update => Assert.Null(LlmProviderContext.GetResponse(update)));
+
+    async Task ReadAsync() {
+      await foreach (var update in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
+          State(LlmApi.OpenAIChatCompletions), History(), Options(tools: true), stop.Token))
+        observed.Add(update);
+    }
+  }
 
   [Theory]
   [InlineData("\"reasoning\":42")]

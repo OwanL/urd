@@ -69,9 +69,16 @@ internal sealed class UsageObservation {
       : prices.FindRates(connection, model);
 
   private UsageRequest Snapshot(bool final) {
+    long? cached = reported?.CachedInputTokenCount;
+    long? write30 = Additional("cache_write_30m_tokens");
+    long? write12 = Additional("cache_write_12h_tokens");
+    bool invalidCached = Additional(ProviderTokenUsage.InvalidCachedInput) is > 0 ||
+        cached < 0 || cached > reported?.InputTokenCount;
+    bool invalidWrites = Additional(ProviderTokenUsage.InvalidCacheWrites) is > 0 || write30 < 0 || write12 < 0 ||
+        (decimal)(write30 ?? 0) + (write12 ?? 0) + (invalidCached ? 0 : cached ?? 0) > reported?.InputTokenCount;
     var tokens = new UsageTokens(reported?.InputTokenCount ?? estimatedInput,
-        reported?.OutputTokenCount ?? counter.OutputTokens, reported?.CachedInputTokenCount,
-        Additional("cache_write_30m_tokens"), Additional("cache_write_12h_tokens"),
+        reported?.OutputTokenCount ?? counter.OutputTokens, invalidCached ? null : cached,
+        invalidWrites ? null : write30, invalidWrites ? null : write12,
         reported?.ReasoningTokenCount, reported?.TotalTokenCount);
     bool hasCompleteReportedUsage = reported?.InputTokenCount is not null && reported.OutputTokenCount is not null
         && tokens.CachedInputTokens is >= 0 && tokens.CacheWrite30mTokens is >= 0 && tokens.CacheWrite12hTokens is >= 0;
@@ -83,7 +90,8 @@ internal sealed class UsageObservation {
     };
     bool hasUnsupportedPricingTokens = Additional("unsupported_pricing_tokens") is > 0;
     bool noEvidence = final && reported is null && !responseObserved;
-    long? nanoDollars = hasUnsupportedPricingTokens || noEvidence ? null : UsagePricing.NanoDollars(request.Rates, quote);
+    long? nanoDollars = hasUnsupportedPricingTokens || invalidCached || invalidWrites || noEvidence
+        ? null : UsagePricing.NanoDollars(request.Rates, quote);
     string? problem = ExplainProblem(final, hasCompleteReportedUsage, hasUnsupportedPricingTokens, nanoDollars);
     return request with {
       Tokens = tokens,

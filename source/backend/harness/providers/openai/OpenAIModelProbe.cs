@@ -8,8 +8,9 @@ using OpenAI.Models;
 using OpenAI.Responses;
 using Urd.Core.Storage;
 using Urd.Core.Usage;
+using UsageDetails = Microsoft.Extensions.AI.UsageDetails;
 
-#pragma warning disable OPENAI001 // The pinned SDK's native Responses and authentication-policy APIs.
+#pragma warning disable OPENAI001, MEAI001 // The pinned SDK's native Responses, authentication and usage APIs.
 
 namespace Urd.Core.Providers;
 
@@ -116,17 +117,37 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
       ProviderCredentials? credentials, string modelId, UsageObservation? observation, CancellationToken ct) {
     var client = new ChatClient(modelId, ProviderSdkAuthentication.Create(connection, credentials), Options(connection));
     var options = new ChatCompletionOptions { StoredOutputEnabled = false };
+    using var readStop = new ProviderCancellation(Timeout.InfiniteTimeSpan, ct);
+    ProviderModelTestResult result;
+    try {
+      await using var stream = client.CompleteChatStreamingAsync([new UserChatMessage(TestPrompt)], options, readStop.Token)
+          .GetAsyncEnumerator(readStop.Token);
+      result = await ReadChatAsync(stream, readStop, connection.Id, modelId, observation, ct).ConfigureAwait(false);
+    } finally {
+      await readStop.CancelAsync().ConfigureAwait(false);
+    }
+    ct.ThrowIfCancellationRequested();
+    return result;
+  }
+
+  private static async Task<ProviderModelTestResult> ReadChatAsync(IAsyncEnumerator<StreamingChatCompletionUpdate> stream,
+      ProviderCancellation readStop, Guid connectionId, string modelId, UsageObservation? observation, CancellationToken ct) {
     var text = new StringBuilder();
     bool truncated = false;
     int completed = 0;
     ProviderUsage? usage = null;
-    await foreach (var update in client.CompleteChatStreamingAsync(
-        [new UserChatMessage(TestPrompt)], options, ct).ConfigureAwait(false)) {
+    while (await stream.MoveNextAsync().ConfigureAwait(false)) {
+      StreamingChatCompletionUpdate update = stream.Current;
       ObserveUsage(observation, update, string.Concat(update.ContentUpdate.Select(part => part.Text)), update.Model);
       foreach (var part in update.ContentUpdate) AppendPreview(text, part.Text, ref truncated);
       if (update.FinishReason is { } finish) {
-        if (finish != ChatFinishReason.Stop)
+        if (finish == ChatFinishReason.Length && observation is not null && update.Usage is null &&
+            await ChatUsageTrailer.ReadAsync(stream, static update => update, readStop, ct).ConfigureAwait(false) is { } trailer)
+          ObserveUsage(observation, stream.Current, null, stream.Current.Model, trailer);
+        if (finish != ChatFinishReason.Stop) {
+          ct.ThrowIfCancellationRequested();
           throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
+        }
         if (++completed != 1) throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
       }
       if (update.Usage is not null)
@@ -134,10 +155,11 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
     }
     ct.ThrowIfCancellationRequested();
     if (completed != 1) throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
-    return new(connection.Id, modelId, text.ToString(), truncated, usage);
+    return new(connectionId, modelId, text.ToString(), truncated, usage);
   }
 
-  private static void ObserveUsage(UsageObservation? observation, object update, string? text, string? model) {
+  private static void ObserveUsage(UsageObservation? observation, object update, string? text, string? model,
+      UsageDetails? trailer = null) {
     if (observation is null) return;
     model ??= update switch {
       StreamingResponseIncompleteUpdate incomplete => incomplete.Response?.Model,
@@ -145,10 +167,10 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
       _ => null
     };
     var observed = new Microsoft.Extensions.AI.ChatResponseUpdate { ModelId = model };
-    if (update is StreamingResponseCompletedUpdate or StreamingChatCompletionUpdate { FinishReason: not null })
+    if (update is StreamingResponseCompletedUpdate or StreamingChatCompletionUpdate { FinishReason: ChatFinishReason.Stop })
       observed.FinishReason = Microsoft.Extensions.AI.ChatFinishReason.Stop;
     if (!string.IsNullOrEmpty(text)) observed.Contents.Add(new Microsoft.Extensions.AI.TextContent(text));
-    if (ProviderTokenUsage.Read(update) is { } usage)
+    if ((trailer ?? ProviderTokenUsage.Read(update)) is { } usage)
       observed.Contents.Add(new Microsoft.Extensions.AI.UsageContent(usage));
     observation.Append(observed);
   }
@@ -203,4 +225,4 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
           JsonException or FormatException or InvalidOperationException or KeyNotFoundException or ArgumentException;
 }
 
-#pragma warning restore OPENAI001
+#pragma warning restore OPENAI001, MEAI001

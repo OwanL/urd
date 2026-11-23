@@ -120,12 +120,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
             UsageDetails? usage = ProviderTokenUsage.Read(nativeUpdate.RawRepresentation);
             if (usage is not null) {
               nativeUpdate.Contents = nativeUpdate.Contents.Where(content => content is not UsageContent).ToList();
-              yield return new ChatResponseUpdate(nativeUpdate.Role, [new UsageContent(usage)]) {
-                ResponseId = nativeUpdate.ResponseId,
-                MessageId = nativeUpdate.MessageId,
-                ModelId = nativeUpdate.ModelId,
-                CreatedAt = nativeUpdate.CreatedAt
-              };
+              yield return UsageUpdate(nativeUpdate, usage);
             }
 
             BinaryData? toolArgumentDelta = estimate is not null && nativeUpdate.RawRepresentation is StreamingResponseFunctionCallArgumentsDeltaUpdate arguments
@@ -135,6 +130,12 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
               update = guard.Accept(nativeUpdate);
             } catch (Exception error) when (CanClassify(error, cancellationToken)) {
               throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
+            }
+            if (guard.ChatHitOutputLimit) {
+              if (usage is null && await ChatUsageTrailer.ReadAsync(stream, static update => update.RawRepresentation,
+                  readStop, cancellationToken, readTimeout).ConfigureAwait(false) is { } trailer)
+                yield return UsageUpdate(stream.Current, trailer);
+              break;
             }
             if (toolArgumentDelta is not null) {
               update ??= new(); // No visible output or tool execution yet.
@@ -170,6 +171,14 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       }
     }
   }
+
+  private static ChatResponseUpdate UsageUpdate(ChatResponseUpdate update, UsageDetails usage) =>
+      new(update.Role, [new UsageContent(usage)]) {
+        ResponseId = update.ResponseId,
+        MessageId = update.MessageId,
+        ModelId = update.ModelId,
+        CreatedAt = update.CreatedAt
+      };
 
   private static Guid? TakeSessionId(ref ChatOptions options) {
     if (options.AdditionalProperties?.TryGetValue(SessionIdProperty, out object? value) != true)

@@ -339,6 +339,7 @@ public sealed class McpRoutesTests {
     private readonly bool oauth;
     private readonly bool rotateTokens;
     private int tokenGeneration;
+    private volatile bool stopping;
     internal bool RejectAccessToken { get; set; }
     internal bool FailToolsList { get; set; }
     internal ConcurrentQueue<string> RefreshTokens { get; } = new();
@@ -362,13 +363,13 @@ public sealed class McpRoutesTests {
     }
 
     private async Task ServeAsync() {
-      while (listener.IsListening) {
+      while (!stopping) {
         HttpListenerContext context;
         try {
           context = await listener.GetContextAsync();
-        } catch (HttpListenerException) when (!listener.IsListening) {
+        } catch (HttpListenerException) when (stopping) {
           break;
-        } catch (ObjectDisposedException) when (!listener.IsListening) {
+        } catch (ObjectDisposedException) when (stopping) {
           break;
         }
         await RespondAsync(context);
@@ -470,6 +471,8 @@ public sealed class McpRoutesTests {
     }
 
     public async ValueTask DisposeAsync() {
+      // Stop can abort a pending accept before IsListening changes.
+      stopping = true;
       listener.Stop();
       listener.Close();
       await serving;

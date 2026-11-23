@@ -88,6 +88,7 @@ public sealed class RemoteMcpProbeTests {
     private readonly Task serving;
     private readonly Uri? redirect;
     private readonly bool offersTools;
+    private volatile bool stopping;
 
     public McpPeer(Uri? redirect = null, bool offersTools = true) {
       this.redirect = redirect;
@@ -106,13 +107,13 @@ public sealed class RemoteMcpProbeTests {
     public ConcurrentQueue<Request> Requests { get; } = new();
 
     private async Task ServeAsync() {
-      while (listener.IsListening) {
+      while (!stopping) {
         HttpListenerContext context;
         try {
           context = await listener.GetContextAsync();
-        } catch (HttpListenerException) when (!listener.IsListening) {
+        } catch (HttpListenerException) when (stopping) {
           break;
-        } catch (ObjectDisposedException) when (!listener.IsListening) {
+        } catch (ObjectDisposedException) when (stopping) {
           break;
         }
         await RespondAsync(context);
@@ -160,6 +161,8 @@ public sealed class RemoteMcpProbeTests {
     }
 
     public async ValueTask DisposeAsync() {
+      // Stop can abort a pending accept before IsListening changes.
+      stopping = true;
       listener.Stop();
       listener.Close();
       await serving;

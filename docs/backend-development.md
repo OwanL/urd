@@ -78,15 +78,13 @@ directory context, selected skills, then scoped discovered documents, in that or
 `SelectedSkillsContext` under `context/runtime/` renders selected skills. Composition is
 explicit: there is no `StartingContextContribution` abstraction, reflection-based
 discovery or configurable guidance registration. Built-in guidance bypasses pruning.
-The [context README](../source/backend/harness/context/README.md) owns resource
-recognition, scope, precedence and protection identities. This composition cleanup does
+This composition cleanup does
 not change pruning behavior or context-boundary snapshot activation. `RequestContextEstimate`
 is execution-owned under `execution/`, not part of context guidance.
 
 `InstructionResourceDiscovery` loads eligible agent-facing Markdown and skill metadata
 from the working directory and descendants, independently of Git, and adds packaged skills.
-The [context README](../source/backend/harness/context/README.md) owns recognition, scope,
-precedence and protection identities. Ordinary documentation and other harnesses'
+Ordinary documentation and other harnesses'
 configuration are not instruction candidates. Document candidates include full text; skills
 remain name/description/path references with on-demand bodies. A shared, path-only SQLite
 catalog is stored beside the session database at `<DataRoot>/urd.sqlite.instructions.sqlite`;

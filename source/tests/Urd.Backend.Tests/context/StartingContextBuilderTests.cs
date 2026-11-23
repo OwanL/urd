@@ -25,16 +25,15 @@ public sealed class StartingContextBuilderTests {
     Assert.Equal(shared, subagent.Instructions[0].Text);
 
     string primaryGuidance = primary.Instructions[1].Text;
-    Assert.Contains("Help the user directly", primaryGuidance, StringComparison.Ordinal);
     Assert.Contains("# Default working guidance", primaryGuidance, StringComparison.Ordinal);
-    Assert.Contains("Ask before materially expanding scope.", primaryGuidance, StringComparison.Ordinal);
+    Assert.Contains("Lead with the headline.", primaryGuidance, StringComparison.Ordinal);
     Assert.StartsWith($"Working directory: {workingDirectory}\n", primary.Instructions[2].Text, StringComparison.Ordinal);
 
     Assert.Equal(3, subagent.Instructions.Count);
     Assert.StartsWith("Operating system:", subagent.Instructions[2].Text, StringComparison.Ordinal);
     string subagentGuidance = subagent.Instructions[1].Text;
     Assert.Contains("Stay within its scope", subagentGuidance, StringComparison.Ordinal);
-    Assert.Contains("Start with a plain-language outcome sentence", subagentGuidance, StringComparison.Ordinal);
+    Assert.Contains("# Subagent guidance", subagentGuidance, StringComparison.Ordinal);
     Assert.DoesNotContain(subagent.Instructions, message => message.Text.StartsWith("Working directory:", StringComparison.Ordinal));
     Assert.All(primary.Instructions.Concat(subagent.Instructions), message => Assert.Equal(ChatRole.System, message.Role));
   }

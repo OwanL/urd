@@ -376,8 +376,8 @@ public sealed class SubagentRunTests {
       Assert.Equal(AssignmentTask, childInputs[1].Text);
       string childInstructions = string.Join('\n', childRequest.Messages
           .Where(message => message.Role == ChatRole.System).Select(message => message.Text));
-      Assert.Contains("Start with a plain-language outcome sentence", childInstructions, StringComparison.Ordinal);
-      Assert.DoesNotContain("Help the user directly", childInstructions, StringComparison.Ordinal);
+      Assert.Contains("# Subagent guidance", childInstructions, StringComparison.Ordinal);
+      Assert.DoesNotContain("# Default working guidance", childInstructions, StringComparison.Ordinal);
 
       ScriptedRequest continuation = Assert.Single(requests, request =>
           request.Messages.SelectMany(message => message.Contents).OfType<FunctionResultContent>().Any());

@@ -13,8 +13,6 @@ superseded research and plans live in Git history, not an archive directory.
 - [Browser development](browser-development.md): UI toolchain, behavior and verification.
 - [Provider management](provider-management.md): connections, credentials and browser settings.
 - [Usage accounting](usage-accounting.md): API-equivalent cost, durable records and live-estimate limits.
-- [System guidance and resource discovery](../source/backend/harness/context/README.md):
-  instruction and skill scope, path catalog and scanner.
 - [Web access](web-access-plan.md): search and read tools, limits and remaining qualification.
 - [Test scope](testing.md) and [code shape](code-shape-guidelines.md): local verification,
   size budget and review conventions.

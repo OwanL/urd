@@ -59,8 +59,8 @@ public sealed class SubagentSessionTests {
       Assert.Equal([ParentContextBlock, AssignmentTask], userInputs.Select(message => message.Text));
       string instructions = string.Join('\n', main.Messages.Where(message => message.Role == ChatRole.System)
           .Select(message => message.Text));
-      Assert.Contains("Start with a plain-language outcome sentence", instructions, StringComparison.Ordinal);
-      Assert.DoesNotContain("Help the user directly", instructions, StringComparison.Ordinal);
+      Assert.Contains("# Subagent guidance", instructions, StringComparison.Ordinal);
+      Assert.DoesNotContain("# Default working guidance", instructions, StringComparison.Ordinal);
 
       mainRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed,

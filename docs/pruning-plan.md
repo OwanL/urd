@@ -16,8 +16,8 @@ then scoped discovered documents. `SelectedSkillsContext` under `context/runtime
 renders selected skills. There is no `StartingContextContribution` abstraction,
 reflection-based discovery or configurable guidance registration. `RequestContextEstimate`
 belongs under `execution/`. This cleanup changes neither pruning behavior nor context
-snapshot preparation, activation or reuse; the [context README](../source/backend/harness/context/README.md)
-owns resource discovery details.
+snapshot preparation, activation or reuse; [backend development](backend-development.md#starting-context)
+describes resource discovery.
 
 ## Selected direction
 
@@ -220,8 +220,8 @@ precedence, rather than being injected into unrelated projects.
 from matching files in the working directory and descendants, without requiring Git. No
 ancestor or sibling project guidance is included; Urd's packaged skills remain available.
 This supersedes the earlier Git-only discovery decision, not the pruning triggers or
-protection contract. The [context guide](../source/backend/harness/context/README.md#project-instruction-documents)
-owns filename recognition, the path-only catalog, and scanner and watcher behavior.
+protection contract. [Backend development](backend-development.md#starting-context)
+describes filename recognition, the path-only catalog, and scanner and watcher behavior.
 
 **Document scope decision:** include agent-facing Markdown instruction resources,
 including `AGENTS.md` and append-system resources. Exclude files specific to other
@@ -553,9 +553,8 @@ settled fallback in
 fallback notes are historical.
 
 Earlier proposal examples in this document preserve design history, not a frozen API
-or statements that these mechanisms remain unimplemented. Concrete discovery rules live
-in the [context README](../source/backend/harness/context/README.md); implemented ownership
-is described in [backend development](backend-development.md#starting-context) and
+or statements that these mechanisms remain unimplemented. Concrete discovery rules and
+implemented ownership are described in [backend development](backend-development.md#starting-context) and
 [execution design](execution-design.md#implemented-core). Verification uses fake/loopback
 providers and owned temporary profiles; it does not establish pruning quality or a
 winner over keep-all. The running host and live database have not been changed.

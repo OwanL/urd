@@ -612,8 +612,8 @@ Project instructions and skills are discovered under the working directory, with
 requiring Git; see the [discovery rules](pruning-plan.md#project-resource-discovery).
 Agent-facing Markdown instructions are in scope, including `AGENTS.md` and append-system
 resources; other harnesses' files, such as `CLAUDE.md` and Copilot instructions, are excluded.
-The implemented recognition rules, precedence and protection identities are documented
-in the [context README](../source/backend/harness/context/README.md), with acceptance
+The implemented recognition rules, precedence and protection identities are described
+in [backend development](backend-development.md#starting-context), with acceptance
 coverage in `InstructionResourceDiscoveryTests`. The subsequent protection and
 category-selection direction is recorded below. Skills are listed by name,
 description and path when a chat starts, from project `SKILL.md` files and Urd's packaged

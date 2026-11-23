@@ -155,8 +155,8 @@ public sealed class InstructionResourceIntegrationTests(ITestOutputHelper output
   private static async Task CatalogIndexSettledAsync(InstructionResourceDiscovery discovery, string directory, int count) {
     using var settle = new CancellationTokenSource(TestTimeout);
     while (true) {
-      var (_, instructions) = await discovery.FindMetadataAsync(directory, settle.Token);
-      if (instructions.Count >= count)
+      var resources = await discovery.FindAsync(directory, settle.Token);
+      if (resources.Instructions.Count >= count && resources.Index.Phase == InstructionResourceIndexPhase.Complete)
         return;
       await Task.Delay(25, settle.Token);
     }

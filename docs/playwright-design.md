@@ -1,9 +1,10 @@
 # Browser automation
 
-Status: browser host, session tool and viewer implemented. The launch configuration now matches
-the successful spike; the finished app still needs its real-account Google qualification. Replaces
-the shipped preview (shared profile, restricted tool, headed sign-in relaunch, network proxy). The
-earlier design and probes are in Git history before this revision.
+Status: browser host, session tool and viewer implemented. The launch configuration matches the
+successful spike; real-account Google sign-in, restart persistence and third-party sign-in passed
+in the finished viewer on 2026-11-24. Replaces the shipped preview (shared profile, restricted
+tool, headed sign-in relaunch, network proxy). The earlier design and probes are in Git history
+before this revision.
 
 ## Goals
 
@@ -176,7 +177,9 @@ more per loaded page. Idle shutdown is what keeps resource use low.
   `--disable-blink-features=AutomationControlled`, and remove `Headless` markers from the actual
   browser user agent. The user agent is captured on a blank first launch, then cached by Chromium
   product version; a browser update captures a new value. Real-page tests assert
-  `navigator.webdriver == false` and no `Headless` marker. Real-account qualification is pending.
+  `navigator.webdriver == false` and no `Headless` marker. The corrected staged build passed Gmail
+  sign-in with 2FA, stayed signed in after a full Urd and Chromium restart, and completed ChatGPT's
+  third-party "Continue with Google" flow in the same fresh profile.
 - Risk: Chrome for Testing identifies as plain Chromium, and a pinned build ages between Urd
   updates. If Google starts refusing it, revisit using an installed browser.
 - If Google still refuses headless, run headed with an off-screen window; the screencast viewer
@@ -215,10 +218,9 @@ results are not. The browser tool's own 12,000-character truncation goes away wi
 ## Qualification order
 
 1. Done: the spike verified Google sign-in with the proposed browser configuration (see above).
-   Release blocker: repeat that flow in the finished Urd viewer using a fresh test profile. The
-   owner must be able to sign in with 2FA, restart Urd and reopen Gmail without signing in again,
-   and use Sign in with Google on a third-party site. A failed check blocks the browser release;
-   Google is not an optional provider.
+   The finished Urd viewer then passed the required real-account checks on a fresh profile: Gmail
+   sign-in with 2FA, Gmail still signed in after a full Urd restart, and third-party Sign in with
+   Google. Google is not an optional provider; any regression in these checks blocks release.
 2. Done: shared tool output cap (separate change).
 3. Browser host and `browser` tool, replacing the current tool.
 4. Viewer and handoff in the chat, including from a LAN device. Suggested slices: screencast and

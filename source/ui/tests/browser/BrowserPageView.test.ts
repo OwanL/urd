@@ -155,36 +155,108 @@ void test("touch drag scrolls, while mouse drag and cancelled gestures do not cl
 
 void test("Tab retains native focus navigation instead of being forwarded", async () => {
   await page.getByRole("application").focus();
+  assert.equal(
+    await page
+      .getByLabel("Input for Example")
+      .evaluate((element) => element === document.activeElement),
+    true,
+  );
   await page.keyboard.press("Tab");
   assert.equal(
     await page
-      .getByLabel("Text for Example")
+      .getByLabel("Input for Example")
       .evaluate((element) => element === document.activeElement),
-    true,
+    false,
   );
   assert.deepEqual(await commands(), []);
 });
 
-void test("AltGr printable characters are forwarded once, but shortcuts remain local", async () => {
-  const result = await page.getByRole("application").evaluate((surface) => {
-    const dispatch = (key: string, altGraph: boolean) => {
-      const event = new KeyboardEvent("keydown", {
-        key,
-        ctrlKey: true,
-        altKey: true,
-        bubbles: true,
-        cancelable: true,
-      });
-      Object.defineProperty(event, "getModifierState", {
-        value: (name: string) => name === "AltGraph" && altGraph,
-      });
-      surface.dispatchEvent(event);
-      return event.defaultPrevented;
-    };
-    return [dispatch("@", true), dispatch("a", false)];
+void test("typing, paste, editing and composition send each input once", async () => {
+  await page.getByRole("application").focus();
+  await page.keyboard.type("Hi");
+  await page.keyboard.press("Backspace");
+  const extendSelection = "Shift+ArrowLeft";
+  await page.keyboard.press(extendSelection);
+  await page.keyboard.press("Control+a");
+  await page.keyboard.insertText(" pasted 🐱");
+  assert.deepEqual(await commands(), [
+    { type: "text", text: "H" },
+    { type: "text", text: "i" },
+    { type: "key", key: "Backspace" },
+    { type: "key", key: extendSelection },
+    { type: "key", key: "Control+a" },
+    { type: "text", text: " pasted 🐱" },
+  ]);
+  await page.getByLabel("Input for Example").evaluate((input: HTMLTextAreaElement) => {
+    input.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    input.value = "に";
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true, data: "に" }));
+    input.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "に" }));
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, data: "に" }));
   });
-  assert.deepEqual(result, [true, false]);
-  assert.deepEqual(await commands(), [{ type: "text", text: "@" }]);
+  assert.deepEqual(await commands(), [{ type: "text", text: "に" }]);
+  assert.equal(await page.getByRole("button", { name: "Send text" }).count(), 0);
+});
+
+void test("input bridge is read-only while disconnected and discards input", async () => {
+  await commands();
+  const input = page.getByLabel("Input for Example");
+  assert.equal(
+    await input.evaluate((element) => element.classList.contains("browser-page-input-bridge")),
+    true,
+  );
+  assert.deepEqual(
+    await input.evaluate((element: HTMLTextAreaElement) => ({
+      spellcheck: element.spellcheck,
+      autocapitalize: element.getAttribute("autocapitalize"),
+      autocomplete: element.getAttribute("autocomplete"),
+    })),
+    { spellcheck: false, autocapitalize: "off", autocomplete: "off" },
+  );
+  await page.getByRole("application").focus();
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerStream.close());
+  assert.equal(await page.locator(".browser-page-status").textContent(), "Connection lost.");
+  assert.equal(await page.locator(".browser-page-status").isVisible(), true);
+  assert.equal(await input.evaluate((element: HTMLTextAreaElement) => element.readOnly), true);
+  assert.equal(await input.evaluate((element) => element === document.activeElement), true);
+  assert.equal(await input.evaluate((element) => getComputedStyle(element).pointerEvents), "none");
+  await page.keyboard.type("silent");
+  await page.keyboard.insertText("paste");
+  await input.evaluate((element: HTMLTextAreaElement) => {
+    element.value = "stale";
+    element.dispatchEvent(new InputEvent("input", { bubbles: true, data: "stale" }));
+  });
+  assert.equal(await input.inputValue(), "");
+  assert.deepEqual(await commands(), []);
+
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerStream.open());
+  assert.equal(
+    await page.locator(".browser-page-status").textContent(),
+    "Waiting for first frame.",
+  );
+  assert.equal(await input.evaluate((element: HTMLTextAreaElement) => element.readOnly), false);
+  assert.equal(await input.evaluate((element) => element === document.activeElement), true);
+  assert.equal(await input.inputValue(), "");
+  assert.deepEqual(await commands(), []);
+  await page.keyboard.insertText("current");
+  assert.deepEqual(await commands(), [{ type: "text", text: "current" }]);
+});
+
+void test("CDP IME composition sends committed text once", async () => {
+  await commands();
+  await page.getByLabel("Input for Example").focus();
+  const cdp = await page.context().newCDPSession(page);
+  try {
+    await cdp.send("Input.imeSetComposition", {
+      text: "に",
+      selectionStart: 1,
+      selectionEnd: 1,
+    });
+    await cdp.send("Input.insertText", { text: "に" });
+  } finally {
+    await cdp.detach();
+  }
+  assert.deepEqual(await commands(), [{ type: "text", text: "に" }]);
 });
 
 // Frame-pipeline regressions; these run after the pointer tests so the canvas

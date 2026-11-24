@@ -24,132 +24,322 @@ after(async () => {
   await server?.close();
 });
 
-async function openViewer(width: number, height: number): Promise<Page> {
+type Rect = { x: number; y: number; width: number; height: number };
+type Edge = "left" | "right" | "top" | "bottom";
+
+async function openViewer(width = 1200, height = 800): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height } });
   await page.goto(`${server.resolvedUrls!.local[0]}geometry-test`);
-  await page.getByRole("button", { name: "Browser pages (1)" }).click();
+  await page.getByRole("button", { name: "Open browser" }).click();
   await page.waitForFunction(() => document.querySelector("canvas")?.width === 1280);
   return page;
 }
 
-async function geometry(page: Page) {
-  return page.evaluate(() => {
-    const rect = (selector: string) => {
-      const bounds = document.querySelector(selector)!.getBoundingClientRect();
-      return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height };
-    };
-    return {
-      panel: rect(".browser-viewer-panel"),
-      surface: rect(".browser-page-surface"),
-      canvas: rect("canvas"),
-    };
-  });
+async function rect(page: Page, selector: string): Promise<Rect> {
+  const box = await page.locator(selector).boundingBox();
+  assert.ok(box, `${selector} is visible`);
+  return box;
 }
 
-function assertCanvasFits({ surface, canvas }: Awaited<ReturnType<typeof geometry>>) {
+function close(actual: number, expected: number, message: string) {
+  assert.ok(Math.abs(actual - expected) <= 2, `${message}: ${actual} != ${expected}`);
+}
+
+function sameRect(actual: Rect, expected: Rect) {
+  for (const key of ["x", "y", "width", "height"] as const) close(actual[key], expected[key], key);
+}
+
+async function assertCanvasFits(page: Page) {
+  const surface = await rect(page, ".browser-page-surface");
+  const canvas = await rect(page, "canvas");
   assert.ok(
     canvas.width > 100 && canvas.height > 50,
     `canvas is usable: ${JSON.stringify(canvas)}`,
   );
   assert.ok(
     canvas.width <= surface.width + 1 && canvas.height <= surface.height + 1,
-    `canvas fits surface: ${JSON.stringify({ surface, canvas })}`,
+    "canvas fits surface",
   );
   assert.ok(
     Math.abs(canvas.width / canvas.height - 1280 / 720) < 0.02,
-    `canvas preserves frame aspect ratio: ${JSON.stringify(canvas)}`,
+    "canvas preserves frame aspect ratio",
   );
   const scale = Math.min(1, surface.width / 1280, surface.height / 720);
   assert.ok(
     Math.abs(canvas.width - 1280 * scale) < 1 && Math.abs(canvas.height - 720 * scale) < 1,
-    `canvas uses available surface: ${JSON.stringify({ surface, canvas })}`,
+    "canvas uses available surface",
   );
 }
 
-void test("docked viewer fills its allotted height and restores after maximize", async () => {
-  const page = await openViewer(1200, 800);
+async function assertChatContentsFit(page: Page) {
+  const chat = await rect(page, ".chat-pane");
+  for (const selector of [".transcript-area", ".composer"]) {
+    const content = await rect(page, selector);
+    assert.ok(
+      content.x >= chat.x - 1 &&
+        content.y >= chat.y - 1 &&
+        content.x + content.width <= chat.x + chat.width + 1 &&
+        content.y + content.height <= chat.y + chat.height + 1,
+      `${selector} fits chat: ${JSON.stringify({ chat, content })}`,
+    );
+  }
+}
+
+async function mode(page: Page, value: string) {
+  await page.waitForFunction(
+    (expected) =>
+      document.querySelector(".browser-viewer-panel")?.getAttribute("data-mode") === expected,
+    value,
+  );
+}
+
+async function drag(page: Page, selector: string, x: number, y: number) {
+  const box = await rect(page, selector);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(x, y, { steps: 10 });
+  await page.mouse.up();
+}
+
+async function snap(page: Page, edge: Edge) {
+  const workspace = await rect(page, ".chat-view");
+  const x =
+    edge === "left"
+      ? workspace.x + 1
+      : edge === "right"
+        ? workspace.x + workspace.width - 1
+        : workspace.x + workspace.width / 2;
+  const y =
+    edge === "top"
+      ? workspace.y + 1
+      : edge === "bottom"
+        ? workspace.y + workspace.height - 1
+        : workspace.y + workspace.height / 2;
+  await drag(page, ".browser-viewer-grip", x, y);
+  await mode(page, edge);
+}
+
+async function assertSplit(page: Page, edge: Edge) {
+  const workspace = await rect(page, ".chat-view");
+  const panel = await rect(page, ".browser-viewer-panel");
+  const chat = await rect(page, ".chat-pane");
+  assert.ok(chat.width > 0 && chat.height > 0, "chat remains visible");
+  await assertChatContentsFit(page);
+  if (edge === "left" || edge === "right") {
+    close(panel.y, workspace.y, "panel top");
+    close(panel.height, workspace.height, "panel height");
+    close(chat.y, workspace.y, "chat top");
+    close(chat.height, workspace.height, "chat height");
+    close(panel.width + chat.width, workspace.width, "split width");
+    close(edge === "left" ? panel.x : chat.x, workspace.x, "split left");
+    close(
+      edge === "left" ? panel.x + panel.width : chat.x + chat.width,
+      edge === "left" ? chat.x : panel.x,
+      "split seam",
+    );
+  } else {
+    close(panel.x, workspace.x, "panel left");
+    close(panel.width, workspace.width, "panel width");
+    close(chat.x, workspace.x, "chat left");
+    close(chat.width, workspace.width, "chat width");
+    close(panel.height + chat.height, workspace.height, "split height");
+    close(edge === "top" ? panel.y : chat.y, workspace.y, "split top");
+    close(
+      edge === "top" ? panel.y + panel.height : chat.y + chat.height,
+      edge === "top" ? chat.y : panel.y,
+      "split seam",
+    );
+  }
+}
+
+for (const edge of ["left", "right", "top", "bottom"] as const) {
+  void test(`dragging to ${edge} snaps into a true chat split`, async () => {
+    const page = await openViewer();
+    try {
+      await snap(page, edge);
+      await assertSplit(page, edge);
+    } finally {
+      await page.close();
+    }
+  });
+}
+
+void test("dragging a docked header undocks with the previous floating size", async () => {
+  const page = await openViewer();
   try {
-    const docked = await geometry(page);
-    assert.ok(
-      Math.abs(docked.panel.height - 384) < 1,
-      `docked height: ${JSON.stringify(docked.panel)}`,
+    const floating = await rect(page, ".browser-viewer-panel");
+    await snap(page, "left");
+    const workspace = await rect(page, ".chat-view");
+    await drag(
+      page,
+      ".browser-viewer-grip",
+      workspace.x + workspace.width / 2,
+      workspace.y + workspace.height / 2,
     );
-    assertCanvasFits(docked);
-    await page.getByRole("button", { name: "Maximize viewer" }).click();
-    const maximized = await geometry(page);
-    assert.deepEqual(maximized.panel, { x: 0, y: 0, width: 1200, height: 800 });
-    assertCanvasFits(maximized);
-    await page.getByRole("button", { name: "Restore viewer size" }).click();
-    const restored = await geometry(page);
-    assert.ok(
-      Math.abs(restored.panel.height - docked.panel.height) < 1,
-      `restored height: ${JSON.stringify(restored.panel)}`,
-    );
-    assertCanvasFits(restored);
+    await mode(page, "floating");
+    const undocked = await rect(page, ".browser-viewer-panel");
+    close(undocked.width, floating.width, "floating width");
+    close(undocked.height, floating.height, "floating height");
   } finally {
     await page.close();
   }
 });
 
-void test("floating viewer stays in view after viewport narrows and after maximize restore", async () => {
-  const page = await openViewer(1200, 800);
+void test("corner and side handles resize the floating panel", async () => {
+  const page = await openViewer();
   try {
-    await page.getByRole("button", { name: "Float viewer" }).click();
-    const header = page.locator(".browser-viewer-header");
-    const bounds = (await header.boundingBox())!;
-    await page.mouse.move(bounds.x + 2, bounds.y + 2);
-    await page.mouse.down();
-    await page.mouse.move(1190, 790);
-    await page.mouse.up();
+    const before = await rect(page, ".browser-viewer-panel");
+    const corner = await rect(page, '.browser-resize-handle[data-edge="se"]');
+    await drag(
+      page,
+      '.browser-resize-handle[data-edge="se"]',
+      corner.x + corner.width / 2 - 100,
+      corner.y + corner.height / 2 - 80,
+    );
+    const afterCorner = await rect(page, ".browser-viewer-panel");
+    assert.ok(
+      afterCorner.width < before.width - 20 && afterCorner.height < before.height - 20,
+      "corner changes both dimensions",
+    );
+    const side = await rect(page, '.browser-resize-handle[data-edge="e"]');
+    await drag(
+      page,
+      '.browser-resize-handle[data-edge="e"]',
+      side.x + side.width / 2 + 50,
+      side.y + side.height / 2,
+    );
+    const afterSide = await rect(page, ".browser-viewer-panel");
+    assert.ok(afterSide.width > afterCorner.width + 20, "side changes width");
+    close(afterSide.height, afterCorner.height, "side preserves height");
+  } finally {
+    await page.close();
+  }
+});
+
+void test("floating panel stays within the workspace when the viewport shrinks", async () => {
+  const page = await openViewer();
+  try {
+    await drag(page, ".browser-viewer-grip", 1000, 650);
     await page.setViewportSize({ width: 360, height: 600 });
     await page.waitForFunction(() => {
-      const bounds = document.querySelector(".browser-viewer-panel")!.getBoundingClientRect();
-      return bounds.right <= innerWidth && bounds.bottom <= innerHeight;
+      const panel = document.querySelector(".browser-viewer-panel")!.getBoundingClientRect();
+      const workspace = document.querySelector(".chat-view")!.getBoundingClientRect();
+      return (
+        panel.left >= workspace.left - 1 &&
+        panel.top >= workspace.top - 1 &&
+        panel.right <= workspace.right + 1 &&
+        panel.bottom <= workspace.bottom + 1
+      );
     });
-    const floating = await geometry(page);
-    assert.ok(
-      floating.panel.x >= 0 && floating.panel.x + floating.panel.width <= 360,
-      JSON.stringify(floating),
-    );
-    assertCanvasFits(floating);
-    await page.getByRole("button", { name: "Maximize viewer" }).click();
-    await page.getByRole("button", { name: "Restore viewer size" }).click();
-    const restored = await geometry(page);
-    assert.ok(
-      restored.panel.x >= 0 && restored.panel.x + restored.panel.width <= 360,
-      JSON.stringify(restored),
-    );
-    assertCanvasFits(restored);
+    await assertCanvasFits(page);
+    await assertChatContentsFit(page);
+    const floating = await rect(page, ".browser-viewer-panel");
+    await page.getByLabel("Window layout").selectOption("maximized");
+    await mode(page, "maximized");
+    await assertCanvasFits(page);
+    await page.getByLabel("Window layout").selectOption("floating");
+    await mode(page, "floating");
+    sameRect(await rect(page, ".browser-viewer-panel"), floating);
+    await assertCanvasFits(page);
+    await assertChatContentsFit(page);
     await page.setViewportSize({ width: 1200, height: 800 });
-    const resizedHeader = (await header.boundingBox())!;
-    await page.mouse.move(resizedHeader.x + 2, resizedHeader.y + 2);
-    await page.mouse.down();
-    await page.mouse.move(1190, 790);
-    await page.mouse.up();
-    await page.getByRole("button", { name: "Maximize viewer" }).click();
+    await drag(page, ".browser-viewer-grip", 1000, 650);
+    await page.getByLabel("Window layout").selectOption("maximized");
+    await mode(page, "maximized");
     await page.setViewportSize({ width: 360, height: 600 });
-    await page.getByRole("button", { name: "Restore viewer size" }).click();
-    const restoredAfterResize = await geometry(page);
+    await page.getByLabel("Window layout").selectOption("floating");
+    await mode(page, "floating");
+    const restored = await rect(page, ".browser-viewer-panel");
+    const workspace = await rect(page, ".chat-view");
     assert.ok(
-      restoredAfterResize.panel.x >= 0 &&
-        restoredAfterResize.panel.x + restoredAfterResize.panel.width <= 360,
-      JSON.stringify(restoredAfterResize),
+      restored.x >= workspace.x && restored.x + restored.width <= workspace.x + workspace.width + 1,
+      "restored panel fits narrow workspace",
     );
-    assertCanvasFits(restoredAfterResize);
+    await assertCanvasFits(page);
+    await assertChatContentsFit(page);
   } finally {
     await page.close();
   }
 });
 
-void test("narrow docked viewer contains the frame without distortion", async () => {
+void test("minimize removes the panel and reopening restores its floating rectangle", async () => {
+  const page = await openViewer();
+  try {
+    const before = await rect(page, ".browser-viewer-panel");
+    await page.getByRole("button", { name: "Minimize viewer" }).click();
+    await page.locator(".browser-viewer-panel").waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Open browser" }).click();
+    await mode(page, "floating");
+    sameRect(await rect(page, ".browser-viewer-panel"), before);
+  } finally {
+    await page.close();
+  }
+});
+
+void test("docked split resizes by pointer and keyboard and survives minimize", async () => {
+  const page = await openViewer();
+  try {
+    await snap(page, "left");
+    const before = await rect(page, ".browser-viewer-panel");
+    const divider = await rect(page, ".browser-divider");
+    await drag(
+      page,
+      ".browser-divider",
+      divider.x + divider.width / 2 + 100,
+      divider.y + divider.height / 2,
+    );
+    const resized = await rect(page, ".browser-viewer-panel");
+    assert.ok(resized.width > before.width + 50, "pointer changes split");
+    await assertSplit(page, "left");
+    await page.getByRole("separator", { name: "Browser split" }).focus();
+    await page.keyboard.press("ArrowRight");
+    const keyboard = await rect(page, ".browser-viewer-panel");
+    assert.ok(keyboard.width > resized.width, "arrow changes split");
+    await assertSplit(page, "left");
+    await page.getByRole("button", { name: "Minimize viewer" }).click();
+    await page.locator(".browser-viewer-panel").waitFor({ state: "detached" });
+    await page.getByRole("button", { name: "Open browser" }).click();
+    await mode(page, "left");
+    sameRect(await rect(page, ".browser-viewer-panel"), keyboard);
+    await assertSplit(page, "left");
+  } finally {
+    await page.close();
+  }
+});
+
+void test("frame fits in narrow docked, maximized and restored layouts", async () => {
   const page = await openViewer(360, 800);
   try {
-    const bounds = await geometry(page);
-    assert.ok(
-      Math.abs(bounds.panel.height - 384) < 1,
-      `docked height: ${JSON.stringify(bounds.panel)}`,
-    );
-    assertCanvasFits(bounds);
+    await page.getByLabel("Window layout").selectOption("bottom");
+    await mode(page, "bottom");
+    await assertSplit(page, "bottom");
+    const docked = await rect(page, ".browser-viewer-panel");
+    await assertCanvasFits(page);
+    await page.getByLabel("Window layout").selectOption("maximized");
+    await mode(page, "maximized");
+    sameRect(await rect(page, ".browser-viewer-panel"), await rect(page, ".chat-view"));
+    await assertCanvasFits(page);
+    await page.getByLabel("Window layout").selectOption("bottom");
+    await mode(page, "bottom");
+    sameRect(await rect(page, ".browser-viewer-panel"), docked);
+    await assertCanvasFits(page);
+    await assertSplit(page, "bottom");
+  } finally {
+    await page.close();
+  }
+});
+
+void test("keyboard layout control changes layout without a pointer gesture", async () => {
+  const page = await openViewer();
+  try {
+    const layout = page.getByLabel("Window layout");
+    await layout.focus();
+    await page.keyboard.press("Home");
+    // Select by typing the native option label, as a keyboard user can.
+    await page.keyboard.type("right");
+    await page.keyboard.press("Enter");
+    await mode(page, "right");
+    await assertSplit(page, "right");
   } finally {
     await page.close();
   }

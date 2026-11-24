@@ -1,3 +1,4 @@
+import type { ComponentChildren } from "preact";
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import { MessageEditingContext, InlineMessageEditor } from "./message-editing/EditableMessage.tsx";
 import type { MessageEditing } from "./message-editing/MessageEditing.ts";
@@ -297,16 +298,8 @@ export function Chat({
     if (!state.selectionLocked) selectModel(sessionId, next);
   }
 
-  return (
-    <section
-      ref={panel}
-      id={active ? "chat-view" : undefined}
-      hidden={!active}
-      data-chat-session={sessionId}
-      class="chat-view"
-      role="tabpanel"
-      aria-labelledby={`tab-${sessionId}`}
-    >
+  const renderChat = (browserLauncher: ComponentChildren) => (
+    <>
       <MessageEditingContext.Provider value={editingContext}>
         <Transcript
           client={client}
@@ -417,15 +410,6 @@ export function Chat({
             onCancel={() => messageEditing.cancel(sessionId)}
           />
         )}
-      <BrowserViewer
-        sessionId={sessionId}
-        active={active}
-        refresh={refresh}
-        browserRefresh={browserRefresh}
-        openRequest={browserRequest}
-        onReturnToQuestion={hasQuestion ? () => questionPanel.current?.focus() : undefined}
-        onOwnersChange={setBrowserOwners}
-      />
       {active && (
         <UserQuestions
           client={client}
@@ -441,6 +425,7 @@ export function Chat({
         />
       )}
       <Composer
+        browserLauncher={browserLauncher}
         input={composerInput}
         subagentProviders={
           active && (
@@ -563,6 +548,30 @@ export function Chat({
         }}
         onSetUpProvider={onSetUpProvider}
       />
+    </>
+  );
+
+  return (
+    <section
+      ref={panel}
+      id={active ? "chat-view" : undefined}
+      hidden={!active}
+      data-chat-session={sessionId}
+      class="chat-view"
+      role="tabpanel"
+      aria-labelledby={`tab-${sessionId}`}
+    >
+      <BrowserViewer
+        sessionId={sessionId}
+        active={active}
+        refresh={refresh}
+        browserRefresh={browserRefresh}
+        openRequest={browserRequest}
+        onReturnToQuestion={hasQuestion ? () => questionPanel.current?.focus() : undefined}
+        onOwnersChange={setBrowserOwners}
+      >
+        {renderChat}
+      </BrowserViewer>
     </section>
   );
 }

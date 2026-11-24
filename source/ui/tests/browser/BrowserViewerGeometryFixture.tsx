@@ -7,6 +7,7 @@ import {
 import "../../base.css";
 import "../../chat/chat.css";
 import "../../chat/transcript/transcript.css";
+import "../../chat/composer/composer.css";
 
 window.fetch = async () =>
   new Response(
@@ -41,9 +42,6 @@ BrowserPageStream.prototype.open = function () {
 render(
   <div style={{ display: "flex", height: "100%" }}>
     <div class="chat-view">
-      <div class="transcript-area">
-        <div class="transcript" />
-      </div>
       <BrowserViewer
         sessionId="session"
         active
@@ -52,8 +50,19 @@ render(
         openRequest={null}
         onOwnersChange={() => {}}
         onReturnToQuestion={undefined}
-      />
-      <div style={{ flex: "none", height: "100px" }} />
+      >
+        {(launcher) => (
+          <>
+            <div class="transcript-area">
+              <div class="transcript" />
+            </div>
+            {launcher}
+            <div class="composer">
+              <textarea class="composer-input" aria-label="Message" />
+            </div>
+          </>
+        )}
+      </BrowserViewer>
     </div>
   </div>,
   document.body,

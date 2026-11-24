@@ -16,6 +16,9 @@ The ASP.NET Core host serves the Preact browser workspace and its HTTP APIs. It 
 loopback by default; optional LAN hosting binds private IPv4 addresses separately, is off by
 default, and has no sign-in. Enable it only on a trusted network. The UI has local tabs, drafts,
 model/reasoning selection, Send/Stop and provider settings.
+When an agent has a browser page open, choose **Browser** in the composer to view it and type directly into it.
+Drag the title bar to a chat edge for a split, or back into the chat to float. Drag a border or corner to resize.
+Minimize hides the viewer without closing the agent’s page.
 Paste screenshots directly into chat with an image-capable model. Images can be added or removed
 in drafts and inline edits, and appear in the transcript. Reference other files by path in the prompt.
 User messages can be edited inline: Save stops current work, replaces the later conversation

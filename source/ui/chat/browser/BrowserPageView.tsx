@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
-import { IconButton } from "../../controls/IconButton.tsx";
 import type { BrowserPage } from "./BrowserPage.ts";
 import { BrowserPageStream } from "./BrowserPageStream.ts";
 import type { BrowserPageStreamState } from "./BrowserPageStream.ts";
@@ -65,13 +64,14 @@ function paintFrame(canvas: HTMLCanvasElement, bitmap: ImageBitmap): boolean {
 export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewProps) {
   const surface = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLCanvasElement>(null);
-  const textInput = useRef<HTMLInputElement>(null);
+  const textInput = useRef<HTMLTextAreaElement>(null);
+  const composing = useRef(false);
+  const streamConnected = useRef(false);
   const stream = useRef<BrowserPageStream | null>(null);
   const drawnRef = useRef(false);
   const [state, setState] = useState<BrowserPageStreamState>("connecting");
   const [drawn, setDrawn] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const [text, setText] = useState("");
   const sendResize = useRef<() => void>(() => {});
   const pointer = useRef<{
     id: number;
@@ -155,13 +155,15 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
         void paintQueuedFrames();
       },
       stateChange: (next, streamFailure) => {
+        connected = next === "open";
+        streamConnected.current = connected;
+        composing.current = false;
+        if (textInput.current) textInput.current.value = "";
         setState(next);
         setFailure(streamFailure);
-        if (next === "open") {
-          connected = true;
+        if (connected) {
           sendResize.current();
         } else {
-          connected = false;
           connectionVersion += 1;
           latestFrame = null;
           drawnRef.current = false;
@@ -182,17 +184,18 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
   useEffect(() => {
     if (!enabled || !surface.current) return;
     const box = surface.current;
-    let queued = false;
+    // CSS fits the last frame throughout a drag. Reconfigure Chromium's screencast
+    // once the surface settles, not on every mouse move.
+    let timer: ReturnType<typeof setTimeout>;
     const observer = new ResizeObserver(() => {
-      if (queued) return;
-      queued = true;
-      requestAnimationFrame(() => {
-        queued = false;
-        sendResize.current();
-      });
+      clearTimeout(timer);
+      timer = setTimeout(() => sendResize.current(), 80);
     });
     observer.observe(box);
-    return () => observer.disconnect();
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
   }, [enabled]);
 
   useLayoutEffect(() => {
@@ -226,7 +229,7 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
     const point = mapPoint(canvas, event.clientX, event.clientY);
     if (!point) return;
     event.preventDefault();
-    surface.current?.focus({ preventScroll: true });
+    textInput.current?.focus({ preventScroll: true });
     canvas.setPointerCapture(event.pointerId);
     pointer.current = {
       id: event.pointerId,
@@ -276,23 +279,33 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.metaKey || ((event.ctrlKey || event.altKey) && !event.getModifierState("AltGraph")))
+    if (
+      !streamConnected.current ||
+      event.isComposing ||
+      composing.current ||
+      event.key === "Process"
+    )
       return;
-    if (event.key.length === 1) {
-      event.preventDefault();
-      stream.current?.send({ type: "text", text: event.key });
-      return;
-    }
-    if (!routedKeys.has(event.key)) return;
+    const altGraph = event.getModifierState("AltGraph");
+    // Paste is handled by the textarea's input event. Keep other host shortcuts
+    // local, except selection and modified navigation within the remote page.
+    const selectAll = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a";
+    if (!routedKeys.has(event.key) && !selectAll) return;
+    if (altGraph) return;
+    const modifiers = [
+      event.ctrlKey && "Control",
+      event.metaKey && "Meta",
+      event.altKey && "Alt",
+      event.shiftKey && "Shift",
+    ].filter(Boolean);
     event.preventDefault();
-    stream.current?.send({ type: "key", key: event.key });
+    stream.current?.send({ type: "key", key: [...modifiers, event.key].join("+") });
   };
 
-  const sendText = () => {
-    if (!text) return;
-    if (!stream.current?.send({ type: "text", text })) return;
-    setText("");
-    textInput.current?.focus({ preventScroll: true });
+  const sendInput = (input: HTMLTextAreaElement) => {
+    const text = input.value;
+    input.value = "";
+    if (streamConnected.current && text) stream.current?.send({ type: "text", text });
   };
 
   return (
@@ -300,11 +313,55 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
       <div
         ref={surface}
         class="browser-page-surface"
-        tabindex={0}
+        tabindex={-1}
         role="application"
         aria-label={label}
-        onKeyDown={onKeyDown}
+        onFocus={(event) => {
+          if (event.target === event.currentTarget)
+            textInput.current?.focus({ preventScroll: true });
+        }}
       >
+        <textarea
+          ref={textInput}
+          class="browser-page-input-bridge"
+          aria-label={`Input for ${page.title || page.url}`}
+          tabindex={0}
+          readOnly={state !== "open"}
+          spellcheck={false}
+          autocapitalize="off"
+          autocomplete="off"
+          onKeyDown={onKeyDown}
+          onCompositionStart={() => {
+            composing.current = streamConnected.current;
+          }}
+          onCompositionEnd={(event) => {
+            const wasComposing = composing.current;
+            composing.current = false;
+            if (!wasComposing || !streamConnected.current) {
+              event.currentTarget.value = "";
+              return;
+            }
+            if (!event.currentTarget.value) event.currentTarget.value = event.data;
+            sendInput(event.currentTarget);
+          }}
+          onInput={(event) => {
+            if (!composing.current && !(event as InputEvent).isComposing)
+              sendInput(event.currentTarget);
+          }}
+          onBeforeInput={(event) => {
+            const input = event as InputEvent;
+            if (!streamConnected.current || input.isComposing || composing.current) return;
+            const key =
+              input.inputType === "deleteContentBackward"
+                ? "Backspace"
+                : input.inputType === "deleteContentForward"
+                  ? "Delete"
+                  : null;
+            if (!key) return;
+            event.preventDefault();
+            stream.current?.send({ type: "key", key });
+          }}
+        />
         <canvas
           ref={frame}
           class="browser-page-frame"
@@ -326,24 +383,6 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
             {state !== "open" ? (failure ?? "Connecting.") : "Waiting for first frame."}
           </p>
         )}
-      </div>
-      <div class="browser-page-text-row">
-        <input
-          ref={textInput}
-          type="text"
-          class="browser-page-text"
-          aria-label={`Text for ${page.title || page.url}`}
-          value={text}
-          enterKeyHint="send"
-          onInput={(event) => setText(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              sendText();
-            }
-          }}
-        />
-        <IconButton icon="send" label="Send text" onClick={sendText} />
       </div>
     </div>
   );

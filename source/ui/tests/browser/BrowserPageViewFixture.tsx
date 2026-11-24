@@ -1,3 +1,4 @@
+import "../../chat/browser/browser-viewer.css";
 import { render } from "preact";
 import { BrowserPageView } from "../../chat/browser/BrowserPageView.tsx";
 import { BrowserPageStream } from "../../chat/browser/BrowserPageStream.ts";

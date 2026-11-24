@@ -39,6 +39,7 @@ interface ComposerProps {
   onSend: () => void;
   onContinue: () => void;
   onStop: () => void;
+  browserLauncher?: ComponentChildren;
   subagentProviders?: ComponentChildren;
   indicators?: ComponentChildren;
 }
@@ -77,6 +78,7 @@ export function Composer({
   onSend,
   onContinue,
   onStop,
+  browserLauncher,
   subagentProviders,
   indicators,
 }: ComposerProps) {
@@ -254,6 +256,7 @@ export function Composer({
           </div>
         )}
         <div class="composer-actions" ref={actions}>
+          {browserLauncher}
           {!inlineAccounting && (
             <div class="composer-overflow">
               <IconButton

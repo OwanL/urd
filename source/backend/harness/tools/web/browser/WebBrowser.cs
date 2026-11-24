@@ -3,7 +3,6 @@ using Microsoft.Playwright;
 namespace Urd.Core.Tools;
 
 internal sealed class WebBrowser : IAsyncDisposable {
-  private const int MaximumParticipants = 10;
   private readonly object sync = new();
   private readonly SemaphoreSlim slots = new(2);
   private readonly CancellationTokenSource lifetime = new();
@@ -87,8 +86,6 @@ internal sealed class WebBrowser : IAsyncDisposable {
   private void Enter() {
     lock (sync) {
       ObjectDisposedException.ThrowIf(disposing is not null, this);
-      if (participants == MaximumParticipants)
-        throw new InvalidOperationException("The browser queue is full.");
       participants++;
     }
   }

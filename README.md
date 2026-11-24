@@ -17,7 +17,7 @@ loopback by default; optional LAN hosting binds private IPv4 addresses separatel
 default, and has no sign-in. Enable it only on a trusted network. The UI has local tabs, drafts,
 model/reasoning selection, Send/Stop and provider settings.
 When an agent has a page open, select the globe on the composer’s upper-right edge to join the browser and type directly into it.
-Drag the title bar to a chat edge for a split, or away from the edge to float. Drag a border or corner to resize the window; the page scales without changing its desktop layout.
+Drag the title bar to a chat edge for a split, or away from the edge to float. Drag a border or corner to resize the window; the page follows the window’s proportions and stays at desktop scale even in a small viewer.
 Minimize hides the viewer without closing the agent’s page.
 Paste screenshots directly into chat with an image-capable model. Images can be added or removed
 in drafts and inline edits, and appear in the transcript. Reference other files by path in the prompt.

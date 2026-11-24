@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { BrowserPage } from "./BrowserPage.ts";
 import { BrowserPageStream } from "./BrowserPageStream.ts";
 import type { BrowserPageStreamState } from "./BrowserPageStream.ts";
+import { viewerViewport } from "./viewerViewport.ts";
 
 interface BrowserPageViewProps {
   sessionId: string;
@@ -62,6 +63,7 @@ function paintFrame(canvas: HTMLCanvasElement, bitmap: ImageBitmap): boolean {
 }
 
 export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewProps) {
+  const surface = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLCanvasElement>(null);
   const textInput = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
@@ -91,7 +93,8 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
   }, [page.id, enabled]);
 
   useEffect(() => {
-    if (!enabled) return;
+    const box = surface.current;
+    if (!enabled || !box) return;
     let live = true;
     let connected = false;
     let connectionVersion = 0;
@@ -138,6 +141,13 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
       }
     };
 
+    let lastSize: ReturnType<typeof viewerViewport> = null;
+    const fitViewport = () => {
+      if (!connected) return;
+      const size = viewerViewport(box.clientWidth, box.clientHeight);
+      if (!size || (size.width === lastSize?.width && size.height === lastSize.height)) return;
+      if (pageStream.send({ type: "resize", ...size })) lastSize = size;
+    };
     const pageStream = new BrowserPageStream(sessionId, page.id, {
       frame: (data) => {
         if (!live || !connected) return;
@@ -152,7 +162,10 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
         if (textInput.current) textInput.current.value = "";
         setState(next);
         setFailure(streamFailure);
-        if (!connected) {
+        if (connected) {
+          fitViewport();
+        } else {
+          lastSize = null;
           connectionVersion += 1;
           latestFrame = null;
           drawnRef.current = false;
@@ -162,8 +175,18 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
     });
     stream.current = pageStream;
     pageStream.open();
+    // Scale the current frame locally throughout a drag. Reconfigure the remote
+    // viewport only after the content area settles, not for each pointer move.
+    let resizeTimer: ReturnType<typeof setTimeout>;
+    const observer = new ResizeObserver(() => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(fitViewport, 100);
+    });
+    observer.observe(box);
     return () => {
       live = false;
+      observer.disconnect();
+      clearTimeout(resizeTimer);
       pointer.current = null;
       stream.current = null;
       pageStream.close();
@@ -283,6 +306,7 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
   return (
     <div class="browser-page-view">
       <div
+        ref={surface}
         class="browser-page-surface"
         tabindex={-1}
         role="application"

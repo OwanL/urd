@@ -62,9 +62,11 @@ Its tab strip lists the chat's and its helpers' pages.
   question being answered).
 - Each chat has its own window. Switching chat tabs hides it, and each chat remembers whether its
   window was open, docked, floating or maximized, plus its size and position.
-- The viewer scales the live desktop viewport (normally 1280×800) to fit without cropping it or
-  changing the site's layout. A viewer resize changes only the local display. Other viewers and
-  the agent continue to see the same page. Pointer positions map back to the displayed frame.
+- The live page follows the aspect ratio of the viewer's content area. Small viewers show a
+  scaled desktop layout (normally at least 1280 CSS pixels wide) instead of triggering mobile
+  layouts. Both dimensions stay within the host's 240–3840 limits. During drags the current
+  frame scales locally; once settled, the most recently resized viewer sets the shared page's
+  viewport. With no viewers it returns to 1280×800. Pointer positions map to the actual frame.
 - Opening: when a chat has pages, a globe tab appears on the composer's upper-right edge;
   it opens the window, and a minimized window returns to it. The question card's **Open browser**
   opens the same window. The window never opens by itself.

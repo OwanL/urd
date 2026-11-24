@@ -39,7 +39,9 @@ after(async () => {
 
 async function commands() {
   return page.evaluate(() =>
-    (window as unknown as { viewerCommands: { type: string }[] }).viewerCommands.splice(0),
+    (window as unknown as { viewerCommands: { type: string }[] }).viewerCommands
+      .splice(0)
+      .filter((c) => c.type !== "resize"),
   );
 }
 
@@ -127,10 +129,28 @@ async function waitForDecodesIdle() {
   });
 }
 
-void test("joining and shrinking a viewer leaves the remote viewport untouched", async () => {
-  await page.setViewportSize({ width: 420, height: 300 });
-  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
-  assert.deepEqual(await commands(), []);
+void test("a small viewer requests a desktop viewport with its content aspect ratio, including on reconnect", async () => {
+  await page.locator(".browser-page-surface").evaluate((el: HTMLElement) => {
+    el.style.flex = "none";
+    el.style.width = "400px";
+    el.style.height = "300px";
+  });
+  const waitForSize = () =>
+    page.waitForFunction(() => {
+      const sent = (
+        window as unknown as { viewerCommands: { type: string; width?: number; height?: number }[] }
+      ).viewerCommands;
+      return sent.some((c) => c.type === "resize" && c.width === 1280 && c.height === 960);
+    });
+  await waitForSize();
+  await commands();
+  await page.evaluate(() => {
+    const { viewerStream } = window as unknown as ViewerWindow;
+    viewerStream.close();
+    viewerStream.open();
+  });
+  await waitForSize();
+  await commands();
 });
 
 void test("pointer taps map to frame coordinates and clamp outside the canvas", async () => {

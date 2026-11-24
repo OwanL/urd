@@ -160,6 +160,7 @@ async function setup(t: TestContext) {
 
 type UserQuestion = {
   id: string;
+  askingSessionId: string;
   question: string;
   context: string | null;
   answers: string[];
@@ -399,6 +400,7 @@ for (const answer of ["Choose café", '{\r\n  "answer": "Custom 東京 🧭"\r\n
       const question = await f.pending(id);
       assert.deepEqual(question, {
         id: question.id,
+        askingSessionId: id,
         question: args.question,
         context: args.context,
         answers: args.choices,
@@ -437,6 +439,7 @@ void test(
     const question = await f.pending(id);
     assert.deepEqual(question, {
       id: question.id,
+      askingSessionId: id,
       question: args.question,
       context: null,
       answers: [],
@@ -492,6 +495,9 @@ void test("a child ask_user is routed to its primary session", { timeout: 90_000
   const id = await f.create();
   const execution = await f.submit(id, f.firstConnection, "Delegate a question.");
   const question = await f.pending(id);
+  const children = await f.client.getLiveSubagents(id, f.signal);
+  assert.equal(children.length, 1);
+  assert.equal(question.askingSessionId, children[0]!.id);
   assert.equal(question.question, "Child question?");
   assert.equal(question.context, null);
   assert.deepEqual(question.answers, []);

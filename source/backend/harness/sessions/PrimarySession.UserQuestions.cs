@@ -11,6 +11,10 @@ public sealed partial class PrimarySession {
       ReadUnderLockAsync(() => userQuestions.Values.Where(pending => !pending.Reply.Task.IsCompleted)
           .Select(pending => pending.Question).ToArray(), cancellation);
 
+  internal Task<bool> HasPendingUserQuestionAsync(Guid askingSessionId, CancellationToken cancellation = default) =>
+      ReadUnderLockAsync(() => userQuestions.Values.Any(pending => pending.Question.AskingSessionId == askingSessionId
+          && !pending.Reply.Task.IsCompleted), cancellation);
+
   public Task<bool> AnswerUserQuestionAsync(Guid questionId, string answer, CancellationToken cancellation = default) {
     AskUserTool.ReadRequiredText(answer, "Answer");
     return ReadUnderLockAsync(() => {

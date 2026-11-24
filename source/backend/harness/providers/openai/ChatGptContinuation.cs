@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
@@ -39,10 +40,10 @@ internal sealed class ChatGptContinuation {
 
       int length = input.GetArrayLength();
       int index = 0;
-      foreach (JsonElement item in input.EnumerateArray()) {
-        byte[] canonical = Canonical(item);
-        Add(pending, index++ < count ? prefix : null, 3, canonical);
-      }
+      var canonical = new ArrayBufferWriter<byte>();
+      using var canonicalWriter = new Utf8JsonWriter(canonical);
+      foreach (JsonElement item in input.EnumerateArray())
+        AddCanonical(pending, index++ < count ? prefix : null, item, canonical, canonicalWriter);
       bool append = digest is not null && responseId is not null && length > count &&
           CryptographicOperations.FixedTimeEquals(digest, prefix.GetHashAndReset());
       string? previousId = append ? responseId : null;
@@ -94,8 +95,10 @@ internal sealed class ChatGptContinuation {
         Reset();
         return;
       }
+      var canonical = new ArrayBufferWriter<byte>();
+      using var canonicalWriter = new Utf8JsonWriter(canonical);
       foreach (JsonElement item in output.EnumerateArray())
-        Add(pending, null, 3, Canonical(item));
+        AddCanonical(pending, null, item, canonical, canonicalWriter);
       digest = pending.GetHashAndReset();
       count = checked(pendingCount + output.GetArrayLength());
       responseId = id.GetString();
@@ -117,11 +120,13 @@ internal sealed class ChatGptContinuation {
     responseId = null;
   }
 
-  private static byte[] Canonical(JsonElement item) {
-    using var stream = new MemoryStream();
-    using (var writer = new Utf8JsonWriter(stream))
-      WriteCanonical(writer, item);
-    return stream.ToArray();
+  private static void AddCanonical(IncrementalHash hash, IncrementalHash? other, JsonElement item,
+      ArrayBufferWriter<byte> buffer, Utf8JsonWriter writer) {
+    buffer.ResetWrittenCount();
+    writer.Reset(buffer);
+    WriteCanonical(writer, item);
+    writer.Flush();
+    Add(hash, other, 3, buffer.WrittenSpan);
   }
 
   private static void WriteCanonical(Utf8JsonWriter writer, JsonElement value) {
@@ -149,7 +154,7 @@ internal sealed class ChatGptContinuation {
     }
   }
 
-  private static void Add(IncrementalHash hash, IncrementalHash? other, byte tag, byte[] bytes) {
+  private static void Add(IncrementalHash hash, IncrementalHash? other, byte tag, ReadOnlySpan<byte> bytes) {
     Span<byte> header = stackalloc byte[1 + sizeof(int)];
     header[0] = tag;
     BinaryPrimitives.WriteInt32BigEndian(header[1..], bytes.Length);

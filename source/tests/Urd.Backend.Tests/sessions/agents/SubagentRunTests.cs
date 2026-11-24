@@ -189,7 +189,7 @@ public sealed class SubagentRunTests {
 
     ISubagentRunner runner = fixture.Manager;
     Task<SubagentRunResult> run = runner.RunSubagentAsync(Caller(fixture),
-        new("small", SubagentContextMode.None, AssignmentTask), CancellationToken.None).WaitAsync(TestTimeout);
+        new("small", false, AssignmentTask), CancellationToken.None).WaitAsync(TestTimeout);
     try {
       await toolEntered.Task.WaitAsync(TestTimeout);
       Assert.False(run.IsCompleted);
@@ -234,7 +234,7 @@ public sealed class SubagentRunTests {
 
     ISubagentRunner runner = fixture.Manager;
     Task<SubagentRunResult> run = runner.RunSubagentAsync(Caller(fixture),
-        new("small", SubagentContextMode.None, AssignmentTask), cancellation.Token).WaitAsync(TestTimeout);
+        new("small", false, AssignmentTask), cancellation.Token).WaitAsync(TestTimeout);
     try {
       await requestWaiting.Task.WaitAsync(TestTimeout);
       await cancellation.CancelAsync();
@@ -277,7 +277,7 @@ public sealed class SubagentRunTests {
 
     ISubagentRunner runner = fixture.Manager;
     Task<SubagentRunResult> run = runner.RunSubagentAsync(Caller(fixture),
-        new("small", SubagentContextMode.None, AssignmentTask), CancellationToken.None).WaitAsync(TestTimeout);
+        new("small", false, AssignmentTask), CancellationToken.None).WaitAsync(TestTimeout);
     try {
       await requestWaiting.Task.WaitAsync(TestTimeout);
       Task managerShutdown = fixture.Manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
@@ -366,7 +366,10 @@ public sealed class SubagentRunTests {
           definition => definition.Name == "subagent"));
       JsonElement properties = declaration.JsonSchema.GetProperty("properties");
       Assert.Equal("string", properties.GetProperty("bucket").GetProperty("type").GetString());
-      Assert.Equal("string", properties.GetProperty("context").GetProperty("type").GetString());
+      Assert.Equal("boolean", properties.GetProperty("includeUserInput").GetProperty("type").GetString());
+      Assert.False(properties.TryGetProperty("context", out _));
+      Assert.Contains(declaration.JsonSchema.GetProperty("required").EnumerateArray(),
+          item => item.GetString() == "includeUserInput");
       Assert.Equal("string", properties.GetProperty("task").GetProperty("type").GetString());
       Assert.Equal("boolean", properties.GetProperty("background").GetProperty("type").GetString());
       Assert.Contains(childRequest.Options!.Tools!, definition => definition.Name == "subagent");
@@ -404,7 +407,7 @@ public sealed class SubagentRunTests {
             return TextUpdates([parentContinuation], token);
           return ToolBatch(token, new FunctionCallContent("delegate", "subagent",
               new Dictionary<string, object?> {
-            ["bucket"] = "small", ["context"] = "recent", ["task"] = AssignmentTask }));
+            ["bucket"] = "small", ["includeUserInput"] = true, ["task"] = AssignmentTask }));
         case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
           return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
         default:
@@ -579,7 +582,7 @@ public sealed class SubagentRunTests {
           new ToolSessionServices(fixture.Store.Sessions, fixture.Manager)) { RequestId = Guid.NewGuid() };
       var runner = (ISubagentRunner)fixture.Manager;
       var error = await Assert.ThrowsAsync<InvalidOperationException>(() => runner.RunSubagentAsync(caller,
-          new("small", SubagentContextMode.None, "must not run"), CancellationToken.None).WaitAsync(TestTimeout));
+          new("small", false, "must not run"), CancellationToken.None).WaitAsync(TestTimeout));
       Assert.Contains("nesting limit", error.Message, StringComparison.OrdinalIgnoreCase);
       Assert.Null(await fixture.Manager.FindSubagentByCallAsync(nested.Id, caller.RequestId, caller.CallId)
           .WaitAsync(TestTimeout));
@@ -674,11 +677,11 @@ public sealed class SubagentRunTests {
   }
 
   [Theory]
-  [InlineData("user", "user", true)]
-  [InlineData("recent", "user", true)]
-  [InlineData("none", "user", false)]
-  [InlineData("recent", "recent", true)]
-  public async Task NestedContextPreservesHumanProvenance(string childContext, string nestedContext, bool inheritsHuman) {
+  [InlineData(true, true)]
+  [InlineData(false, true)]
+  [InlineData(true, false)]
+  [InlineData(false, false)]
+  public async Task NestedContextPreservesHumanProvenance(bool childIncludesUserInput, bool nestedIncludesUserInput) {
     const string firstHuman = "parent mission";
     const string secondHuman = "another human request";
     const string parentAssistant = "parent assistant observation";
@@ -707,26 +710,17 @@ public sealed class SubagentRunTests {
         call => call.CallId == "provenance-inner").Outcome);
 
     SubagentContextEntry[] childEntries = ContextEntries(childRequest);
-    if (childContext == "recent") {
-      Assert.Contains(childEntries, entry => entry.Source == "human input" && entry.Text == firstHuman);
-      Assert.Contains(childEntries, entry => entry.Source == "human input" && entry.Text == secondHuman);
-      Assert.Contains(childEntries, entry => entry.Source == "assistant" && entry.Text == parentAssistant);
-      Assert.Contains(childEntries, entry => entry.Source == "tool result" && entry.Text == parentToolResult);
-    }
+    Assert.Equal(childIncludesUserInput ? new[] { firstHuman, secondHuman } : [], childEntries.Select(entry => entry.Text));
+    Assert.All(childEntries, entry => Assert.Equal("human input", entry.Source));
+    Assert.Equal(new[] { AssignmentTask }, childRequest.Messages.Where(message => message.Role == ChatRole.User
+        && !message.Text.StartsWith("[PARENT CONTEXT:", StringComparison.Ordinal)).Select(message => message.Text));
 
     SubagentContextEntry[] nestedEntries = ContextEntries(nestedRequest);
-    SubagentContextEntry[] nestedHuman = [.. nestedEntries.Where(entry => entry.Source == "human input")];
-    Assert.Equal(inheritsHuman ? new[] { firstHuman, secondHuman } : [], nestedHuman.Select(entry => entry.Text));
-    Assert.DoesNotContain(nestedHuman, entry => entry.Text.Contains(AssignmentTask, StringComparison.Ordinal)
-        || entry.Text.Contains(parentAssistant, StringComparison.Ordinal)
-        || entry.Text.Contains(parentToolResult, StringComparison.Ordinal));
-    if (nestedContext == "user") {
-      Assert.All(nestedEntries, entry => Assert.Equal("human input", entry.Source));
-    } else {
-      Assert.Contains(nestedEntries, entry => entry.Source == "assistant" && entry.Text == parentAssistant);
-      Assert.Contains(nestedEntries, entry => entry.Source == "tool result" && entry.Text == parentToolResult);
-      Assert.Contains(nestedEntries, entry => entry.Source == "agent assignment" && entry.Text == AssignmentTask);
-    }
+    Assert.Equal(childIncludesUserInput && nestedIncludesUserInput ? new[] { firstHuman, secondHuman } : [],
+        nestedEntries.Select(entry => entry.Text));
+    Assert.All(nestedEntries, entry => Assert.Equal("human input", entry.Source));
+    Assert.Equal(new[] { nestedTask }, nestedRequest.Messages.Where(message => message.Role == ChatRole.User
+        && !message.Text.StartsWith("[PARENT CONTEXT:", StringComparison.Ordinal)).Select(message => message.Text));
 
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
       switch (request.Purpose) {
@@ -741,12 +735,12 @@ public sealed class SubagentRunTests {
             if (HasResult(request, "provenance-inner"))
               return TextUpdates([ChildReport], token);
             childRequest = request;
-            return ToolBatch(token, Delegate("provenance-inner", nestedTask, context: nestedContext));
+            return ToolBatch(token, Delegate("provenance-inner", nestedTask, includeUserInput: nestedIncludesUserInput));
           }
           if (!HasUserText(request, secondHuman) || HasResult(request, "provenance-outer"))
             return Complete(token);
           return HasResult(request, "provenance-lookup")
-              ? ToolBatch(token, Delegate("provenance-outer", AssignmentTask, context: childContext))
+              ? ToolBatch(token, Delegate("provenance-outer", AssignmentTask, includeUserInput: childIncludesUserInput))
               : Lookup(token);
         case { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal):
           return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
@@ -1048,9 +1042,9 @@ public sealed class SubagentRunTests {
   }
 
   private static FunctionCallContent Delegate(string callId, string task, bool background = false, string bucket = "small",
-      string context = "none") =>
+      bool includeUserInput = false) =>
       new(callId, "subagent", new Dictionary<string, object?> {
-        ["bucket"] = bucket, ["context"] = context, ["task"] = task, ["background"] = background
+        ["bucket"] = bucket, ["includeUserInput"] = includeUserInput, ["task"] = task, ["background"] = background
       });
 
   private static SubagentContextEntry[] ContextEntries(ScriptedRequest request) {
@@ -1073,7 +1067,7 @@ public sealed class SubagentRunTests {
 
   private static async Task<SubagentRunResult> RunTaskAsync(SubagentRunFixture fixture, string task) {
     ISubagentRunner runner = fixture.Manager;
-    return await runner.RunSubagentAsync(Caller(fixture), new("small", SubagentContextMode.None, task),
+    return await runner.RunSubagentAsync(Caller(fixture), new("small", false, task),
         CancellationToken.None);
   }
 

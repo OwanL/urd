@@ -1,51 +1,29 @@
 using Microsoft.Data.Sqlite;
-using Urd.Core.Compaction;
 using Urd.Core.Context;
 using Urd.Core.Execution;
 
 namespace Urd.Core.Storage;
 
 // Captures parent context at the invoking request's input boundary, not the live transcript tail.
-internal sealed class SubagentContextReader(Database database, ToolResultCodec toolResults) {
-  internal string? Read(ExecutionIdentity parent, Guid requestId, string callId, SubagentContextMode mode,
-      int? parentContextWindow = null, int? compactionTriggerTokenCount = null) {
-    switch (mode) {
-      case SubagentContextMode.None:
-        return null;
-      case SubagentContextMode.User:
-        var user = database.Read(transaction => {
-          Invocation invocation = ReadInvocation(transaction, parent, requestId, callId);
-          return ReadUserContext(transaction, parent, invocation);
-        });
-        return SubagentContext.Build(user);
-      case SubagentContextMode.Recent:
-        var recent = database.Read(transaction => {
-          Invocation invocation = ReadInvocation(transaction, parent, requestId, callId);
-          return new LlmContextReader(database, toolResults)
-              .ReadBeforeResponse(transaction, parent, requestId, invocation.FirstRetained);
-        });
-        return SubagentContext.BuildRecent(recent, parentContextWindow, compactionTriggerTokenCount);
-      default:
-        throw new ArgumentOutOfRangeException(nameof(mode));
-    }
+internal sealed class SubagentContextReader(Database database) {
+  internal string? Read(ExecutionIdentity parent, Guid requestId, string callId) {
+    var user = database.Read(transaction => {
+      Invocation invocation = ReadInvocation(transaction, parent, requestId, callId);
+      return ReadUserContext(transaction, parent, invocation);
+    });
+    return SubagentContext.Build(user);
   }
 
   private Invocation ReadInvocation(SqliteTransaction transaction, ExecutionIdentity parent, Guid requestId, string callId) =>
       database.QuerySingleOrDefault(transaction, """
-        SELECT r.ordinal, q.request_index, c.first_kept_request_id, c.first_kept_run_ordinal,
-            c.first_kept_request_index, c.first_kept_message_index
+        SELECT r.ordinal, q.request_index
         FROM execution_requests q JOIN execution_runs r ON r.run_id = q.run_id
         JOIN sessions s ON s.session_id = r.session_id AND s.history_revision = r.history_revision
         JOIN execution_tools t ON t.request_id = q.request_id AND t.run_id = r.run_id
-        LEFT JOIN session_compactions c ON c.compaction_id = q.compaction_id
         WHERE r.session_id = $session AND r.run_id = $run AND r.history_revision = $revision
             AND q.request_id = $request AND q.attempt = 2 AND t.call_id = $call
             AND t.name = 'subagent' AND t.started = 1;
-        """, row => new Invocation(row.Long("ordinal"), row.Int("request_index"),
-          row.NullableGuid("first_kept_request_id") is { } kept
-              ? new HistoryMessageLocation(kept, row.Long("first_kept_run_ordinal"), row.Int("first_kept_request_index"),
-                  row.Int("first_kept_message_index"))
-              : null),
+        """, row => new Invocation(row.Long("ordinal"), row.Int("request_index")),
         ExecutionSql.Parameters(parent, ("$request", requestId), ("$call", callId)))
       ?? throw new InvalidOperationException("The invoking subagent call is not in the parent history revision.");
 
@@ -77,5 +55,5 @@ internal sealed class SubagentContextReader(Database database, ToolResultCodec t
         : [new("human input", text, requestId), new("human input", SubagentContext.UserImageOmitted, requestId)];
   }
 
-  private sealed record Invocation(long RunOrdinal, int RequestIndex, HistoryMessageLocation? FirstRetained);
+  private sealed record Invocation(long RunOrdinal, int RequestIndex);
 }

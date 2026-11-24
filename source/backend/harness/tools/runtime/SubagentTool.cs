@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Urd.Core.Context;
 
 namespace Urd.Core.Tools;
 
@@ -14,24 +13,19 @@ internal sealed class SubagentTool : HarnessTool {
       "type": "object",
       "properties": {
         "bucket": { "type": "string", "enum": ["small", "medium", "large"] },
-        "context": { "type": "string", "enum": ["none", "user", "recent"] },
+        "includeUserInput": { "type": "boolean", "description": "Include human input from the parent history as quoted context." },
         "task": { "type": "string" }
       },
-      "required": ["bucket", "context", "task"],
+      "required": ["bucket", "includeUserInput", "task"],
       "additionalProperties": false
     }
     """);
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, HarnessToolContext context, CancellationToken cancellation) {
     string bucket = arguments.GetProperty("bucket").GetString() ?? throw new ArgumentException("Bucket is required.");
-    SubagentContextMode mode = arguments.GetProperty("context").GetString() switch {
-      "none" => SubagentContextMode.None,
-      "user" => SubagentContextMode.User,
-      "recent" => SubagentContextMode.Recent,
-      _ => throw new ArgumentException("Unknown subagent context; expected none, user, or recent.")
-    };
+    bool includeUserInput = arguments.GetProperty("includeUserInput").GetBoolean();
     string task = arguments.GetProperty("task").GetString() ?? throw new ArgumentException("Task is required.");
-    SubagentRunResult result = await context.Sessions.RunSubagentAsync(context, new(bucket, mode, task), cancellation);
+    SubagentRunResult result = await context.Sessions.RunSubagentAsync(context, new(bucket, includeUserInput, task), cancellation);
     return result.Error is { } error
         ? new ToolOutput(error, [], IsError: true)
         : new ToolOutput(result.Report ?? "The subagent task produced no report.", [], IsError: result.Report is null);

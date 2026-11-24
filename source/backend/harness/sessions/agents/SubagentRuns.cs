@@ -55,7 +55,7 @@ internal sealed class SubagentRuns(
       throw new InvalidOperationException("Subagent buckets require a configured model selector.");
     LlmSelection selection = await modelSelector.ResolveSubagentAsync(request.Bucket, captured,
         store.Sessions.ReadSubagentProviders(parent.Id), cancellation);
-    string? contextBlock = ReadParentContext(parent, caller, request, captured.CompactionTriggerTokenCount);
+    string? contextBlock = ReadParentContext(parent, caller, request);
     return new(parent.Id, childDepth, caller.RequestId, caller.CallId, parent.WorkingDirectory, request.Task, contextBlock, selection);
   }
 
@@ -76,16 +76,11 @@ internal sealed class SubagentRuns(
   private static InvalidOperationException NestingLimit(int maxDepth) =>
       new($"Subagent nesting limit reached ({maxDepth} levels below the primary). Finish the task without delegating.");
 
-  private string? ReadParentContext(SessionRecord parent, HarnessToolContext caller, SubagentRunRequest request,
-      int? parentCompactionTriggerTokens) {
-    if (request.Context == SubagentContextMode.None)
+  private string? ReadParentContext(SessionRecord parent, HarnessToolContext caller, SubagentRunRequest request) {
+    if (!request.IncludeUserInput)
       return null;
-
-    // Only Recent budgets need the parent's own chat selection; stored facts are enough here.
-    LlmSelection? parentSelection = request.Context == SubagentContextMode.Recent
-        ? store.Snapshots.ReadRunSelection(parent.Id, caller.ExecutionId) : null;
     return store.Subagents.Read(new ExecutionIdentity(parent.Id, caller.ExecutionId, parent.HistoryRevision),
-        caller.RequestId, caller.CallId, request.Context, parentSelection?.ContextWindow, parentCompactionTriggerTokens);
+        caller.RequestId, caller.CallId);
   }
 
   private Task<SubagentSession> CreateSubagentAsync(SubagentAssignment assignment, AgentWaitSource owner,

@@ -162,7 +162,7 @@ public sealed class UserQuestionTests {
     using var cancellation = new CancellationTokenSource();
     ISubagentRunner runner = manager;
     Task<SubagentRunResult> run = runner.RunSubagentAsync(Caller(store, manager, primary.Id, "spawn"),
-        new("small", SubagentContextMode.None, "Ask the user"), cancellation.Token);
+        new("small", false, "Ask the user"), cancellation.Token);
     try {
       PendingUserQuestion question = Assert.Single(await WaitForQuestionsAsync(primary, 1));
       Guid[] children = [.. database.ReadRows("SELECT session_id FROM sessions WHERE kind = 1;",

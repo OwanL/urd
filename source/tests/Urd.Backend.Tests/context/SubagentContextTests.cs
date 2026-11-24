@@ -1,7 +1,5 @@
 using System.Text.Json;
-using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
-using Urd.Core.Compaction;
 using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Storage;
@@ -11,49 +9,18 @@ namespace Urd.Backend.Tests.Context;
 
 public sealed class SubagentContextTests {
   [Fact]
-  public void UserModeReadsAttemptedHumanInputsAcrossCompaction() {
+  public void ReadsOnlyAttemptedHumanInputsAcrossCompactionAndLegacyInheritedContext() {
     using var fixture = new ParentHistory();
-    SubagentContextEntry[] entries = Entries(fixture.Read(SubagentContextMode.User));
+    string? captured = fixture.Read();
+    SubagentContextEntry[] entries = Entries(captured);
     Assert.Collection(entries,
         entry => Assert.Equal(("human input", "old human"), (entry.Source, entry.Text)),
         entry => Assert.Equal(("human input", "current human"), (entry.Source, entry.Text)),
+        entry => Assert.Equal(("human input", "inherited human"), (entry.Source, entry.Text)),
         entry => Assert.Equal(("human input", "steered human"), (entry.Source, entry.Text)));
-    Assert.Null(fixture.Read(SubagentContextMode.None));
-  }
-
-  [Fact]
-  public void RecentUsesTheInvokingRequestsSavedBoundaryAndExcludesItsResponse() {
-    using var fixture = new ParentHistory();
-    string? captured = fixture.Read(SubagentContextMode.Recent);
-    SubagentContextEntry[] entries = Entries(captured);
-    Assert.Collection(entries,
-        entry => Assert.Equal(("human input", "current human"), (entry.Source, entry.Text)),
-        entry => Assert.Equal(("agent question", "current agent", fixture.Sender.ToString("D")),
-            (entry.Source, entry.Text, entry.SenderSessionId)),
-        entry => Assert.Equal(("assistant", "parent assistant"), (entry.Source, entry.Text)),
-        entry => Assert.Equal(("tool call", "prior-tool"), (entry.Source, entry.CallId)),
-        entry => Assert.Equal(("tool result", "prior result"), (entry.Source, entry.Text)),
-        entry => Assert.Equal(("human input", "steered human"), (entry.Source, entry.Text)));
-
-    string? user = fixture.Read(SubagentContextMode.User);
     fixture.AdvanceParent();
-    Assert.Equal(captured, fixture.Read(SubagentContextMode.Recent));
-    Assert.Equal(user, fixture.Read(SubagentContextMode.User));
-    Assert.Throws<InvalidOperationException>(() => fixture.Read(SubagentContextMode.Recent, "prior-tool"));
-  }
-
-  [Fact]
-  public void RecentSharesCompactionBudgetAndFallsBackToAssistantNotToolResult() {
-    HistoryMessage[] history = [
-      new(new(Guid.NewGuid(), 1, 0, 0), true, new(ChatRole.User, new string('x', 400))),
-      new(new(Guid.NewGuid(), 1, 0, 1), false, new(ChatRole.Assistant, "recent response")),
-      new(new(Guid.NewGuid(), 1, 0, 2), false,
-          new(ChatRole.Tool, [new FunctionResultContent("id", "result")]))
-    ];
-    Assert.Equal(2, Entries(SubagentContext.BuildRecent(history, 1000, 80)).Length);
-    Assert.Equal("recent response", Entries(SubagentContext.BuildRecent(history, 1000, 80))[0].Text);
-    Assert.Null(SubagentContext.BuildRecent(history, 1000, 40));
-    Assert.Equal(3, Entries(SubagentContext.BuildRecent(history, 1000, null)).Length);
+    Assert.Equal(captured, fixture.Read());
+    Assert.Throws<InvalidOperationException>(() => fixture.Read("prior-tool"));
   }
 
   private static SubagentContextEntry[] Entries(string? context) {
@@ -92,6 +59,7 @@ public sealed class SubagentContextTests {
         {Input(initial, old)}
         {NewInput(retained, "current human")}
         {NewInput(retained, "current agent", Sender)}
+        {LegacyInheritedInput(retained)}
         {NewInput(invoking, "steered human")}
         {NewInput(later, "not attempted yet")}
         INSERT INTO execution_output (request_id, chunk_index, text_utf8, is_final) VALUES
@@ -106,13 +74,12 @@ public sealed class SubagentContextTests {
           ('{parent.ExecutionId}', '{invoking}', 1, 'sibling-tool', 'read', 1, 0, 0, '{EmptyArguments}', '{Result}');
         """);
       database = new(storage.OpenReadOnlyConnection());
-      reader = new(database, new(new ToolImageStore(storage.Path + ".tool-images")));
+      reader = new(database);
     }
 
     internal Guid Sender { get; } = Guid.NewGuid();
 
-    internal string? Read(SubagentContextMode mode, string callId = "delegating") =>
-        reader.Read(parent, invoking, callId, mode);
+    internal string? Read(string callId = "delegating") => reader.Read(parent, invoking, callId);
 
     internal void AdvanceParent() => storage.Execute($"""
       {Compaction(Guid.NewGuid(), invoking, 2, "new compaction summary")}
@@ -135,6 +102,18 @@ public sealed class SubagentContextTests {
     private string NewInput(Guid request, string text, Guid? sender = null) {
       Guid input = Guid.NewGuid();
       return Decision(input, text) + Input(input, request, sender);
+    }
+
+    private string LegacyInheritedInput(Guid request) {
+      Guid input = Guid.NewGuid();
+      string text = SubagentContext.Build([
+        new("human input", "inherited human"), new("assistant", "legacy assistant"),
+        new("tool result", "legacy tool result"), new("agent assignment", "legacy assignment")
+      ])!;
+      return Decision(input, text) + $"""
+        INSERT INTO execution_inputs (session_id, input_id, run_id, request_id, provenance, sender_session_id)
+        VALUES ('{parent.SessionId}', '{input}', '{parent.ExecutionId}', '{request}', 2, '{Sender}');
+        """;
     }
 
     private string Compaction(Guid id, Guid firstKept, int requestIndex, string summary) => $"""

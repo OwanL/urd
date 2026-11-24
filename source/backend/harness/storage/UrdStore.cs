@@ -40,7 +40,7 @@ public sealed class UrdStore : IDisposable {
     Executions = new(database, toolResults, AuxiliaryConversations, UserMessages);
     Tools = new(database, toolResults);
     Content = new(database);
-    Subagents = new(database, toolResults);
+    Subagents = new(database);
     PrepassDetails = new(database);
     Snapshots = new(database, Content, PrepassDetails);
     History = new(database, PrepassDetails);

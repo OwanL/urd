@@ -37,7 +37,7 @@ public sealed class AgentRecipientsTests {
     await using var fixture = await AgentFixture.OpenAsync(client, [echo]);
     ISubagentRunner runner = fixture.Manager;
     Task<SubagentRunResult> run = runner.RunSubagentAsync(fixture.Caller(fixture.ParentSessionId, "spawn"),
-        new("small", SubagentContextMode.None, ChildTask), CancellationToken.None).WaitAsync(TestTimeout);
+        new("small", false, ChildTask), CancellationToken.None).WaitAsync(TestTimeout);
 
     Guid childId = ChildId(fixture, "spawn");
     await childEntered.Task.WaitAsync(TestTimeout);
@@ -97,7 +97,7 @@ public sealed class AgentRecipientsTests {
     await using var fixture = await AgentFixture.OpenAsync(client, [echo]);
     ISubagentRunner runner = fixture.Manager;
     Task<SubagentRunResult> run = runner.RunSubagentAsync(fixture.Caller(fixture.ParentSessionId, "spawn"),
-        new("small", SubagentContextMode.None, ChildTask), CancellationToken.None).WaitAsync(TestTimeout);
+        new("small", false, ChildTask), CancellationToken.None).WaitAsync(TestTimeout);
 
     Guid childId = ChildId(fixture, "spawn");
     await childEntered.Task.WaitAsync(TestTimeout);

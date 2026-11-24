@@ -2,6 +2,8 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Core.Context;
+using Urd.Core.Providers;
+using Urd.Core.Tools;
 
 namespace Urd.Core.Storage;
 
@@ -114,6 +116,11 @@ internal sealed class StartingContextStorage(Database database) {
     if (tool is null || tool.Name is null || tool.JsonSchema.ValueKind == JsonValueKind.Undefined)
       throw new InvalidDataException("The stored starting-context tool declaration is incomplete.");
 
+    // Restore the current subagent contract without rewriting the boundary or historical calls.
+    if (tool.Name == SubagentTool.ToolName && tool.JsonSchema.ValueKind == JsonValueKind.Object
+        && tool.JsonSchema.TryGetProperty("properties", out JsonElement properties)
+        && properties.ValueKind == JsonValueKind.Object && properties.TryGetProperty("context", out _))
+      return AgentToolDeclaration.Create(new SubagentTool());
     return AIFunctionFactory.CreateDeclaration(tool.Name, tool.Description, tool.JsonSchema.Clone());
   }
 

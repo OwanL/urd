@@ -273,10 +273,6 @@ internal sealed class SnapshotReader {
         ("$session", sessionId), ("$run", executionId)));
   }
 
-  // The delegating request's chat selection supplies the parent's context budget to children.
-  internal LlmSelection? ReadRunSelection(Guid sessionId, Guid runId) => database.Read(transaction =>
-    ReadLatestSelection(transaction, sessionId, runId));
-
   private string? ReadFirstUserPreview(SqliteTransaction transaction, Guid sessionId, long historyRevision) {
     MessageRef? message = database.QuerySingleOrDefault(transaction, FirstUserSql,
         row => new MessageRef(row.Guid("run_id"), row.Guid("message_id"), MessageRole.User, historyRevision),

@@ -42,6 +42,25 @@ public sealed class StartingContextStorageTests {
   }
 
   [Fact]
+  public void LegacySubagentDeclarationRestoresUserInputAndBackgroundOptions() {
+    using var database = new TemporaryDatabase();
+    Guid session;
+    using (UrdStore store = UrdStore.Open(database.Path))
+      session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+
+    StartingContext legacy = Context("system", "developer",
+        Tool("subagent", "Legacy subagent declaration.", "{\"type\":\"object\",\"properties\":{\"context\":{\"type\":\"string\"}}}"));
+    Save(database.Path, session, legacy);
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    StartingContext restored = Assert.IsType<StartingContext>(reopened.StartingContexts.Read(session));
+    JsonElement properties = Assert.Single(restored.Tools).JsonSchema.GetProperty("properties");
+    Assert.False(properties.TryGetProperty("context", out _));
+    Assert.True(properties.TryGetProperty("includeUserInput", out _));
+    Assert.True(properties.TryGetProperty("background", out _));
+  }
+
+  [Fact]
   public void FirstSavedStartingContextIsNotOverwritten() {
     using var database = new TemporaryDatabase();
     Guid session;

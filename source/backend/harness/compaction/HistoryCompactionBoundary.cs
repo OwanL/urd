@@ -10,10 +10,6 @@ internal static class HistoryCompactionBoundary {
           minimumIndex: 1, previousBoundary: history.PreviousCompaction?.FirstRetainedMessageLocation)
       ?? FindBoundaryPreservingLatestUserTurn(history);
 
-  // A copy may keep all available history, including the first message of an existing suffix.
-  internal static int? FindRecentSuffix(IReadOnlyList<HistoryMessage> messages, int retainedHistoryTokenLimit) =>
-      FindBoundaryWithinTokenBudget(messages, retainedHistoryTokenLimit, minimumIndex: 0, previousBoundary: null);
-
   private static int? FindBoundaryWithinTokenBudget(IReadOnlyList<HistoryMessage> messages,
       int retainedHistoryTokenLimit, int minimumIndex, HistoryMessageLocation? previousBoundary) {
     int? oldestUserTurnIndexWithinBudget = null;

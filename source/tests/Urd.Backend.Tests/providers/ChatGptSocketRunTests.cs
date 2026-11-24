@@ -88,6 +88,60 @@ public sealed class ChatGptSocketRunTests {
   }
 
   [Theory]
+  [InlineData(119, false)]
+  [InlineData(120, true)]
+  [InlineData(121, true)]
+  public async Task IdleSocketExpiresBeforeNextTurn(int seconds, bool expired) {
+    var clock = new FakeClock();
+    using var run = new ChatGptSocketRun(clock);
+    ProviderState state = CreateState();
+    Guid session = Guid.NewGuid();
+    var first = new FakeSocket(Created, Completion);
+    var second = new FakeSocket();
+    int attempts = 0;
+    Task<WebSocket> Connect(string token, Guid id, CancellationToken cancellationToken) => Task.FromResult<WebSocket>(++attempts == 1 ? first : second);
+    using (HttpClient turn = (await run.OpenTurnAsync(state, session, Connect, default))!) {
+      using var response = await turn.PostAsync("http://local/", new StringContent(Request));
+      await response.Content.ReadAsStringAsync();
+    }
+    clock.Advance(TimeSpan.FromSeconds(seconds));
+    run.EndTurn(true);
+
+    using HttpClient next = (await run.OpenTurnAsync(state, session, Connect, default))!;
+    Assert.Equal(expired, first.Disposed.Task.IsCompleted);
+    Assert.Equal(expired ? 2 : 1, attempts);
+    using var nextRequest = new HttpRequestMessage(HttpMethod.Post, "http://local/") { Content = new StringContent(Followup) };
+    using var nextResponse = await next.SendAsync(nextRequest, HttpCompletionOption.ResponseHeadersRead);
+    using var frame = JsonDocument.Parse(expired ? Assert.Single(second.Frames) : first.Frames[1]);
+    Assert.Equal(!expired, frame.RootElement.TryGetProperty("previous_response_id", out _));
+    Assert.Equal(expired ? 3 : 1, frame.RootElement.GetProperty("input").GetArrayLength());
+    run.EndTurn(false);
+  }
+
+  [Fact]
+  public async Task ExpiredSocketHandshakeFailureLatchesHttpFallback() {
+    var clock = new FakeClock();
+    using var run = new ChatGptSocketRun(clock);
+    ProviderState state = CreateState();
+    Guid session = Guid.NewGuid();
+    var socket = new FakeSocket(Created, Completion);
+    int attempts = 0;
+    Task<WebSocket> Connect(string token, Guid id, CancellationToken ct) => ++attempts == 1 ?
+        Task.FromResult<WebSocket>(socket) : Task.FromException<WebSocket>(new WebSocketException());
+    using (HttpClient turn = (await run.OpenTurnAsync(state, session, Connect, default))!) {
+      using var response = await turn.PostAsync("http://local/", new StringContent(Request));
+      await response.Content.ReadAsStringAsync();
+    }
+    run.EndTurn(true);
+    clock.Advance(TimeSpan.FromMinutes(2));
+    Assert.Null(await run.OpenTurnAsync(state, session, Connect, default));
+    Assert.True(socket.Disposed.Task.IsCompleted);
+    Assert.Null(await run.OpenTurnAsync(state, session, Connect, default));
+    Assert.Equal(2, attempts);
+    Assert.Single(socket.Frames);
+  }
+
+  [Theory]
   [InlineData("send")]
   [InlineData("receive")]
   [InlineData("interrupted")]
@@ -155,6 +209,13 @@ public sealed class ChatGptSocketRunTests {
       new(Guid.NewGuid(), "ChatGPT", ProviderRoute.ChatGpt, LlmApi.OpenAIResponses,
           new Uri("https://api.openai.com/v1/"), AuthenticationMethod.OAuth),
       1, 1, null, new(null, "token", null, null, null, []), false, null);
+
+  private sealed class FakeClock : TimeProvider {
+    private long timestamp;
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+    public override long GetTimestamp() => timestamp;
+    public void Advance(TimeSpan duration) => timestamp += duration.Ticks;
+  }
 
   private sealed class FakeSocket(params string[] messages) : WebSocket {
     private WebSocketState state = WebSocketState.Open;

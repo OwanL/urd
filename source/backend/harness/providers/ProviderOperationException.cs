@@ -24,7 +24,8 @@ public sealed class ProviderOperationException : Exception {
   internal ProviderDiagnostic.Cause? DiagnosticCause { get; private init; }
 
   internal static ProviderOperationException FromProviderError(Exception error,
-      bool discovery = false, bool contextWindow = false, ProviderCredentials? credentials = null) {
+      bool discovery = false, bool contextWindow = false, ProviderCredentials? credentials = null,
+      bool socketTransport = false) {
     ProviderErrorDetails? details = error is ClientResultException clientError ? ReadErrorDetails(clientError) : null;
     ProviderFailure failure = error switch {
       ClientResultException { Status: 401 } => ProviderFailure.AuthenticationRequired,
@@ -40,6 +41,14 @@ public sealed class ProviderOperationException : Exception {
 
     int? status = details?.Status is >= 100 and <= 599 ? details.Status : null;
     var cause = ProviderDiagnostic.Describe(error, status);
+    if (socketTransport && cause.HttpStatus is null &&
+        (cause.HttpRequestError == nameof(HttpRequestError.ConnectionError) || cause.SocketError is not null || cause.WebSocketError is not null ||
+         cause.WebSocketReceiveFailure is "PeerClosed" or "TransportRead"))
+      return new(ProviderFailure.ProviderUnavailable,
+          "The ChatGPT connection was lost. The request may have been processed. Check the conversation before sending another message.") {
+        DiagnosticCause = cause
+      };
+
     if (details is not null && status is null)
       return new(failure, "No HTTP response received from the provider.") { DiagnosticCause = cause };
 

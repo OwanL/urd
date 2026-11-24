@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -59,11 +60,42 @@ public sealed class ResponsesTerminalDiagnosticsTests {
     var (error, diagnostic, socket) = await SocketFailure(Created);
 
     Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
-    Assert.Contains("peer closed", error.Message, StringComparison.OrdinalIgnoreCase);
+    Assert.Contains("The request may have been processed", error.Message, StringComparison.Ordinal);
     Assert.Null(diagnostic.WireTerminal);
     Assert.Null(diagnostic.SdkTerminal);
     Assert.Equal("PeerClosed", diagnostic.WebSocketReceiveFailure);
     Assert.Equal(2, socket.Receives);
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task FailedSendReportsUncertainOutcomeWithoutReplay(bool ioFailure) {
+    var socket = new ScriptedSocket([]) { SendFailure = ioFailure ? new IOException() : new SocketException((int)SocketError.ConnectionAborted) };
+    using var run = new ChatGptSocketRun();
+    using var handler = new ScriptedOpenAIHandler("unexpected");
+    using var http = new HttpClient(handler);
+    List<ProviderDiagnostic> diagnostics = [];
+    var inference = new OpenAIInferenceClient(http, connectSocket: (_, _, _) => Task.FromResult<WebSocket>(socket), diagnose: diagnostics.Add);
+    var options = Options();
+    options.AdditionalProperties = new() {
+      [OpenAIInferenceClient.SessionIdProperty] = Guid.NewGuid(),
+      [ChatGptSocketRun.PropertyName] = run
+    };
+
+    var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
+      await foreach (var _ in inference.GetStreamingResponseAsync(CreateState(ProviderRoute.ChatGpt), History(), options, default)) { /* Drain to the failure. */ }
+    });
+
+    Assert.Equal(ProviderFailure.ProviderUnavailable, error.Failure);
+    Assert.Contains("The request may have been processed", error.Message, StringComparison.Ordinal);
+    Assert.Contains("Check the conversation", error.Message, StringComparison.Ordinal);
+    Assert.Null(error.InnerException);
+    var diagnostic = Assert.Single(diagnostics);
+    if (ioFailure) Assert.Equal("ConnectionError", diagnostic.HttpRequestError);
+    else Assert.Equal("ConnectionAborted", diagnostic.SocketError);
+    Assert.Single(socket.Sends);
+    Assert.Empty(handler.Requests);
   }
 
   [Fact]
@@ -186,6 +218,7 @@ public sealed class ResponsesTerminalDiagnosticsTests {
   private sealed class ScriptedSocket(string[] messages) : WebSocket {
     private int index;
     public int Receives { get; private set; }
+    public Exception? SendFailure { get; init; }
     public List<string> Sends { get; } = [];
     public override WebSocketCloseStatus? CloseStatus => null;
     public override string? CloseStatusDescription => null;
@@ -197,7 +230,7 @@ public sealed class ResponsesTerminalDiagnosticsTests {
     public override Task CloseOutputAsync(WebSocketCloseStatus closeStatus, string? statusDescription, CancellationToken cancellationToken) => throw new NotSupportedException();
     public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage, CancellationToken cancellationToken) {
       Sends.Add(Encoding.UTF8.GetString(buffer.AsSpan()));
-      return Task.CompletedTask;
+      return SendFailure is null ? Task.CompletedTask : Task.FromException(SendFailure);
     }
     public override Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken) {
       cancellationToken.ThrowIfCancellationRequested();

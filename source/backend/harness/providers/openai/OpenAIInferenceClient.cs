@@ -1,5 +1,6 @@
 using System.ClientModel;
 using System.ClientModel.Primitives;
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -100,7 +101,8 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
           stream = client.GetStreamingResponseAsync(history, wireOptions, progress.Token).GetAsyncEnumerator(progress.Token);
         } catch (Exception error) when (CanClassify(error, cancellationToken)) {
           cancellationToken.ThrowIfCancellationRequested();
-          throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
+          throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials,
+              socketTransport: progress.Transport == "websocket");
         }
         try {
           while (await MoveNextAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false)) {
@@ -265,7 +267,8 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       ct.ThrowIfCancellationRequested();
       if (progress.Token.IsCancellationRequested)
         throw progress.TimeoutFailure();
-      throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials);
+      throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials,
+          socketTransport: progress.Transport == "websocket");
     }
   }
 
@@ -277,14 +280,15 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       ct.ThrowIfCancellationRequested();
       if (progress.Token.IsCancellationRequested)
         throw progress.TimeoutFailure(cleanupFailed: true);
-      throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials);
+      throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials,
+          socketTransport: progress.Transport == "websocket");
     }
   }
 
   private static bool CanClassify(Exception error, CancellationToken ct) => error is not ProviderOperationException &&
       !(error is OperationCanceledException && ct.IsCancellationRequested) &&
       error is ClientResultException or HttpRequestException or IOException or OperationCanceledException or
-          JsonException or FormatException or InvalidOperationException or KeyNotFoundException or ArgumentException or NotSupportedException;
+          SocketException or WebSocketException or JsonException or FormatException or InvalidOperationException or KeyNotFoundException or ArgumentException or NotSupportedException;
 }
 
 #pragma warning restore OPENAI001, MEAI001

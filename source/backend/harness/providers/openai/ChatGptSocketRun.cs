@@ -6,14 +6,18 @@ using System.Text.Json;
 namespace Urd.Core.Providers;
 
 // Owns a socket and its continuation for one sequential agent run.
-internal sealed class ChatGptSocketRun : IDisposable {
+internal sealed class ChatGptSocketRun(TimeProvider? timeProvider = null) : IDisposable {
   internal const string PropertyName = "urd.chatgpt.socket-run";
   private static readonly TimeSpan handshakeTimeout = TimeSpan.FromSeconds(10);
+  // Conservative client idle limit, not a provider TTL.
+  private static readonly TimeSpan idleTimeout = TimeSpan.FromMinutes(2);
   private const int MaximumResponseIds = 1024;
+  private readonly TimeProvider clock = timeProvider ?? TimeProvider.System;
   private readonly ChatGptContinuation continuation = new();
   private readonly HashSet<string> responseIds = new(StringComparer.Ordinal);
   private WebSocket? socket;
   private (Guid Session, Guid Connection, long Generation, long CredentialVersion)? scope;
+  private long completedAt;
   private bool httpOnly;
   private bool completed;
   private bool turnOpen;
@@ -47,7 +51,8 @@ internal sealed class ChatGptSocketRun : IDisposable {
       return null;
 
     var nextScope = (sessionId, state.Connection.Id, state.Generation, state.CredentialVersion);
-    if (scope != nextScope || socket?.State != WebSocketState.Open || responseIds.Count >= MaximumResponseIds)
+    if (scope != nextScope || socket?.State != WebSocketState.Open || responseIds.Count >= MaximumResponseIds ||
+        (completed && clock.GetElapsedTime(completedAt) >= idleTimeout))
       Reset();
     if (socket is null) {
       string? token = state.Credentials?.AccessToken;
@@ -136,9 +141,14 @@ internal sealed class ChatGptSocketRun : IDisposable {
         using var document = await JsonDocument.ParseAsync(await request.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false),
             cancellationToken: cancellationToken).ConfigureAwait(false);
         byte[] frame = run.continuation.CreateFrame(document.RootElement);
-        await run.socket.SendAsync(frame.AsMemory(), WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+        try {
+          await run.socket.SendAsync(frame.AsMemory(), WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+        } catch (IOException failure) {
+          throw new HttpRequestException(HttpRequestError.ConnectionError, "Responses WebSocket send failed.", failure);
+        }
         var stream = new ResponsesSocketStream(run.socket, response => {
           run.continuation.Complete(response);
+          run.completedAt = run.clock.GetTimestamp();
           run.completed = true;
         }, id => run.responseIds.Add(id), observeTerminal);
         var content = new StreamContent(stream);

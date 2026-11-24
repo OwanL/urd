@@ -323,7 +323,7 @@ public sealed class ProviderSessionExecutionTests {
       Assert.Empty(transport.Requests);
       if (failBeforeCompletion) {
         Assert.Equal(ExecutionOutcome.Failed, result.Outcome);
-        Assert.Contains("Responses WebSocket transport read failed.", (await session.ReadSnapshotAsync()).LastSettlement?.Error,
+        Assert.Contains("The request may have been processed.", (await session.ReadSnapshotAsync()).LastSettlement?.Error,
             StringComparison.Ordinal);
         Assert.Equal(0, effects);
         Assert.Empty(StoredTools.Read(database));

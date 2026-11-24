@@ -1,3 +1,4 @@
+using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -141,7 +142,7 @@ internal sealed class ResponsesSocketStream(WebSocket socket, Action<JsonElement
   private async ValueTask<ValueWebSocketReceiveResult> ReceiveFrame(CancellationToken cancellationToken) {
     try {
       return await socket.ReceiveAsync(receiveBuffer.AsMemory(), cancellationToken).ConfigureAwait(false);
-    } catch (Exception error) when (error is WebSocketException or IOException or InvalidOperationException or ArgumentException) {
+    } catch (Exception error) when (error is WebSocketException or SocketException or IOException or InvalidOperationException or ArgumentException) {
       throw new ReceiveException(ReceiveFailure.TransportRead, ProviderDiagnostic.Describe(error, null));
     }
   }

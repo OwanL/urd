@@ -142,6 +142,8 @@ public sealed class BrowserViewerLoopbackTests {
 
     BrowserPage<IPage> registered = await host.OpenAsync(primary, deadline.Token);
     IPage page = registered.Page;
+    Assert.False(await page.EvaluateAsync<bool>("navigator.webdriver"));
+    Assert.DoesNotContain("Headless", await page.EvaluateAsync<string>("navigator.userAgent"));
     await page.GotoAsync(new Uri(origin, "/fixture").ToString());
     string path = $"/browser-view/{primary:D}/{registered.Id:D}";
     using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = origin };

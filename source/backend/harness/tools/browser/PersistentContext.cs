@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Playwright;
 
@@ -14,6 +15,7 @@ internal sealed class PersistentContext : IAsyncDisposable {
 
   private readonly string profilePath;
   private readonly string cookiePath;
+  private readonly string userAgentPath;
   private IPlaywright? driver;
   private IBrowserContext? context;
   private bool ready;
@@ -22,6 +24,7 @@ internal sealed class PersistentContext : IAsyncDisposable {
   private PersistentContext(string profilePath, string cookiePath) {
     this.profilePath = profilePath;
     this.cookiePath = cookiePath;
+    userAgentPath = profilePath + ".user-agent";
   }
 
   internal IBrowserContext Context => context ?? throw new InvalidOperationException("The browser is not running.");
@@ -46,19 +49,58 @@ internal sealed class PersistentContext : IAsyncDisposable {
     IPlaywright started = await Playwright.CreateAsync();
     driver = started;
     cancellation.ThrowIfCancellationRequested();
-    IBrowserContext launched = await started.Chromium.LaunchPersistentContextAsync(profilePath, new BrowserTypeLaunchPersistentContextOptions {
-      ExecutablePath = executable,
-      ChromiumSandbox = true,
-      Headless = true,
-      ViewportSize = new ViewportSize { Width = 1280, Height = 800 },
-      AcceptDownloads = true,
-      Timeout = LaunchTimeoutMilliseconds
-    });
+    string? browserVersion = FileVersionInfo.GetVersionInfo(executable).ProductVersion;
+    string? userAgent = await ReadUserAgentAsync(browserVersion, cancellation);
+    IBrowserContext launched = await LaunchAsync(started, executable, userAgent);
+    if (userAgent is null) {
+      IPage probe = launched.Pages.Count > 0 ? launched.Pages[0] : await launched.NewPageAsync();
+      userAgent = (await probe.EvaluateAsync<string>("navigator.userAgent"))
+          .Replace("HeadlessChrome", "Chrome", StringComparison.Ordinal)
+          .Replace("Headless", "", StringComparison.Ordinal);
+      await launched.CloseAsync();
+      await SaveUserAgentAsync(browserVersion, userAgent, cancellation);
+      launched = await LaunchAsync(started, executable, userAgent);
+    }
     launched.Close += (_, _) => this.closed = true;
     context = launched;
     cancellation.ThrowIfCancellationRequested();
     await RestoreSessionCookiesAsync(launched, cancellation);
     ready = true;
+  }
+
+  private Task<IBrowserContext> LaunchAsync(IPlaywright started, string executable, string? userAgent) =>
+      started.Chromium.LaunchPersistentContextAsync(profilePath,
+      new BrowserTypeLaunchPersistentContextOptions {
+        ExecutablePath = executable,
+        ChromiumSandbox = true,
+        Headless = true,
+        IgnoreDefaultArgs = ["--enable-automation"],
+        Args = ["--disable-blink-features=AutomationControlled"],
+        UserAgent = userAgent,
+        ViewportSize = new ViewportSize { Width = 1280, Height = 800 },
+        AcceptDownloads = true,
+        Timeout = LaunchTimeoutMilliseconds
+      });
+
+  private async Task<string?> ReadUserAgentAsync(string? browserVersion, CancellationToken cancellation) {
+    if (string.IsNullOrEmpty(browserVersion) || !File.Exists(userAgentPath))
+      return null;
+    try {
+      string[] cached = await File.ReadAllLinesAsync(userAgentPath, cancellation);
+      return cached is [var version, var userAgent] && version == browserVersion ? userAgent : null;
+    } catch (Exception error) when (error is IOException or UnauthorizedAccessException) {
+      return null;
+    }
+  }
+
+  private async Task SaveUserAgentAsync(string? browserVersion, string userAgent, CancellationToken cancellation) {
+    if (string.IsNullOrEmpty(browserVersion))
+      return;
+    try {
+      await File.WriteAllLinesAsync(userAgentPath, [browserVersion, userAgent], cancellation);
+    } catch (Exception error) when (error is IOException or UnauthorizedAccessException) {
+      // A read-only cache does not prevent this launch from using the detected value.
+    }
   }
 
   // Saves session cookies, then closes the browser and releases the driver. Best effort: a

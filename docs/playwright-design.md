@@ -1,8 +1,9 @@
 # Browser automation
 
-Status: browser host, session tool and viewer implemented. Google sign-in passed in the spike;
-release is blocked: the isolated staged-build check failed at Google sign-in on 2026-11-24. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
-relaunch, network proxy). The earlier design and probes are in Git history before this revision.
+Status: browser host, session tool and viewer implemented. The launch configuration now matches
+the successful spike; the finished app still needs its real-account Google qualification. Replaces
+the shipped preview (shared profile, restricted tool, headed sign-in relaunch, network proxy). The
+earlier design and probes are in Git history before this revision.
 
 ## Goals
 
@@ -167,11 +168,15 @@ Measured on the same machine with fresh profiles, Edge, Chrome and Chrome for Te
 launch in about 0.6–0.7 s, about 250 MB private memory with one blank page, and about 75–150 MB
 more per loaded page. Idle shutdown is what keeps resource use low.
 
-- Qualification difference: the spike changed how the automated browser identified itself. The
-  implementation currently uses standard Playwright identification. The spike's successful result
-  does not carry over: on 2026-11-24 the owner opened Gmail in the staged viewer on a fresh
-  profile and Google reported that the browser may not be secure. The refusal does not identify
-  the exact trigger. Restart persistence and third-party Google sign-in were not reached.
+- The first staged check used standard Playwright identification instead of the spike's settings.
+  On 2026-11-24 the owner opened Gmail in that viewer on a fresh profile and Google reported that
+  the browser may not be secure. The refusal did not identify the exact trigger, and restart
+  persistence and third-party Google sign-in were not reached.
+- The implementation now matches the spike: omit `--enable-automation`, pass
+  `--disable-blink-features=AutomationControlled`, and remove `Headless` markers from the actual
+  browser user agent. The user agent is captured on a blank first launch, then cached by Chromium
+  product version; a browser update captures a new value. Real-page tests assert
+  `navigator.webdriver == false` and no `Headless` marker. Real-account qualification is pending.
 - Risk: Chrome for Testing identifies as plain Chromium, and a pinned build ages between Urd
   updates. If Google starts refusing it, revisit using an installed browser.
 - If Google still refuses headless, run headed with an off-screen window; the screencast viewer

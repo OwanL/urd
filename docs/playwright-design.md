@@ -1,7 +1,7 @@
 # Browser automation
 
-Status: design agreed (2026-11-24); implementation pending, starting with the prerequisite below.
-Google sign-in qualified by spike. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
+Status: browser host, session tool and viewer implemented. Google sign-in passed in the spike;
+the finished app is not release-qualified until the real-account checks below pass. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
 relaunch, network proxy). The earlier design and probes are in Git history before this revision.
 
 ## Goals
@@ -86,7 +86,7 @@ Its tab strip lists the chat's and its helpers' pages.
   factor per context), so text is softer on high-DPI screens and phones. Refine later if needed.
 - Debounce window resizes before resizing the page.
 
-- Frames: `page.Screencast.StartAsync(new() { OnFrame = ... })` delivers JPEG frames, sent over a
+- Frames: Chromium's page screencast delivers JPEG frames, sent over a
   per-viewer WebSocket (input travels back on the same socket, keeping its order) and drawn on a
   `<canvas>`. Frames flow only while a viewer is open. Send the latest frame when a viewer connects.
 - Input: canvas mouse, wheel, key and paste events are scaled to page coordinates and replayed with
@@ -126,7 +126,7 @@ cap (prerequisite below).
 | `back` | |
 | `tabs` | optional `select` or `close` page id |
 | `screenshot` | returns an image for vision-capable models |
-| `click_at` | `x`, `y` from the last screenshot (captchas, canvas) |
+| `click_at` | `x`, `y` from the last screenshot (e.g. canvas controls) |
 | `wait` | `text` or `ms` |
 | `upload` | `ref`, local file `paths` |
 | `dialog` | `accept` or `dismiss`, optional prompt text |
@@ -143,8 +143,8 @@ Chromium downloads PDFs rather than displaying them; reading PDFs belongs in the
 tool, not the browser.
 
 Snapshots use `page.AriaSnapshotAsync(new() { Mode = "ai" })`, which includes page text, iframes and
-`[ref=eN]` references; actions resolve refs with the `aria-ref=` locator. Captchas: the agent may
-try with `screenshot` and `click_at`, then asks the user if it fails.
+`[ref=eN]` references; actions resolve refs with the `aria-ref=` locator. The agent hands a captcha
+or access challenge to the user in the viewer.
 
 The email-code flow needs no special support: the agent opens Gmail in a second tab, searches, reads
 the code from the snapshot and types it into the first tab.
@@ -167,8 +167,9 @@ Measured on the same machine with fresh profiles, Edge, Chrome and Chrome for Te
 launch in about 0.6–0.7 s, about 250 MB private memory with one blank page, and about 75–150 MB
 more per loaded page. Idle shutdown is what keeps resource use low.
 
-- Launch without `--enable-automation`, with `--disable-blink-features=AutomationControlled`, and
-  remove the `Headless` marker from the user agent.
+- Qualification difference: the spike changed how the automated browser identified itself. The
+  implementation currently uses standard Playwright identification. The spike's successful result
+  is not evidence that this configuration passes; a refusal in the finished app blocks release.
 - Risk: Chrome for Testing identifies as plain Chromium, and a pinned build ages between Urd
   updates. If Google starts refusing it, revisit using an installed browser.
 - If Google still refuses headless, run headed with an off-screen window; the screencast viewer

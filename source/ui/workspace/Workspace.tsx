@@ -398,6 +398,7 @@ export function Workspace({
               notice={id === activeId ? events.notice : null}
               provisioning={id === activeId ? events.provisioning : null}
               refresh={refresh}
+              browserRefresh={events.browserRefresh[id] ?? 0}
               onRefresh={refreshSnapshot}
               onSetUpProvider={() => openSettings("providers")}
               onChooseModels={() => openSettings("model-buckets")}

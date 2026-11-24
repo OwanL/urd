@@ -115,6 +115,53 @@ void test("parses chunked SSE events and sends the browser registration", async 
   assert.ok(streamController);
 });
 
+void test("delivers per-session browser metadata notices with a session", async (t) => {
+  let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const browser: string[] = [];
+
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
+    assert.ok(input instanceof URL);
+    if (input.pathname === "/api/events") {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller;
+          controller.enqueue(
+            encoder.encode('event: connected\ndata: {"stream":"stream-b","boot":"boot-b"}\n\n'),
+          );
+        },
+      });
+      return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+    }
+    return new Response(null, { status: 204 });
+  });
+
+  const events = new SessionEvents(new URL("https://server.example"), {
+    connected() {},
+    change() {},
+    status() {},
+    created() {},
+    disconnected() {},
+    browser(session) {
+      browser.push(session);
+    },
+  });
+  t.after(() => events.stop());
+  events.start();
+
+  streamController?.enqueue(
+    encoder.encode(
+      'event: browser\ndata: {"other":"s1"}\n\n' +
+        'event: browser\ndata: {"session":"s1"}\n\n' +
+        'event: browser\ndata: {"session":"session-雪"}\n\n',
+    ),
+  );
+  // Requests without a session identity are ignored.
+  await waitFor(() => browser.length === 2);
+  assert.deepEqual(browser, ["s1", "session-雪"]);
+
+  events.stop();
+});
+
 void test("delivers host-wide browser provisioning notices without a session", async (t) => {
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
   const provisioning: Array<[string, string | null]> = [];

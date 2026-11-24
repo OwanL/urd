@@ -7,6 +7,7 @@ export interface SessionEventCallbacks {
   change(session: string, notice: string): void;
   status(session: string, status: string, title: string | null): void;
   created(session: string): void;
+  browser?(session: string): void;
   disconnected(): void;
   error?(message: string): void;
   provisioning?(stage: BrowserProvisioningStage, detail: string | null): void;
@@ -226,6 +227,12 @@ export class SessionEvents {
 
     if (message.event === "session-created") {
       this.call(() => this.callbacks.created(event.session as string));
+      return;
+    }
+
+    // Browser page metadata for one session changed; viewers re-read the page list.
+    if (message.event === "browser") {
+      this.call(() => this.callbacks.browser?.(event.session as string));
       return;
     }
 

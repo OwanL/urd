@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "preact/hooks";
+import type { RefObject } from "preact";
 import { RequestError } from "../../http/RequestError.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import type { UserQuestion } from "../../sessions/inputs/UserQuestion.ts";
@@ -27,9 +28,22 @@ interface UserQuestionsProps {
   sessionId: string;
   connected: boolean;
   notice: string | null;
+  browserOwners?: readonly string[];
+  panelRef?: RefObject<HTMLElement | null>;
+  onQuestionAvailability?(available: boolean): void;
+  onOpenBrowser?(ownerId: string): void;
 }
 
-export function UserQuestions({ client, sessionId, connected, notice }: UserQuestionsProps) {
+export function UserQuestions({
+  client,
+  sessionId,
+  connected,
+  notice,
+  browserOwners,
+  panelRef,
+  onQuestionAvailability,
+  onOpenBrowser,
+}: UserQuestionsProps) {
   const [questions, setQuestions] = useState<UserQuestion[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [, setDraftVersion] = useState(0);
@@ -87,6 +101,11 @@ export function UserQuestions({ client, sessionId, connected, notice }: UserQues
     questions.findIndex((item) => item.id === selected),
   );
   const question = questions[selectedIndex];
+  const hasQuestion = !!question;
+  useEffect(() => {
+    onQuestionAvailability?.(hasQuestion);
+    return () => onQuestionAvailability?.(false);
+  }, [hasQuestion, onQuestionAvailability]);
   const draftKey = question ? `${sessionId}:${question.id}` : "";
   const draft = drafts.get(draftKey) ?? "";
   const move = (offset: number) =>
@@ -127,7 +146,15 @@ export function UserQuestions({ client, sessionId, connected, notice }: UserQues
 
   if (!question && !readFailed && !answerError) return null;
   return (
-    <section ref={panel} class="user-questions" aria-label="Pending questions" tabIndex={-1}>
+    <section
+      ref={(element) => {
+        panel.current = element;
+        if (panelRef) panelRef.current = element;
+      }}
+      class="user-questions"
+      aria-label="Pending questions"
+      tabIndex={-1}
+    >
       {question && (
         <div class="user-question-current" aria-busy={sending}>
           <QuestionPrompt
@@ -141,6 +168,11 @@ export function UserQuestions({ client, sessionId, connected, notice }: UserQues
             }}
             onAnswer={(text) => void answer(text)}
           />
+          {onOpenBrowser && browserOwners?.includes(question.askingSessionId) && (
+            <button type="button" onClick={() => onOpenBrowser(question.askingSessionId)}>
+              Open browser
+            </button>
+          )}
           {questions.length > 1 && (
             <div class="user-question-pages">
               <button type="button" aria-label="Previous question" onClick={() => move(-1)}>

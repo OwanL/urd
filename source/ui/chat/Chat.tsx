@@ -37,7 +37,7 @@ import {
 } from "./user-images/ImagePaste.ts";
 import { useImageUploads } from "./user-images/useImageUploads.ts";
 import { UserQuestions } from "./ask-user/UserQuestions.tsx";
-import { BrowserSignInPrompt } from "./playwright/BrowserSignInPrompt.tsx";
+import { BrowserViewer } from "./browser/BrowserViewer.tsx";
 import "./chat.css";
 
 const efforts = ["none", "low", "medium", "high", "extraHigh"];
@@ -66,6 +66,7 @@ interface ChatProps {
   sessionStatus: string | undefined;
   canPersist: boolean;
   refresh: number;
+  browserRefresh: number;
   notice: string | null;
   provisioning: string | null;
   onRefresh(): void;
@@ -105,6 +106,7 @@ export function Chat({
   closing,
   canPersist,
   refresh,
+  browserRefresh,
   notice,
   provisioning,
   onRefresh,
@@ -146,10 +148,17 @@ export function Chat({
     active && !unavailable,
     transcript === undefined,
   );
+  const [browserRequest, setBrowserRequest] = useState<{
+    ownerId: string;
+    sequence: number;
+  } | null>(null);
+  const [browserOwners, setBrowserOwners] = useState<readonly string[]>([]);
   const [workingDirectoryLocked, setWorkingDirectoryLocked] = useState(false);
   const [workingDirectoryNotice, setWorkingDirectoryNotice] = useState<string | null>(null);
   const workingDirectoryGate = useRef(false);
   const composerInput = useRef<HTMLTextAreaElement>(null);
+  const questionPanel = useRef<HTMLElement>(null);
+  const [hasQuestion, setHasQuestion] = useState(false);
   const panel = useRef<HTMLElement>(null);
   const editTarget = chat.messageEdit?.target ?? null;
   const composerUploads = useImageUploads(sessionId, sessionId, chat.draftImages, (image) =>
@@ -408,17 +417,28 @@ export function Chat({
             onCancel={() => messageEditing.cancel(sessionId)}
           />
         )}
+      <BrowserViewer
+        sessionId={sessionId}
+        active={active}
+        refresh={refresh}
+        browserRefresh={browserRefresh}
+        openRequest={browserRequest}
+        onReturnToQuestion={hasQuestion ? () => questionPanel.current?.focus() : undefined}
+        onOwnersChange={setBrowserOwners}
+      />
       {active && (
-        <>
-          <UserQuestions client={client} sessionId={sessionId} connected={ready} notice={notice} />
-          <BrowserSignInPrompt
-            key={sessionId}
-            client={client}
-            sessionId={sessionId}
-            connected={ready}
-            notice={notice}
-          />
-        </>
+        <UserQuestions
+          client={client}
+          sessionId={sessionId}
+          connected={ready}
+          notice={notice}
+          browserOwners={browserOwners}
+          panelRef={questionPanel}
+          onQuestionAvailability={setHasQuestion}
+          onOpenBrowser={(ownerId) =>
+            setBrowserRequest((previous) => ({ ownerId, sequence: (previous?.sequence ?? 0) + 1 }))
+          }
+        />
       )}
       <Composer
         input={composerInput}

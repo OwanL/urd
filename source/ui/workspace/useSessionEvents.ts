@@ -29,6 +29,7 @@ export function useSessionEvents(
   refreshSnoozed: () => void,
 ) {
   const [notices, setNotices] = useState<Record<string, string>>({});
+  const [browserRefresh, setBrowserRefresh] = useState<Record<string, number>>({});
   const [activity, setActivity] = useState(emptySessionActivity);
   const [provisioning, setProvisioning] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<SessionConnectionState>("connecting");
@@ -53,6 +54,7 @@ export function useSessionEvents(
     let disposed = false;
     let streamStarted = false;
     let streamConnected = false;
+    let connectedBefore = false;
     let discovery: AbortController | null = null;
     function add(session: string) {
       if (disposed || isClosed(session) || discovered.has(session)) return;
@@ -88,12 +90,22 @@ export function useSessionEvents(
     }
     const events = new SessionEvents(new URL(window.location.href), {
       connected(_boot, nextStreamId) {
+        const reconnected = connectedBefore;
+        connectedBefore = true;
         streamConnected = true;
         setStreamId(nextStreamId);
         setConnectionState("connected");
         setHasConnected(true);
         refreshSnoozed();
         setError(null);
+        // Browser pages may have changed during the gap; refresh every observed session.
+        if (reconnected)
+          setBrowserRefresh((previous) => {
+            const keep = new Set(desired.current.open);
+            const next: Record<string, number> = {};
+            for (const session of keep) next[session] = (previous[session] ?? 0) + 1;
+            return next;
+          });
         discovery?.abort();
         discovery = new AbortController();
         void discover(discovery.signal);
@@ -116,6 +128,13 @@ export function useSessionEvents(
         if (titled !== state) access.save(titled);
       },
       created: add,
+      browser(session) {
+        if (isClosed(session)) return;
+        setBrowserRefresh((previous) => ({
+          ...previous,
+          [session]: (previous[session] ?? 0) + 1,
+        }));
+      },
       snoozeChanged: refreshSnoozed,
       disconnected() {
         streamConnected = false;
@@ -193,6 +212,7 @@ export function useSessionEvents(
     connectionState,
     streamId,
     notice: watched === active && active ? (notices[active] ?? null) : null,
+    browserRefresh,
     provisioning,
     unread: activity.unread,
     knownStatuses: Object.fromEntries(open.map((session) => [session, activity.statuses[session]])),

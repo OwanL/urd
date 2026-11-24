@@ -214,7 +214,7 @@ public sealed class AgentWaitCycleTests {
 
   private static FunctionCallContent Delegate(string callId, string task, bool background) =>
       new(callId, "subagent", new Dictionary<string, object?> {
-        ["bucket"] = "small", ["context"] = "none", ["task"] = task, ["background"] = background
+        ["bucket"] = "small", ["includeUserInput"] = false, ["task"] = task, ["background"] = background
       });
 
   private static bool HasText(ScriptedRequest request, string text) => request.Messages.Any(message =>

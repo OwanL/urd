@@ -9,6 +9,20 @@
   background: var(--surface-input);
   color: var(--text-primary);
 }
+.composer:has(> .browser-launcher-slot) {
+  margin-top: 30px;
+}
+.browser-launcher-slot {
+  position: absolute;
+  display: flex;
+  right: 8px;
+  bottom: 100%;
+}
+@media (pointer: coarse) {
+  .composer:has(> .browser-launcher-slot) {
+    margin-top: 36px;
+  }
+}
 .composer:focus-within {
   border-color: var(--border-subtle);
 }

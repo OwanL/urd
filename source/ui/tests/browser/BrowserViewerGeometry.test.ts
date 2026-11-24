@@ -30,7 +30,7 @@ type Edge = "left" | "right" | "top" | "bottom";
 async function openViewer(width = 1200, height = 800): Promise<Page> {
   const page = await browser.newPage({ viewport: { width, height } });
   await page.goto(`${server.resolvedUrls!.local[0]}geometry-test`);
-  await page.getByRole("button", { name: "Open browser" }).click();
+  await page.getByRole("button", { name: "Join browser" }).click();
   await page.waitForFunction(() => document.querySelector("canvas")?.width === 1280);
   return page;
 }
@@ -167,19 +167,88 @@ for (const edge of ["left", "right", "top", "bottom"] as const) {
 void test("dragging a docked header undocks with the previous floating size", async () => {
   const page = await openViewer();
   try {
+    const corner = await rect(page, '.browser-resize-handle[data-edge="se"]');
+    await drag(page, '.browser-resize-handle[data-edge="se"]', corner.x - 80, corner.y - 60);
     const floating = await rect(page, ".browser-viewer-panel");
     await snap(page, "left");
     const workspace = await rect(page, ".chat-view");
-    await drag(
-      page,
-      ".browser-viewer-grip",
-      workspace.x + workspace.width / 2,
-      workspace.y + workspace.height / 2,
-    );
+    const grip = await rect(page, ".browser-viewer-grip");
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(workspace.x + workspace.width / 2, workspace.y + 100, { steps: 10 });
     await mode(page, "floating");
     const undocked = await rect(page, ".browser-viewer-panel");
-    close(undocked.width, floating.width, "floating width");
-    close(undocked.height, floating.height, "floating height");
+    close(undocked.width, floating.width, "floating width during drag");
+    close(undocked.height, floating.height, "floating height during drag");
+    await page.mouse.up();
+    await page.getByLabel("Window layout").selectOption("maximized");
+    await page.getByLabel("Window layout").selectOption("floating");
+    sameRect(await rect(page, ".browser-viewer-panel"), undocked);
+  } finally {
+    await page.close();
+  }
+});
+
+void test("pulling a full-width maximized viewer away leaves a visible gap during the gesture", async () => {
+  const page = await openViewer(580, 800);
+  try {
+    const workspace = await rect(page, ".chat-view");
+    const floating = await rect(page, ".browser-viewer-panel");
+    close(floating.width, workspace.width, "initial floating width");
+    await page.getByLabel("Window layout").selectOption("maximized");
+    const grip = await rect(page, ".browser-viewer-grip");
+    const startX = grip.x + grip.width / 2;
+    const startY = grip.y + grip.height / 2;
+    const x = workspace.x + workspace.width / 2;
+    const y = startY + 90;
+    await page.mouse.move(startX, startY);
+    await page.mouse.down();
+    await page.mouse.move(x, y, { steps: 10 });
+    await mode(page, "floating");
+    const pulled = await rect(page, ".browser-viewer-panel");
+    assert.ok(pulled.width < workspace.width - 20, "pulled panel is narrower");
+    assert.ok(
+      pulled.x > workspace.x && pulled.x + pulled.width < workspace.x + workspace.width,
+      "horizontal gap",
+    );
+    assert.ok(
+      pulled.y > workspace.y && pulled.y + pulled.height < workspace.y + workspace.height,
+      "vertical gap",
+    );
+    assert.ok(
+      Math.abs((x - pulled.x) / pulled.width - (startX - workspace.x) / workspace.width) < 0.02,
+      "horizontal grab point stays anchored",
+    );
+    await page.mouse.up();
+  } finally {
+    await page.close();
+  }
+});
+
+void test("a short pull from a docked top edge does not immediately snap back", async () => {
+  const page = await openViewer();
+  try {
+    await page.getByLabel("Window layout").selectOption("top");
+    const grip = await rect(page, ".browser-viewer-grip");
+    const x = grip.x + grip.width / 2;
+    const y = grip.y + grip.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x + 8, y);
+    await mode(page, "floating");
+    await page.mouse.up();
+    await mode(page, "floating");
+  } finally {
+    await page.close();
+  }
+});
+
+void test("a docked header can drag along the workspace edge into another split", async () => {
+  const page = await openViewer();
+  try {
+    await snap(page, "right");
+    await snap(page, "top");
+    await assertSplit(page, "top");
   } finally {
     await page.close();
   }
@@ -266,9 +335,12 @@ void test("minimize removes the panel and reopening restores its floating rectan
   const page = await openViewer();
   try {
     const before = await rect(page, ".browser-viewer-panel");
-    await page.getByRole("button", { name: "Minimize viewer" }).click();
+    const minimize = page.getByRole("button", { name: "Minimize viewer" });
+    const bounds = (await minimize.boundingBox())!;
+    // This point also falls inside the north-east corner's expanded grab area.
+    await page.mouse.click(bounds.x + bounds.width - 2, bounds.y + 2);
     await page.locator(".browser-viewer-panel").waitFor({ state: "detached" });
-    await page.getByRole("button", { name: "Open browser" }).click();
+    await page.getByRole("button", { name: "Join browser" }).click();
     await mode(page, "floating");
     sameRect(await rect(page, ".browser-viewer-panel"), before);
   } finally {
@@ -298,7 +370,7 @@ void test("docked split resizes by pointer and keyboard and survives minimize", 
     await assertSplit(page, "left");
     await page.getByRole("button", { name: "Minimize viewer" }).click();
     await page.locator(".browser-viewer-panel").waitFor({ state: "detached" });
-    await page.getByRole("button", { name: "Open browser" }).click();
+    await page.getByRole("button", { name: "Join browser" }).click();
     await mode(page, "left");
     sameRect(await rect(page, ".browser-viewer-panel"), keyboard);
     await assertSplit(page, "left");

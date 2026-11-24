@@ -56,27 +56,23 @@ Chromium never shows a window. To watch or take over, the user opens a browser w
 Its tab strip lists the chat's and its helpers' pages.
 
 - Desktop layout: the window works like a small desktop window. It can dock as a split view beside
-  the chat (default, with a draggable divider), float (move and resize over the chat), maximize to
-  fill Urd, or minimize to a chip. Floating keeps the chat and question cards usable; docked never
+  the chat (with a draggable divider), float (the default), maximize to fill the chat, or minimize
+  back to the composer. Floating keeps the chat and question cards usable; docked never
   covers them. Rejected: inline in the transcript (scrolls away) and overlay-only (hides the
   question being answered).
 - Each chat has its own window. Switching chat tabs hides it, and each chat remembers whether its
   window was open, docked, floating or maximized, plus its size and position.
-- The page resizes to match the window while a viewer is open (minimum width about 360px), so text is
-  drawn at full size and phones get the site's mobile layout. When two viewers watch the same chat,
-  the most recently opened or resized one sets the size. When the last viewer closes, the page
-  returns to 1280×800, so unattended work uses desktop layouts. The agent targets elements by ref, so
-  a resize cannot misdirect clicks; a ref hidden by the new layout fails and the agent re-reads the
-  page. `click_at` is rejected if the page size changed since the screenshot it is based on.
-- Opening: when a chat has pages, a "Browser · N tabs" chip appears in the composer's indicator row;
+- The viewer scales the live desktop viewport (normally 1280×800) to fit without cropping it or
+  changing the site's layout. A viewer resize changes only the local display. Other viewers and
+  the agent continue to see the same page. Pointer positions map back to the displayed frame.
+- Opening: when a chat has pages, a globe tab appears on the composer's upper-right edge;
   it opens the window, and a minimized window returns to it. The question card's **Open browser**
   opens the same window. The window never opens by itself.
 - Controls are minimal: the window is for watching and handoff, not general browsing. The top bar
   only switches between the chat's and its helpers' tabs; there is no address bar, back/forward,
   reload, new-tab or close button. Navigation is the agent's job.
-- Phones: the window is full screen only and can be minimized back to the chat. Safe defaults: tap
-  clicks, drag scrolls, a keyboard button opens the phone keyboard and sends text, and the pending
-  question stays visible. Phone input is best-effort and untested; refine after real use.
+- Narrow screens: maximize to read a larger view, then minimize back to the chat. Tap to click or
+  focus an input; drag the page to scroll. Physical phone input is best-effort.
 - Tab selection: the window opens on the agent's active page; after that the user switches tabs
   independently, and the user's choice never changes the agent's active page. New pages appear in
   the tab strip without stealing the view, except a popup opened by the user's own input in the

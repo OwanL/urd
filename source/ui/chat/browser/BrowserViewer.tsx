@@ -87,7 +87,7 @@ export function BrowserViewer({
     <Tooltip
       content={
         <>
-          {open ? "Minimize browser" : "Open browser"}
+          {open ? "Minimize browser" : "Join browser"}
           {pages.map((page) => (
             <span class="tooltip-detail" key={page.id}>
               {pageTitle(page)}
@@ -100,7 +100,7 @@ export function BrowserViewer({
         ref={trigger}
         type="button"
         class="browser-launcher"
-        aria-label={open ? "Minimize browser" : "Open browser"}
+        aria-label={open ? "Minimize browser" : "Join browser"}
         aria-expanded={open}
         aria-controls={open ? panelId : undefined}
         onClick={() => {
@@ -112,7 +112,6 @@ export function BrowserViewer({
         }}
       >
         <BrowserIcon name="browser" />
-        <span class="browser-launcher-label">Browser</span>
       </button>
     </Tooltip>
   );

@@ -198,6 +198,7 @@ export function Composer({
         if (canSubmit) submit();
       }}
     >
+      {browserLauncher && <div class="browser-launcher-slot">{browserLauncher}</div>}
       {imagePreviews}
       <textarea
         class="composer-input"
@@ -256,7 +257,6 @@ export function Composer({
           </div>
         )}
         <div class="composer-actions" ref={actions}>
-          {browserLauncher}
           {!inlineAccounting && (
             <div class="composer-overflow">
               <IconButton

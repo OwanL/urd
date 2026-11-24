@@ -56,8 +56,8 @@ render(
             <div class="transcript-area">
               <div class="transcript" />
             </div>
-            {launcher}
             <div class="composer">
+              {launcher && <div class="browser-launcher-slot">{launcher}</div>}
               <textarea class="composer-input" aria-label="Message" />
             </div>
           </>

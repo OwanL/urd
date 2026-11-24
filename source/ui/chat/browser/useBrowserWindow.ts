@@ -20,6 +20,7 @@ interface Gesture {
   split: number;
   mode: BrowserWindowMode;
   started: boolean;
+  snapArmed: boolean;
 }
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
@@ -125,15 +126,18 @@ export function useBrowserWindow(open: boolean) {
     if (!edge && event.target instanceof Element && event.target.closest("button, select, label"))
       return;
     const header = box.getBoundingClientRect();
+    const pulledWidth = rect.width > bounds.width * 0.9 ? bounds.width * 0.85 : rect.width;
+    const pulledHeight = rect.height > bounds.height * 0.9 ? bounds.height * 0.85 : rect.height;
     const origin =
       mode === "floating" || edge
         ? rect
         : {
-            ...rect,
+            width: pulledWidth,
+            height: pulledHeight,
             x:
               event.clientX -
               bounds.left -
-              ((event.clientX - header.left) / header.width) * rect.width,
+              ((event.clientX - header.left) / header.width) * pulledWidth,
             y: header.top - bounds.top,
           };
     gesture.current = {
@@ -145,6 +149,7 @@ export function useBrowserWindow(open: boolean) {
       split,
       mode,
       started: false,
+      snapArmed: mode === "floating",
     };
     box.setPointerCapture(event.pointerId);
   }
@@ -159,7 +164,11 @@ export function useBrowserWindow(open: boolean) {
     if (!drag.started && Math.hypot(dx, dy) < 5) return;
     drag.started = true;
     if (!drag.edge) {
-      const snap = snapEdge(event.clientX, event.clientY, bounds);
+      const edge = snapEdge(event.clientX, event.clientY, bounds);
+      // Allow direct drags along a workspace edge to a new dock. A short tug
+      // should just restore the window, not immediately snap it back.
+      if (!edge || Math.hypot(dx, dy) >= 48) drag.snapArmed = true;
+      const snap = drag.snapArmed ? edge : null;
       setRect(fit({ ...drag.rect, x: drag.rect.x + dx, y: drag.rect.y + dy }, bounds));
       place(release && snap ? snap : "floating");
       setPreview(release ? null : snap);

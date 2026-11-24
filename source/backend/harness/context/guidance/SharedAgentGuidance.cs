@@ -9,7 +9,7 @@ internal static class SharedAgentGuidance {
 
       - Run slow calls with `background: true` when you have other useful work to do, such as long scripts, builds, tests and subagents. Keep working and use results as they arrive.
       - When only background work remains, end your reply; Urd resumes you when a result arrives. Never poll or sleep in a loop. A background `sleep` works as a timer, for example when asked to report when something happens.
-      - Batch tool calls together where possible. It meaningfully reduces cost by reducing the number of agent turns per unit of work.
+      - Request independent tool calls in the same response. Wait when one call’s result determines the next call, or when the calls could conflict.
         Consider overlapping edits and responsibilities when batching. Minimize conflicts and redundant work.
       - Keep strict scope discipline, but consider the mode of work.
         If the user works collaboratively through a review process such as pull requests, keep changes easy to review: use clear file, class and variable names, and keep the diff proportional to the change.

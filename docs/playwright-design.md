@@ -206,7 +206,11 @@ results are not. The browser tool's own 12,000-character truncation goes away wi
 
 ## Qualification order
 
-1. Done: spike with real Google sign-in (see above).
+1. Done: the spike verified Google sign-in with the proposed browser configuration (see above).
+   Release blocker: repeat that flow in the finished Urd viewer using a fresh test profile. The
+   owner must be able to sign in with 2FA, restart Urd and reopen Gmail without signing in again,
+   and use Sign in with Google on a third-party site. A failed check blocks the browser release;
+   Google is not an optional provider.
 2. Done: shared tool output cap (separate change).
 3. Browser host and `browser` tool, replacing the current tool.
 4. Viewer and handoff in the chat, including from a LAN device. Suggested slices: screencast and

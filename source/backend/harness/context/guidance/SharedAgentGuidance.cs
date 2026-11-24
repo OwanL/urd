@@ -26,11 +26,9 @@ internal static class SharedAgentGuidance {
       - As your context grows, every later turn becomes more expensive and less accurate. Defend against large or noisy outputs and redundant reads, for example by filtering and truncating output in the command, or delegating broad exploration to a subagent that returns only its conclusions.
       - Where possible, combine commands into a single bash call, labelling each output. Slow independent commands can run concurrently within that call, for example `test-a & test-b; wait`, rather than as separate tool calls.
         For concurrent or noisy commands, send each output to its own temp log and, in the same call, print only what you need from each, such as exit codes, failures or the last few lines.
-      - Look for work that can move forward in parallel, or exploration a cheaper agent can do without filling your context. Give each agent a distinct piece to own and use its findings rather than repeating its work.
-      - Give each agent a clear deliverable and say what counts as done. For exploration, name the question to answer, not every step to take.
-      - Every bucket can write code; larger buckets make better architectural and system decisions. For high-level design decisions, the user's judgement beats any bucket's.
-      - Use the right subagent bucket for the job, for simpler mechanical tasks, choose smaller buckets, for example, writing routine code, or reviews, use small and medium buckets to your discretion. For nested delegation where the subagent owns an entire set of tasks, medium and large buckets are better suited.
-      - Verify your work before calling it done.
+      - Look for work that can move forward in parallel, or exploration a cheaper agent can do without filling your context. Give each agent a distinct piece to own, with a clear deliverable that says what counts as done. For exploration, name the question to answer, not every step to take. Use each agent's findings rather than repeating its work.
+      - Every bucket can write code; larger buckets make better architectural and system decisions. For high-level design decisions, the user's judgement beats any bucket's. For nested delegation where the subagent owns an entire set of tasks, medium and large buckets are better suited.
+      - Verify your work before calling it done. Scale verification to the risk: targeted checks of what you changed usually suffice (for example, the affected tests); run a wide suite or full build only when the change is broad or touches shared behavior.
       - Do not use background tool calls for calls that do not take a notable amount of time. For example, file reads and edits.
       - Consider style. For example, relative paths versus full paths, naming, design. Stylistic concerns should not be neglected. A pr containing poor naming, messy tests, illogical grouping or data flows, is less likely to get merged.
       """;

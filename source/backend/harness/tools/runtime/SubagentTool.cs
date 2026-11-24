@@ -12,7 +12,7 @@ internal sealed class SubagentTool : HarnessTool {
     {
       "type": "object",
       "properties": {
-        "bucket": { "type": "string", "enum": ["small", "medium", "large"] },
+        "bucket": { "type": "string", "enum": ["small", "medium", "large"], "description": "Pick the smallest bucket sufficient: cost and latency grow with tier. small: bounded, well-defined work; medium: substantial judgment across interacting concerns; large: difficult reasoning, diagnosis or design." },
         "includeUserInput": { "type": "boolean", "description": "Include the parent’s human messages and answered ask_user questions, with their context and choices, as quoted history." },
         "task": { "type": "string" }
       },

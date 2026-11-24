@@ -366,6 +366,8 @@ public sealed class SubagentRunTests {
           definition => definition.Name == "subagent"));
       JsonElement properties = declaration.JsonSchema.GetProperty("properties");
       Assert.Equal("string", properties.GetProperty("bucket").GetProperty("type").GetString());
+      Assert.Equal("Pick the smallest bucket sufficient: cost and latency grow with tier. small: bounded, well-defined work; medium: substantial judgment across interacting concerns; large: difficult reasoning, diagnosis or design.",
+          properties.GetProperty("bucket").GetProperty("description").GetString());
       Assert.Equal("boolean", properties.GetProperty("includeUserInput").GetProperty("type").GetString());
       Assert.False(properties.TryGetProperty("context", out _));
       Assert.Contains(declaration.JsonSchema.GetProperty("required").EnumerateArray(),

@@ -154,6 +154,17 @@ public abstract partial class SessionBase {
           Kind == SessionKind.Subagent ? ReadSubagentProviders() : null, cancellation)
       ?? Task.FromException<LlmSelection>(new InvalidOperationException("No auxiliary model is configured."));
 
+  internal async Task<LlmSelection?> ResolveCompactionModelAsync(CancellationToken cancellation) {
+    if (modelSelector is null)
+      return null;
+    try {
+      return await modelSelector.ResolveAsync(ModelBucket.Small, ReadPreferences(),
+          Kind == SessionKind.Subagent ? ReadSubagentProviders() : null, cancellation);
+    } catch (AuxiliaryModelUnavailableException) {
+      return null;
+    }
+  }
+
   internal Task<bool> CanDelegateAsync(CancellationToken cancellation) =>
       modelSelector is not null && store.Preferences.WithCurrent(p => SubagentDepth < p.MaxSubagentDepth)
           ? modelSelector.HasSubagentProvidersAsync(ReadSubagentProviders(), cancellation)

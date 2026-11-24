@@ -36,6 +36,10 @@ public sealed class ModelSelector {
       ModelBucket bucket, UserPreferences preferences, CancellationToken cancellationToken = default) =>
       ResolveBucketAsync(bucket, preferences, null, false, cancellationToken);
 
+  internal Task<LlmSelection> ResolveAsync(ModelBucket bucket, UserPreferences preferences,
+      IReadOnlyList<Guid>? connectionIds, CancellationToken cancellationToken) =>
+      ResolveBucketAsync(bucket, preferences, connectionIds, false, cancellationToken);
+
   public async Task<LlmSelection> ResolveSubagentAsync(string bucket, UserPreferences preferences,
       IReadOnlyList<Guid>? connectionIds, CancellationToken cancellationToken = default) =>
       await ResolveBucketAsync(ParseBucket(bucket), preferences, connectionIds, true, cancellationToken);

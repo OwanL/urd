@@ -178,7 +178,9 @@ provider usage is not established by synthetic stream tests.
 Model settings and frozen selections carry an optional positive `ContextWindow`; unknown limits
 still allow Send. Exact-ID defaults are restricted to trusted provider identities. Before model
 requests, threshold preparation may summarize older history through the shared request-only
-`IChatClient`. A classified context-window rejection permits one compact-and-retry only if the
+`IChatClient`. Manual, threshold and overflow summaries use the configured small bucket, or the
+session model if no eligible small model is available. This does not change the conversation
+model or its compaction trigger. A classified context-window rejection permits one compact-and-retry only if the
 rejected request produced no output (including buffered output) or tool calls. Generic HTTP
 failures and a failed summary do not trigger it. Compaction never replays tools.
 

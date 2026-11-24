@@ -188,8 +188,12 @@ internal sealed class SessionExecution : IDisposable {
 
   private async Task<GeneratedCompactionSummary> GenerateHistorySummaryAsync(HistoryCompactionPlan plan) {
     try {
-      chatClient ??= createChatClient(selection.Connection);
-      return await HistoryCompactor.GenerateSummaryAsync(chatClient, selection, plan, stop.Token,
+      LlmSelection? small = await session.ResolveCompactionModelAsync(stop.Token);
+      LlmSelection summarySelection = small ?? selection;
+      IChatClient summaryClient = small is null
+          ? chatClient ??= createChatClient(selection.Connection)
+          : createChatClient(summarySelection.Connection);
+      return await HistoryCompactor.GenerateSummaryAsync(summaryClient, summarySelection, plan, stop.Token,
           new UsageContext(session.Id, ExecutionId, "compaction"));
     } catch (OperationCanceledException) when (IsStopping) {
       throw;

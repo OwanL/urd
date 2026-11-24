@@ -86,6 +86,47 @@ public sealed class AutomaticCompactionTests {
         entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
   }
 
+  [Fact]
+  public async Task ThresholdCompactionUsesConfiguredSmallModelWithoutChangingConversationModel() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    const string smallModel = "small-summary-model";
+    string catalog = JsonSerializer.Serialize(new {
+      @object = "list",
+      data = new[] { new { id = smallModel, @object = "model", created = 1_700_000_000, owned_by = "fixture", context_window = 32_000 } }
+    });
+    using var providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"),
+        new ScriptedOpenAIHandler(catalog, "application/json"));
+    ProviderConnection smallConnection = await providers.AddCustomAsync(new("small", LlmApi.OpenAIResponses,
+        new Uri("https://small.fixture.invalid/v1"), AuthenticationMethod.None)).WaitAsync(TestTimeout);
+    await providers.RefreshModelCatalogAsync(smallConnection.Id).WaitAsync(TestTimeout);
+    new PreferenceManager(store).SetBucketModels(ModelBucket.Small, [new(smallConnection.Id, smallModel)]);
+
+    using var conversation = new ScriptedChatClient(Complete);
+    using var summary = new ScriptedChatClient(Complete, _ => Task.FromResult(SummaryResponse()));
+    IChatClient conversationClient = PrepassTolerantChatClient.WrapIfNeeded(conversation, disposeInner: false);
+    IChatClient smallClient = PrepassTolerantChatClient.WrapIfNeeded(summary, disposeInner: false);
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid()), store,
+        connection => connection.Id == smallConnection.Id ? smallClient : conversationClient,
+        modelSelector: new ModelSelector(providers));
+    LlmSelection selection = TestLlmSelection.Default with { ContextWindow = 8_192 };
+    try {
+      await SubmitAsync(session, new string('o', 100_000), TestLlmSelection.Default);
+      await SubmitAsync(session, "current turn", selection);
+
+      Assert.Equal(2, conversation.Requests.Count);
+      Assert.All(conversation.Options, options => Assert.Equal(selection.ModelId, options?.ModelId));
+      Assert.Single(summary.Requests);
+      Assert.Equal(smallModel, Assert.Single(summary.Options)?.ModelId);
+      Assert.Contains(Summary, RequestText(conversation.Requests[^1]));
+      Assert.NotNull(store.Compactions.ReadContext(session.Id, 0).PreviousCompaction);
+    } finally {
+      await session.StopAcceptingUserMessagesAsync();
+      await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      await providers.ShutdownAsync().WaitAsync(TestTimeout);
+    }
+  }
+
   [Theory]
   [InlineData(1_000, 2_500)]
   [InlineData(400_000, 610_000)]

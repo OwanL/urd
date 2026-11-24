@@ -62,7 +62,6 @@ function paintFrame(canvas: HTMLCanvasElement, bitmap: ImageBitmap): boolean {
 }
 
 export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewProps) {
-  const surface = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLCanvasElement>(null);
   const textInput = useRef<HTMLTextAreaElement>(null);
   const composing = useRef(false);
@@ -72,7 +71,6 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
   const [state, setState] = useState<BrowserPageStreamState>("connecting");
   const [drawn, setDrawn] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const sendResize = useRef<() => void>(() => {});
   const pointer = useRef<{
     id: number;
     x: number;
@@ -82,13 +80,6 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
     dragging: boolean;
     touch: boolean;
   } | null>(null);
-
-  sendResize.current = () => {
-    const box = surface.current;
-    const width = box?.clientWidth ?? 0;
-    const height = box?.clientHeight ?? 0;
-    if (width > 0 && height > 0) stream.current?.send({ type: "resize", width, height });
-  };
 
   useEffect(() => {
     const canvas = frame.current;
@@ -161,9 +152,7 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
         if (textInput.current) textInput.current.value = "";
         setState(next);
         setFailure(streamFailure);
-        if (connected) {
-          sendResize.current();
-        } else {
+        if (!connected) {
           connectionVersion += 1;
           latestFrame = null;
           drawnRef.current = false;
@@ -180,23 +169,6 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
       pageStream.close();
     };
   }, [sessionId, page.id, enabled]);
-
-  useEffect(() => {
-    if (!enabled || !surface.current) return;
-    const box = surface.current;
-    // CSS fits the last frame throughout a drag. Reconfigure Chromium's screencast
-    // once the surface settles, not on every mouse move.
-    let timer: ReturnType<typeof setTimeout>;
-    const observer = new ResizeObserver(() => {
-      clearTimeout(timer);
-      timer = setTimeout(() => sendResize.current(), 80);
-    });
-    observer.observe(box);
-    return () => {
-      clearTimeout(timer);
-      observer.disconnect();
-    };
-  }, [enabled]);
 
   useLayoutEffect(() => {
     if (!enabled) return;
@@ -311,7 +283,6 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
   return (
     <div class="browser-page-view">
       <div
-        ref={surface}
         class="browser-page-surface"
         tabindex={-1}
         role="application"

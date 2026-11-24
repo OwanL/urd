@@ -9,7 +9,6 @@ export interface BrowserPage {
 }
 
 export type BrowserPageCommand =
-  | { type: "resize"; width: number; height: number }
   | { type: "click"; x: number; y: number }
   | { type: "wheel"; dx: number; dy: number; x: number; y: number }
   | { type: "key"; key: string }

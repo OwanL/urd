@@ -39,9 +39,7 @@ after(async () => {
 
 async function commands() {
   return page.evaluate(() =>
-    (window as unknown as { viewerCommands: { type: string }[] }).viewerCommands
-      .splice(0)
-      .filter((command) => command.type !== "resize"),
+    (window as unknown as { viewerCommands: { type: string }[] }).viewerCommands.splice(0),
   );
 }
 
@@ -129,8 +127,13 @@ async function waitForDecodesIdle() {
   });
 }
 
+void test("joining and shrinking a viewer leaves the remote viewport untouched", async () => {
+  await page.setViewportSize({ width: 420, height: 300 });
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+  assert.deepEqual(await commands(), []);
+});
+
 void test("pointer taps map to frame coordinates and clamp outside the canvas", async () => {
-  await commands();
   await pointer("pointerdown", 20, 10, "mouse");
   await pointer("pointerup", 22, 12, "mouse");
   assert.deepEqual(await commands(), [{ type: "click", x: 44, y: 24 }]);

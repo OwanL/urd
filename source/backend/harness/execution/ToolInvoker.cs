@@ -15,6 +15,7 @@ internal static class ToolInvoker {
       string? workingDirectory, bool supportsImages, bool background, CancellationToken cancellation,
       Func<string, bool, HarnessToolContext>? createHarnessContext = null) {
     ToolOutput output;
+    ExecutionOutcome? failure = null;
     try {
       cancellation.ThrowIfCancellationRequested();
       AgentTool tool = allowedTools.FirstOrDefault(tool =>
@@ -39,20 +40,22 @@ internal static class ToolInvoker {
         output = await tool.RunAsync(arguments, context, cancellation);
       }
     } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {
-      return CreateToolErrorResult(call, ExecutionOutcome.Cancelled,
-          "Tool execution was cancelled; effects may have occurred.");
+      output = new ToolOutput("Tool execution was cancelled; effects may have occurred.", [], IsError: true);
+      failure = ExecutionOutcome.Cancelled;
     } catch (Exception exception) when (exception is not ToolCleanupException) {
-      return CreateToolErrorResult(call, ExecutionOutcome.Failed, exception.Message);
+      output = new ToolOutput(exception.Message, [], IsError: true);
+      failure = ExecutionOutcome.Failed;
     }
 
-    // Storage freezes output and publishes images outside the ordinary invocation-error catch.
-    // A tool may return an error instead of throwing after cancellation; Stop still takes priority.
-    if (!cancellation.IsCancellationRequested)
-      output = ToolResultPruner.Prune(call.Name, call.Arguments, output);
-    ExecutionOutcome outcome = output.IsError ? ExecutionOutcome.Failed : ExecutionOutcome.Completed;
+    // Spill before pruning so the saved text is complete, including errors and mixed image results.
+    // A spill failure is a recording fault, not a second tool error that hides the original result.
+    ToolOutput limited = await ToolOutputLimit.ApplyAsync(call.Name, output);
+    if (ReferenceEquals(limited, output) && !cancellation.IsCancellationRequested)
+      limited = ToolResultPruner.Prune(call.Name, call.Arguments, limited);
+    ExecutionOutcome outcome = failure ?? (limited.IsError ? ExecutionOutcome.Failed : ExecutionOutcome.Completed);
     if (cancellation.IsCancellationRequested)
       outcome = ExecutionOutcome.Cancelled;
-    return new(call.CallId, outcome, output);
+    return new(call.CallId, outcome, limited);
   }
 
   private static JsonElement StripBackgroundOption(JsonElement arguments) {
@@ -63,11 +66,5 @@ internal static class ToolInvoker {
     JsonObject values = JsonNode.Parse(arguments.GetRawText())!.AsObject();
     values.Remove("background");
     return JsonSerializer.SerializeToElement(values);
-  }
-
-  private static LlmToolResult CreateToolErrorResult(LlmToolCall call, ExecutionOutcome outcome, string message) {
-    // Bound even arbitrary exception messages, allowing for JSON escaping overhead.
-    string error = message[..Math.Min(message.Length, 1024)];
-    return new(call.CallId, outcome, new ToolOutput(error, [], IsError: true));
   }
 }

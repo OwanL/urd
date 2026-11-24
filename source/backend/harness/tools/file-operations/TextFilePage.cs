@@ -13,6 +13,7 @@ internal sealed class TextFilePage(string path, int offset, int limit) {
   private int outputBytes;
   private string? cutoff;
   private bool oversized;
+  private bool pagingNoticeOverflow;
 
   public static async Task<ToolOutput> ReadAsync(Stream stream, string path, int offset, int limit,
       CancellationToken cancellation) {
@@ -47,9 +48,21 @@ internal sealed class TextFilePage(string path, int offset, int limit) {
     if (offset > lineNumber)
       throw new ArgumentException($"Offset {offset} is beyond end of file ({lineNumber} lines total).");
     long nextOffset = (long)offset + output.Count;
-    return new ToolOutput(BuildPageText(nextOffset), [], JsonSerializer.SerializeToElement(new {
+    string text = BuildPageText(nextOffset);
+    // Leave room for paging notices without dropping lines past the advertised next offset.
+    while (!ToolOutputLimit.Fits(text) && output.Count > 0) {
+      cutoff = Encoding.UTF8.GetByteCount(text) > ToolOutputLimits.MaxBytes ? "bytes" : "lines";
+      output.RemoveAt(output.Count - 1);
+      if (output.Count == 0) {
+        oversized = true;
+        pagingNoticeOverflow = true;
+      }
+      nextOffset = (long)offset + output.Count;
+      text = BuildPageText(nextOffset);
+    }
+    return new ToolOutput(text, [], JsonSerializer.SerializeToElement(new {
       totalLines = lineNumber, outputLines = output.Count, nextOffset = oversized ? offset : nextOffset,
-      truncated = cutoff is not null, truncatedBy = cutoff, firstLineExceedsLimit = oversized,
+      truncated = cutoff is not null, truncatedBy = cutoff, firstLineExceedsLimit = oversized && !pagingNoticeOverflow,
       maxLines = ToolOutputLimits.MaxLines, maxBytes = ToolOutputLimits.MaxBytes
     }));
   }
@@ -58,7 +71,8 @@ internal sealed class TextFilePage(string path, int offset, int limit) {
     if (oversized) {
       string bashPath = OperatingSystem.IsWindows() ? path.Replace('\\', '/') : path;
       string quotedPath = "'" + bashPath.Replace("'", "'\\''", StringComparison.Ordinal) + "'";
-      return $"[Line {offset} exceeds the 50KB limit. Use bash: sed -n '{offset}p' -- {quotedPath} | head -c 51200]";
+      string reason = pagingNoticeOverflow ? "cannot fit with the paging notice" : "exceeds the 50KB limit";
+      return $"[Line {offset} {reason}. Use bash: sed -n '{offset}p' -- {quotedPath} | head -c 51200]";
     }
     string text = string.Join("\n", output);
     if (cutoff is not null)

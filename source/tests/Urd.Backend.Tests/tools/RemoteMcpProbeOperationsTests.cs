@@ -57,7 +57,7 @@ public sealed class RemoteMcpProbeOperationsTests {
   }
 
   [Fact]
-  public async Task CallTruncatesLargeOutput() {
+  public async Task CallPreservesFullTextForSharedOutputLimit() {
     await using var peer = new Peer((method, _) => method == "tools/call"
       ? new { content = new[] { new { type = "text", text = new string('x', 40000) } } } : null);
     using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
@@ -66,8 +66,7 @@ public sealed class RemoteMcpProbeOperationsTests {
     var result = await RemoteMcpProbe.CallToolAsync(new() { Endpoint = peer.Endpoint }, "lookup", arguments.RootElement, deadline.Token);
 
     Assert.False(result.IsError);
-    Assert.Equal(32768, result.Text.Length);
-    Assert.EndsWith("[Output truncated]", result.Text);
+    Assert.Equal(new string('x', 40000), result.Text);
   }
 
   [Theory]

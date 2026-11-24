@@ -522,6 +522,9 @@ public sealed class ProviderSessionExecutionTests {
     const string firstDelta = "prefix ";
     string text = string.Concat(Enumerable.Repeat("some visible output ", 512));
     string arguments = JsonSerializer.Serialize(new { key = string.Concat(Enumerable.Repeat("tool argument ", 650)) });
+    // Below the model-facing output cap (ToolOutputLimits.MaxBytes) so the whole result is sent,
+    // while still large enough for the context estimate to move visibly when it lands.
+    string toolAnswer = string.Concat(Enumerable.Repeat("lookup result text ", 2_000));
     JsonObject call = JsonNode.Parse(ProviderModelStreams.Call)!.AsObject();
     call["arguments"] = arguments;
     string initialStream = ProviderModelStreams.Responses(
@@ -555,7 +558,7 @@ public sealed class ProviderSessionExecutionTests {
     var lookup = new TestAgentTool("lookup", async (_, _, cancellation) => {
       toolStarted.TrySetResult();
       await toolResult.Task.WaitAsync(cancellation);
-      return new(string.Concat(Enumerable.Repeat("lookup result text ", 4096)), []);
+      return new(toolAnswer, []);
     });
     await using var fixture = new ManagedSession(database, modelHandler);
     await fixture.OpenAsync(LlmApi.OpenAIResponses, new ToolCatalog([lookup]));
@@ -575,8 +578,8 @@ public sealed class ProviderSessionExecutionTests {
     Assert.Equal(new SessionContextUsage(190, SessionContextUsageSource.Measured),
         (await fixture.Session.ReadSnapshotAsync(timeout.Token)).ContextUsage);
     toolResult.SetResult();
-    long nextPrompt = await WaitForEstimateAsync(streamed + 5_000);
-    Assert.InRange(nextPrompt - streamed, 9_000, 16_000);
+    long nextPrompt = await WaitForEstimateAsync(streamed + 4_000);
+    Assert.InRange(nextPrompt - streamed, 4_000, 8_000);
     secondBody.SetResult();
     Assert.Equal(ExecutionOutcome.Completed, (await fixture.Session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value)
         .WaitAsync(timeout.Token)).Outcome);

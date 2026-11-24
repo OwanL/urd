@@ -80,9 +80,10 @@ public sealed class FileToolTests : IDisposable {
     var first = await Run(tool, new { path });
     Assert.False(first.IsError, first.Text);
     Assert.StartsWith("1\n2\n", first.Text, StringComparison.Ordinal);
-    Assert.Contains("offset=2001", first.Text, StringComparison.Ordinal);
-    Assert.Equal(2000, first.Details!.Value.GetProperty("outputLines").GetInt32());
-    Assert.Equal("2001\n2002\n2003", (await Run(tool, new { path, offset = 2001 })).Text);
+    int nextLine = first.Details!.Value.GetProperty("nextOffset").GetInt32();
+    Assert.Contains($"offset={nextLine}", first.Text, StringComparison.Ordinal);
+    Assert.InRange(first.Text.Split('\n').Length, 1998, 2000);
+    Assert.Equal(string.Join('\n', Enumerable.Range(nextLine, 2004 - nextLine)), (await Run(tool, new { path, offset = nextLine })).Text);
     Assert.Contains("offset=4", (await Run(tool, new { path, offset = 2, limit = 2 })).Text, StringComparison.Ordinal);
     Assert.True((await Run(tool, new { path, offset = 2004 })).IsError);
     Assert.True((await Run(tool, new { path, limit = 0 })).IsError);

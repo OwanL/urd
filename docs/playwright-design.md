@@ -195,9 +195,9 @@ no-login context in the same Chromium is a later follow-up to save memory.
 
 ## Prerequisite: one tool output cap
 
-Only bash and read cap their own output today; other tools, including MCP tools, do not. Before the
-browser work, apply one size cap with spill-to-file (the bash pattern, 50 KB / 2,000 lines) to every
-tool result in the shared tool runner, as a separate change.
+Implemented in the shared tool runner: keep at most 50 KiB of UTF-8 text / 2,000 lines inline,
+including the notice pointing to the complete temp file. This applies to text returned with images,
+errors and remote MCP calls. Do not truncate the source text in the MCP adapter.
 
 Existing pieces to unify rather than duplicate: `tools/runtime/ToolOutputLimits.cs` (the limits),
 `tools/shell/BashOutput.cs` (spill file and `fullOutputPath`), web_read's `spillPath`, and
@@ -207,7 +207,7 @@ results are not. The browser tool's own 12,000-character truncation goes away wi
 ## Qualification order
 
 1. Done: spike with real Google sign-in (see above).
-2. Prerequisite: shared tool output cap (separate change).
+2. Done: shared tool output cap (separate change).
 3. Browser host and `browser` tool, replacing the current tool.
 4. Viewer and handoff in the chat, including from a LAN device. Suggested slices: screencast and
    input over WebSocket in a docked window; chip, tabs and **Open browser**; page resizing;

@@ -84,7 +84,9 @@ public sealed class ManualCompactionTests {
   public async Task OversizedLatestToolResultKeepsWholeTurnAndCompactsOlderHistory() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
-    string toolResult = new('r', 100_000);
+    // Below the model-facing output cap (ToolOutputLimits.MaxBytes) but far above the retained-history
+    // token limit, so compaction still must keep the latest turn whole and cut older history.
+    string toolResult = new('r', 48_000);
     var tool = new TestAgentTool("lookup", (_, _, _) => Task.FromResult(new ToolOutput(toolResult, [])));
     int streamCalls = 0;
     int summaryCalls = 0;

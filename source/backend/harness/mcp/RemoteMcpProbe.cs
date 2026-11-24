@@ -56,15 +56,11 @@ public static class RemoteMcpProbe {
       return await WithClientAsync(options, created => guard = created, async client => {
         var result = await client.CallToolAsync(new CallToolRequestParams { Name = name, Arguments = values }, cancellationToken);
         var text = new StringBuilder();
-        bool truncated = false;
         foreach (var block in result.Content) {
           string value = block is TextContentBlock content ? content.Text : "[Unsupported non-text content]";
-          if (AppendOutput(text, value))
-            continue;
-          truncated = true;
-          break;
+          AppendOutput(text, value);
         }
-        if (!truncated && result.StructuredContent is JsonElement structured)
+        if (result.StructuredContent is JsonElement structured)
           AppendOutput(text, structured.GetRawText());
         return new RemoteMcpToolResult(text.ToString(), result.IsError == true);
       }, cancellationToken);
@@ -77,29 +73,15 @@ public static class RemoteMcpProbe {
     }
   }
 
-  private const int MaxOutputLength = 32768;
   private const int MaxToolCount = 500;
   private const int MaxToolPages = 10;
 
-  private static bool AppendOutput(StringBuilder output, string? value) {
+  private static void AppendOutput(StringBuilder output, string? value) {
     if (string.IsNullOrEmpty(value))
-      return true;
-    int separator = output.Length > 0 ? 1 : 0;
-    if (value.Length <= MaxOutputLength - output.Length - separator) {
-      if (separator != 0)
-        output.Append('\n');
-      output.Append(value);
-      return true;
-    }
-    const string marker = "[Output truncated]";
-    int contentLimit = MaxOutputLength - marker.Length;
-    if (output.Length > contentLimit)
-      output.Length = contentLimit;
-    if (output.Length < contentLimit && separator != 0)
+      return;
+    if (output.Length > 0)
       output.Append('\n');
-    output.Append(value.AsSpan(0, Math.Min(value.Length, contentLimit - output.Length)));
-    output.Append(marker);
-    return false;
+    output.Append(value);
   }
 
   private static async Task<IReadOnlyList<RemoteMcpToolDefinition>> ListToolsAsync(McpClient client, CancellationToken cancellationToken) {

@@ -22,6 +22,100 @@ namespace Urd.Backend.Tests.Hosting;
 public sealed class BrowserViewerLoopbackTests {
   [Fact]
   [Trait("Category", "BrowserViewerLoopback")]
+  public async Task PopupSignInPreservesDraftAndSessionAcrossRestartsUntilLogout() {
+    if (Environment.GetEnvironmentVariable("URD_TEST_BROWSER_VIEWER") != "1")
+      return;
+
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+    using var database = new TemporaryDatabase("urd-viewer-login");
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid owner = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    string root = Path.GetDirectoryName(database.Path)!;
+
+    // Each phase starts a new manager, host, browser and loopback server against the same profile.
+    for (int phase = 0; phase < 3; phase++) {
+      await using var manager = new SessionManager(store, _ => throw new InvalidOperationException("Must not run."));
+      manager.ConfigureBrowser(root);
+      BrowserHost host = manager.BrowserHost!;
+      Uri? origin = null;
+      var builder = WebApplication.CreateBuilder();
+      builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+      await using WebApplication app = builder.Build();
+      app.Use(next => new LocalBrowserGate(next, () => origin).InvokeAsync);
+      app.UseWebSockets();
+      app.MapGet("/fixture", () => Results.Content("""
+        <!doctype html><textarea id="draft" autofocus></textarea>
+        <button id="signin" onclick="window.open('/popup', 'signin', 'width=400,height=300')">Sign in</button>
+        <button id="logout" onclick="fetch('/logout', {method:'POST'}).then(update)">Log out</button>
+        <span id="status"></span>
+        <script>
+          function update() { document.querySelector('#status').textContent = document.cookie.includes('toy_session=yes') ? 'authorized' : 'logged out'; }
+          window.addEventListener('message', update); update();
+        </script>
+        """, "text/html"));
+      app.MapGet("/popup", () => Results.Content("""
+        <!doctype html><button id="authorize" onclick="location.href='/authorize'">Authorize</button>
+        """, "text/html"));
+      app.MapGet("/authorize", (HttpContext http) => {
+        http.Response.Cookies.Append("toy_session", "yes", new CookieOptions { Path = "/", SameSite = SameSiteMode.Lax });
+        return Results.Content("<script>opener.postMessage('authorized', location.origin); window.close()</script>", "text/html");
+      });
+      app.MapPost("/logout", (HttpContext http) => {
+        http.Response.Cookies.Delete("toy_session", new CookieOptions { Path = "/" });
+        return Results.Ok();
+      });
+      app.MapBrowserViewer(manager);
+      await app.StartAsync(deadline.Token);
+      origin = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
+
+      BrowserPage<IPage> original = await host.OpenAsync(owner, deadline.Token);
+      await original.Page.GotoAsync(new Uri(origin, "/fixture").ToString());
+      await original.Page.WaitForFunctionAsync(phase == 1
+        ? "document.querySelector('#status').textContent === 'authorized'"
+        : "document.querySelector('#status').textContent === 'logged out'", null, new() { Timeout = 10000 });
+      using ClientWebSocket viewer = await ConnectAsync(original.Id);
+      if (phase == 0) {
+        await SendAsync(viewer, "{\"type\":\"text\",\"text\":\"unsent draft\"}");
+        await original.Page.WaitForFunctionAsync("document.querySelector('#draft').value === 'unsent draft'", null, new() { Timeout = 10000 });
+        await ClickAsync(viewer, original.Page, "#signin");
+        BrowserPage<IPage>? popup;
+        while ((popup = host.Pages.List(owner).FirstOrDefault(item => item.Id != original.Id)) is null)
+          await Task.Delay(50, deadline.Token);
+        await popup.Page.WaitForSelectorAsync("#authorize");
+        using ClientWebSocket popupViewer = await ConnectAsync(popup.Id);
+        await ClickAsync(popupViewer, popup.Page, "#authorize");
+        await original.Page.WaitForFunctionAsync("document.querySelector('#status').textContent === 'authorized'", null, new() { Timeout = 10000 });
+        Assert.Equal("unsent draft", await original.Page.Locator("#draft").InputValueAsync());
+      } else if (phase == 1) {
+        await ClickAsync(viewer, original.Page, "#logout");
+        await original.Page.WaitForFunctionAsync("document.querySelector('#status').textContent === 'logged out'", null, new() { Timeout = 10000 });
+      }
+      viewer.Abort();
+      await app.StopAsync(deadline.Token);
+
+      async Task<ClientWebSocket> ConnectAsync(Guid pageId) {
+        var socket = new ClientWebSocket();
+        socket.Options.Proxy = null;
+        socket.Options.SetRequestHeader("Origin", origin.GetLeftPart(UriPartial.Authority));
+        var uri = new UriBuilder(new Uri(origin, $"/browser-view/{owner:D}/{pageId:D}")) { Scheme = "ws" }.Uri;
+        await socket.ConnectAsync(uri, deadline.Token);
+        byte[] buffer = new byte[1024 * 1024];
+        WebSocketReceiveResult frame = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), deadline.Token);
+        Assert.Equal(WebSocketMessageType.Binary, frame.MessageType);
+        return socket;
+      }
+      async Task ClickAsync(ClientWebSocket socket, IPage page, string selector) {
+        var box = await page.Locator(selector).BoundingBoxAsync();
+        Assert.NotNull(box);
+        await SendAsync(socket, System.Text.Json.JsonSerializer.Serialize(new { type = "click", x = box.X + box.Width / 2, y = box.Y + box.Height / 2 }));
+      }
+      async Task SendAsync(ClientWebSocket socket, string json) =>
+        await socket.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, deadline.Token);
+    }
+  }
+
+  [Fact]
+  [Trait("Category", "BrowserViewerLoopback")]
   public async Task RealPageStreamsAndAcceptsInputOnlyFromItsTreeAndOrigin() {
     if (Environment.GetEnvironmentVariable("URD_TEST_BROWSER_VIEWER") != "1")
       return;

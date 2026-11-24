@@ -173,6 +173,7 @@ public sealed class BrowserViewerRoutesTests {
     IKeyboard keyboard = Proxy<IKeyboard>(RecordInput);
     IPage page = Proxy<IPage>((method, args) => method.Name switch {
       "get_IsClosed" => false,
+      "get_ViewportSize" => new PageViewportSizeResult { Width = 1280, Height = 800 },
       "get_Context" => context,
       "get_Mouse" => mouse,
       "get_Keyboard" => keyboard,
@@ -191,6 +192,7 @@ public sealed class BrowserViewerRoutesTests {
       Assert.NotNull(frameHandler);
       frameHandler!(devTools, payload.RootElement);
       Assert.Equal(new byte[] { 1, 2, 3 }, await socket.Frames.Reader.ReadAsync(cancellation.Token));
+      Assert.Equal("Emulation.setVisibleSize", (await commands.Reader.ReadAsync(cancellation.Token)).Method);
       Assert.Equal("Page.startScreencast", (await commands.Reader.ReadAsync(cancellation.Token)).Method);
       var ack = await commands.Reader.ReadAsync(cancellation.Token);
       Assert.Equal("Page.screencastFrameAck", ack.Method);

@@ -167,6 +167,12 @@ internal sealed class BrowserViewerStreams {
       IPage page = stream.Page.Page;
       devTools ??= await page.Context.NewCDPSessionAsync(page);
       ICDPSession frames = devTools;
+      // A headless tab can have a smaller compositor surface than its layout viewport.
+      // Align capture on this target only, before subscribing; never resize the page to the viewer.
+      if (page.ViewportSize is { } viewport)
+        await frames.SendAsync("Emulation.setVisibleSize", new Dictionary<string, object> {
+          ["width"] = viewport.Width, ["height"] = viewport.Height
+        }).WaitAsync(PlaywrightTimeout);
       ICDPSessionEvent frameEvent = devTools.Event("Page.screencastFrame");
       EventHandler<JsonElement?> handler = (_, frame) => OnFrame(stream, frames, frame);
       frameEvent.OnEvent += handler;
@@ -178,7 +184,7 @@ internal sealed class BrowserViewerStreams {
         ObserveFailure(FirstFrameAsync(stream, frames, stream.FirstFrameEnd.Token));
         return frames;
       }
-    } catch (Exception error) when (IsBrowserFailure(error)) {
+    } catch (Exception error) when (error is TimeoutException || IsBrowserFailure(error)) {
       // The page or browser may have closed before the session was ready.
     }
     stream.UnsubscribeFrames?.Invoke();

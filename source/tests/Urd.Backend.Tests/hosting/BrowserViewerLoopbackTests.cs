@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -156,6 +157,21 @@ public sealed class BrowserViewerLoopbackTests {
     Assert.False(await page.EvaluateAsync<bool>("navigator.webdriver"));
     Assert.DoesNotContain("Headless", await page.EvaluateAsync<string>("navigator.userAgent"));
     await page.GotoAsync(new Uri(origin, "/fixture").ToString());
+    int[] initialViewport = await page.EvaluateAsync<int[]>("() => [innerWidth, innerHeight]");
+    Assert.Equal(new[] { 1280, 800 }, initialViewport);
+    ICDPSession devTools = await page.Context.NewCDPSessionAsync(page);
+    try {
+      JsonElement window = (await devTools.SendAsync("Browser.getWindowForTarget"))!.Value;
+      int windowId = window.GetProperty("windowId").GetInt32();
+      await devTools.SendAsync("Browser.setContentsSize", new Dictionary<string, object> {
+        ["windowId"] = windowId,
+        ["width"] = 500,
+        ["height"] = 145
+      });
+    } finally {
+      await devTools.DetachAsync();
+    }
+    Assert.Equal(initialViewport, await page.EvaluateAsync<int[]>("() => [innerWidth, innerHeight]"));
     string path = $"/browser-view/{primary:D}/{registered.Id:D}";
     using var http = new HttpClient(new SocketsHttpHandler { UseProxy = false }) { BaseAddress = origin };
     foreach ((string target, string? supplied, HttpStatusCode status) in new[] {
@@ -189,6 +205,11 @@ public sealed class BrowserViewerLoopbackTests {
     byte[] jpeg = frame.ToArray();
     Assert.True(jpeg.Length > 4 && jpeg[0] == 0xff && jpeg[1] == 0xd8 && jpeg[^2] == 0xff && jpeg[^1] == 0xd9);
     Assert.Equal((1280, 800), ReadJpegDimensions(jpeg));
+    using (SKBitmap bitmap = SKBitmap.Decode(jpeg)) {
+      SKColor contentColor = new(0xdd, 0xdd, 0xdd);
+      foreach ((int x, int y) in new[] { (1270, 10), (10, 790), (1270, 790) })
+        Assert.True(PixelMatches(bitmap.GetPixel(x, y), contentColor), $"Expected fixture content at desktop edge pixel ({x},{y}).");
+    }
 
     var streamedFrames = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest });
     Task readingFrames = ReadStreamFramesAsync();
@@ -245,9 +266,7 @@ public sealed class BrowserViewerLoopbackTests {
             if (color is not { } expected)
               return;
             using SKBitmap bitmap = SKBitmap.Decode(received);
-            SKColor pixel = bitmap.GetPixel(x, y);
-            if (Math.Abs(pixel.Red - expected.Red) < 25 && Math.Abs(pixel.Green - expected.Green) < 25
-                && Math.Abs(pixel.Blue - expected.Blue) < 25)
+            if (PixelMatches(bitmap.GetPixel(x, y), expected))
               return;
           }
         }
@@ -281,6 +300,10 @@ public sealed class BrowserViewerLoopbackTests {
 
     async Task SendAsync(string json) => await socket.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, deadline.Token);
   }
+
+  private static bool PixelMatches(SKColor actual, SKColor expected) =>
+    Math.Abs(actual.Red - expected.Red) < 25 && Math.Abs(actual.Green - expected.Green) < 25
+    && Math.Abs(actual.Blue - expected.Blue) < 25;
 
   private static (int Width, int Height) ReadJpegDimensions(ReadOnlySpan<byte> jpeg) {
     Assert.True(jpeg.Length >= 4 && jpeg[0] == 0xff && jpeg[1] == 0xd8, "Frame is not a JPEG.");

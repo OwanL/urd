@@ -517,6 +517,7 @@ public sealed class BrowserViewerStreamsTests {
       IKeyboard keyboard = Proxy<IKeyboard>((method, args) => RecordInput(method.Name, args[0]));
       IPage page = Proxy<IPage>((method, args) => method.Name switch {
         "get_IsClosed" => false,
+        "get_ViewportSize" => null,
         "get_Context" => context,
         "get_Mouse" => mouse,
         "get_Keyboard" => keyboard,

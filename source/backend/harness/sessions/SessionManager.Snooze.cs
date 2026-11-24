@@ -15,9 +15,21 @@ public sealed partial class SessionManager {
 
     PrimarySession session = await registry.RunOpenAsync(() => FindPrimary(sessionId, rejectChild: false)
         ?? throw new KeyNotFoundException($"Primary session '{sessionId}' does not exist."), cancellation);
-    SessionSnoozeStatus status = await session.SetSnoozeAsync(until, expectedUntil, registry.ThrowIfShuttingDown, cancellation);
-    if (status == SessionSnoozeStatus.Changed)
-      Notify(SessionSnoozeChanged, sessionId);
-    return status;
+    bool notified = false;
+    try {
+      SessionSnoozeStatus status = await session.SetSnoozeAsync(until, expectedUntil, registry.ThrowIfShuttingDown, id => {
+        notified = true;
+        Notify(SessionSnoozeChanged, id);
+        return CloseBrowserOwnerAsync(id);
+      }, cancellation);
+      if (status == SessionSnoozeStatus.Changed && until is null)
+        Notify(SessionSnoozeChanged, sessionId);
+      return status;
+    } catch {
+      // Cleanup may have rolled back an already-published snooze.
+      if (notified)
+        Notify(SessionSnoozeChanged, sessionId);
+      throw;
+    }
   }
 }

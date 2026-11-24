@@ -42,9 +42,11 @@ public sealed class SessionEventRoutesTests {
     using HttpResponseMessage registered = await UpdateAsync(server.Client, streamId,
         [missingId, sessionId], [missingId, sessionId]);
     Assert.Equal(HttpStatusCode.NoContent, registered.StatusCode);
-    var handshake = new (string Name, JsonElement Data)[3];
+    var handshake = new (string Name, JsonElement Data)[5];
     for (int index = 0; index < handshake.Length; index++)
       handshake[index] = await ReadEventAsync(reader);
+    Assert.Equal(2, handshake.Count(frame => frame.Name == "browser"));
+    Assert.Contains(handshake, frame => frame.Name == "browser" && frame.Data.GetProperty("session").GetGuid() == sessionId);
     JsonElement missing = Assert.Single(handshake, frame => frame.Name == "status"
         && frame.Data.GetProperty("session").GetGuid() == missingId).Data;
     Assert.Equal("unavailable", missing.GetProperty("status").GetString());
@@ -58,6 +60,7 @@ public sealed class SessionEventRoutesTests {
 
     using HttpResponseMessage unwatched = await UpdateAsync(server.Client, streamId, [sessionId], []);
     Assert.Equal(HttpStatusCode.NoContent, unwatched.StatusCode);
+    Assert.Equal(sessionId, (await ReadEventAsync(reader, "browser")).GetProperty("session").GetGuid());
     Assert.Equal("idle", (await ReadEventAsync(reader, "status")).GetProperty("status").GetString());
     await AssertNoEventAsync(reader, TimeSpan.FromMilliseconds(200));
 

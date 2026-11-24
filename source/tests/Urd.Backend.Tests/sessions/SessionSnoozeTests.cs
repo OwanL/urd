@@ -118,6 +118,79 @@ public sealed class SessionSnoozeTests {
   }
 
   [Fact]
+  public async Task RestoreWaitsForSnoozeCleanup() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(Complete);
+    await using var manager = new SessionManager(store, _ => client);
+    PrimarySession session = await manager.CreatePrimaryAsync();
+    var entered = Signal();
+    var release = Signal();
+    DateTimeOffset until = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds());
+    Task<SessionSnoozeStatus> snooze = session.SetSnoozeAsync(until, null, () => { }, async id => {
+      Assert.Equal(session.Id, id);
+      entered.TrySetResult();
+      await release.Task;
+    }, CancellationToken.None);
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      Task<SessionSnoozeStatus> restore = manager.SetSnoozeAsync(session.Id, null, until);
+      Assert.False(restore.IsCompleted);
+      Assert.NotEqual(MessageAcceptance.Accepted, (await session.SubmitUserMessageAsync(Input("Stay idle"))).Acceptance);
+      release.TrySetResult();
+      Assert.Equal(SessionSnoozeStatus.Changed, await snooze.WaitAsync(TestTimeout));
+      Assert.Equal(SessionSnoozeStatus.Changed, await restore.WaitAsync(TestTimeout));
+    } finally {
+      release.TrySetResult();
+    }
+  }
+
+  [Fact]
+  public async Task FailedSnoozeCleanupRollsBackAndCanBeRetried() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(Complete);
+    await using var manager = new SessionManager(store, _ => client);
+    PrimarySession session = await manager.CreatePrimaryAsync();
+    DateTimeOffset until = DateTimeOffset.FromUnixTimeMilliseconds(DateTimeOffset.UtcNow.AddHours(1).ToUnixTimeMilliseconds());
+    await Assert.ThrowsAsync<InvalidOperationException>(() => session.SetSnoozeAsync(until, null, () => { },
+        _ => Task.FromException(new InvalidOperationException("cleanup failed")), CancellationToken.None));
+    Assert.Empty((await manager.ReadSnoozedAsync()).Sessions);
+    int attempts = 0;
+    Assert.Equal(SessionSnoozeStatus.Changed, await session.SetSnoozeAsync(until, null, () => { }, _ => {
+      attempts++;
+      return Task.CompletedTask;
+    }, CancellationToken.None));
+    Assert.Equal(1, attempts);
+    Assert.Equal(SessionSnoozeStatus.Changed, await manager.SetSnoozeAsync(session.Id, null, until));
+  }
+
+  [Fact]
+  public async Task ShutdownWaitsForSnoozeCleanup() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(Complete);
+    await using var manager = new SessionManager(store, _ => client);
+    PrimarySession session = await manager.CreatePrimaryAsync();
+    var entered = Signal();
+    var release = Signal();
+    Task<SessionSnoozeStatus> snooze = session.SetSnoozeAsync(DateTimeOffset.UtcNow.AddHours(1), null, () => { }, async _ => {
+      entered.TrySetResult();
+      await release.Task;
+    }, CancellationToken.None);
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      Task shutdown = manager.ShutdownSessionsAsync();
+      Assert.False(shutdown.IsCompleted);
+      release.TrySetResult();
+      Assert.Equal(SessionSnoozeStatus.Changed, await snooze.WaitAsync(TestTimeout));
+      await shutdown.WaitAsync(TestTimeout);
+    } finally {
+      release.TrySetResult();
+    }
+  }
+
+  [Fact]
   public async Task OverdueSessionIsVisibleAndUnfencedAfterRestart() {
     using var database = new TemporaryDatabase();
     Guid id;

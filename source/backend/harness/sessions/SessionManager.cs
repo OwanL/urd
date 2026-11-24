@@ -30,11 +30,21 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
   private readonly SubagentRuns subagentRuns;
   private readonly AgentRecipients recipients;
   internal BrowserSetupProgress BrowserProgress { get; }
+  internal BrowserHost? BrowserHost { get; private set; }
+
+  // Configure before publishing session routes or creating tool catalogs.
+  public void ConfigureBrowser(string dataRoot) {
+    if (BrowserHost is not null)
+      throw new InvalidOperationException("Browser is already configured.");
+    BrowserHost = new BrowserHost(dataRoot, sessionId => HasPendingUserQuestionAsync(sessionId));
+    BrowserHost.Changed += OnBrowserChanged;
+  }
 
   public Guid BootId { get; } = Guid.NewGuid();
 
   public event Action<Guid>? SessionCreated;
   public event Action<Guid>? SessionClosed;
+  internal event Action<Guid>? BrowserChanged;
 
   // Notices are host-wide, ephemeral facts about the shared browser's first-use install.
 #pragma warning disable S3264 // BrowserSetupProgress invokes the subscribed callbacks.
@@ -53,7 +63,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
     RemoteMcpTools = remoteMcpTools;
-    subagentRuns = new SubagentRuns(store, this.preferences, modelSelector, agentQuestions, registry, CreateChild);
+    subagentRuns = new SubagentRuns(store, this.preferences, modelSelector, agentQuestions, registry, CreateChild, CloseBrowserOwnerAsync);
     recipients = new AgentRecipients(store, agentQuestions, registry);
     fallbackWorkingDirectory = Path.GetPathRoot(Environment.CurrentDirectory);
     if (toolSettings is null)
@@ -105,8 +115,14 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     if (result == SessionCloseStatus.Closed) {
       foreach (Guid deletedSession in deletedSessions!)
         Notify(SessionClosed, deletedSession);
-      // Keep ownership until process cleanup succeeds, so racing shutdown can join it too.
-      await session.KillProcessesAsync();
+      // Keep ownership until cleanup succeeds, so racing shutdown can join it too.
+      try {
+        await Task.WhenAll(session.KillProcessesAsync(), CloseBrowserOwnerAsync(sessionId));
+        session.CompleteCloseCleanup(null);
+      } catch (Exception failure) {
+        session.CompleteCloseCleanup(failure);
+        throw;
+      }
       await registry.UntrackPrimaryAsync(sessionId);
     }
     return result;
@@ -163,9 +179,13 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     // Fence every handle before a Stop callback can submit a user message to another session.
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.StopAcceptingUserMessagesAsync())));
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.StopExecutionAsync())));
+    await JoinAsync(Task.WhenAll(sessions.Select(session => session.JoinSnoozeCleanupAsync())));
+    await JoinAsync(Task.WhenAll(sessions.Select(session => session.JoinCloseCleanupAsync())));
     // Ordinary Stop preserves earlier survivors; backend shutdown kills them only after work drains.
     await JoinAsync(Task.WhenAll(sessions.Select(session => session.KillProcessesAsync())));
     await JoinAsync(browser.DisposeAsync().AsTask());
+    if (BrowserHost is { } browserHost)
+      await JoinAsync(browserHost.DisposeAsync().AsTask());
     if (failures.Count == 0)
       shutdown.TrySetResult();
     else {
@@ -216,8 +236,8 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
       new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
       new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this), .. (primary ? new AgentTool[] { new ProposeMcpConnectionTool() } : [])];
-    if (primary && playwright is { } automation)
-      shared = [.. shared, new PlaywrightTool(automation)];
+    if (BrowserHost is { } browserHost)
+      shared = [.. shared, new BrowserTool(browserHost)];
     if (toolSettings is null || !processTools)
       return new([.. injectedTools, .. shared]);
     if (!OperatingSystem.IsWindows())
@@ -238,6 +258,8 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
   bool IAgentQuestions.AnswerAgent(HarnessToolContext caller, string answer) => recipients.AnswerAgent(caller, answer);
 
   internal Task<bool> IsSubagentLiveAsync(Guid sessionId) => registry.IsChildAsync(sessionId);
+  private Task CloseBrowserOwnerAsync(Guid ownerId) => BrowserHost?.CloseOwnerAsync(ownerId) ?? Task.CompletedTask;
+
   internal AgentQuestions Questions => agentQuestions;
   internal IRemoteMcpTools? RemoteMcpTools { get; }
 

@@ -33,6 +33,23 @@ public sealed class LocalBrowserGateTests {
   }
 
   [Fact]
+  public async Task BrowserViewRequiresMatchingOriginWithoutChangingOtherRouteAdmission() {
+    Assert.Equal(StatusCodes.Status204NoContent,
+        await InvokeAsync(Request("/browser-view", suppliedOrigin: Authority)));
+
+    foreach (DefaultHttpContext rejected in new[] {
+      Request("/browser-view"),
+      Request("/browser-view", suppliedOrigin: "http://foreign.example"),
+      Request("/browser-view", suppliedOrigin: Authority + "/")
+    })
+      Assert.Equal(StatusCodes.Status403Forbidden, await InvokeAsync(rejected));
+
+    Assert.Equal(StatusCodes.Status204NoContent,
+        await InvokeAsync(Request("/api/sessions", marker: "browser")));
+    Assert.Equal(StatusCodes.Status204NoContent, await InvokeAsync(Request("/health")));
+  }
+
+  [Fact]
   public async Task LanAdmissionRequiresEnabledBoundHostPrivatePeerAndMatchingOrigin() {
     var access = new LanAccess();
     access.Replace(new[] { IPAddress.Parse("192.168.1.10"), IPAddress.Parse("169.254.1.2") });
@@ -43,6 +60,7 @@ public sealed class LocalBrowserGateTests {
     foreach (DefaultHttpContext accepted in new[] {
       Request("/api/sessions", marker: "browser", host: host, remoteAddress: peer),
       Request("/api/sessions", marker: "browser", host: host, suppliedOrigin: lanOrigin, remoteAddress: peer),
+      Request("/browser-view", host: host, suppliedOrigin: lanOrigin, remoteAddress: peer),
       Request("/health", host: "169.254.1.2:43127", remoteAddress: IPAddress.Parse("169.254.5.6")),
       Request("/health", host: host, remoteAddress: peer.MapToIPv6()),
       Request("/health", host: host, remoteAddress: IPAddress.Loopback),
@@ -58,7 +76,8 @@ public sealed class LocalBrowserGateTests {
       Request("/health", host: host, remoteAddress: IPAddress.Parse("192.0.2.1")),
       Request("/health", host: host, remoteAddress: IPAddress.Parse("2001:db8::1")),
       Request("/health", remoteAddress: peer),
-      Request("/api/sessions", host: host, remoteAddress: peer)
+      Request("/api/sessions", host: host, remoteAddress: peer),
+      Request("/browser-view", host: host, remoteAddress: peer)
     })
       Assert.Equal(StatusCodes.Status403Forbidden, await InvokeAsync(rejected, access: access));
 

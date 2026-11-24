@@ -20,6 +20,7 @@
     <PackageReference Include="Duende.IdentityModel" Version="8.1.0" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.23.0" />
     <InternalsVisibleTo Include="Urd.Backend.Tests" />
+    <InternalsVisibleTo Include="Urd.Server" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="harness/usage/model-price-seed.json" LogicalName="Urd.ModelPriceSeed.json" />

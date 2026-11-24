@@ -62,6 +62,7 @@ public sealed class SessionEventQueueTests {
     var queue = new SessionEventQueue();
     Guid session = Guid.NewGuid();
     queue.Enqueue(Message("change", session, 1));
+    queue.Enqueue(Message("browser", session, 1));
     queue.RemoveSessionUpdates(session);
 
     SessionSseRead heartbeat = await queue.ReadNextAsync(TimeSpan.FromMilliseconds(20), CancellationToken.None);

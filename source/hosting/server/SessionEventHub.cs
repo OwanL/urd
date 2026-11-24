@@ -17,6 +17,7 @@ internal sealed class SessionEventHub : IDisposable {
     sessions.SessionCreated += OnSessionCreated;
     sessions.SessionSnoozeChanged += OnSessionSnoozeChanged;
     sessions.BrowserProvisioningChanged += OnBrowserProvisioningChanged;
+    sessions.BrowserChanged += OnBrowserChanged;
   }
 
   internal bool TryCreate(out SessionEventPage page) {
@@ -38,6 +39,17 @@ internal sealed class SessionEventHub : IDisposable {
   internal bool TryGet(Guid streamId, out SessionEventPage page) {
     lock (gate)
       return pages.TryGetValue(streamId, out page!);
+  }
+
+  private void OnBrowserChanged(Guid sessionId) {
+    SessionEventPage[] current;
+    lock (gate) {
+      if (disposed)
+        return;
+      current = pages.Values.ToArray();
+    }
+    foreach (SessionEventPage page in current)
+      page.EnqueueBrowserChange(sessionId);
   }
 
   private void OnSessionCreated(Guid sessionId) =>
@@ -98,6 +110,7 @@ internal sealed class SessionEventHub : IDisposable {
     sessions.SessionCreated -= OnSessionCreated;
     sessions.SessionSnoozeChanged -= OnSessionSnoozeChanged;
     sessions.BrowserProvisioningChanged -= OnBrowserProvisioningChanged;
+    sessions.BrowserChanged -= OnBrowserChanged;
     foreach (SessionEventPage page in current)
       page.Close();
   }

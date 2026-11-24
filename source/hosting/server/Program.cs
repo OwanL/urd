@@ -82,8 +82,6 @@ internal static class Program {
       Func<MessageMarkdownService>? createMarkdown = null, bool warmInstructions = false) {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(onReady);
-    bool playwrightSupported = PlaywrightConfig.Supported;
-    IReadOnlyList<Uri> localBrowserOrigins = playwrightSupported ? PlaywrightConfig.ReadLocalOrigins() : [];
     Directory.CreateDirectory(options.DataRoot);
     // Keep the file, not a stale PID. The OS releases exclusive ownership when this handle/process exits.
     var directoryLock = new FileStream(Path.Combine(options.DataRoot, "urd.lock"),
@@ -125,10 +123,7 @@ internal static class Program {
           ?? throw new InvalidOperationException("The server is not ready."), "/mcp/auth/callback"), options.DataRoot);
       manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient,
           tools, preferences, new ModelSelector(providers), mcp);
-      if (playwrightSupported)
-        manager.ConfigurePlaywright(options.DataRoot,
-            () => Volatile.Read(ref servedOrigin)?.Port ?? 0,
-            localBrowserOrigins);
+      manager.ConfigureBrowser(options.DataRoot);
       eventHub = new SessionEventHub(manager);
       // Initial local limits reuse the exercised workload; transient parser memory is separate.
       markdown = createMarkdown?.Invoke() ?? new MessageMarkdownService(new(
@@ -138,7 +133,6 @@ internal static class Program {
       var lanAccess = new LanAccess();
       app = CreateApplication([IPAddress.Loopback], options.Port, manager, providers, eventHub, markdown, preferences, store,
           () => Volatile.Read(ref servedOrigin), lanAccess, errorLog, lan: false);
-      app.MapSessionBrowserSignInRoutes(manager, playwrightSupported);
       app.MapMcpConnections(mcp);
       app.MapLanHosting(() => lanHosting, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -150,22 +144,19 @@ internal static class Program {
       var origin = new Uri(addresses.Addresses.Single());
       lanHosting = new LanHosting(lanAccess, origin.Port, () => LanAccess.AvailableAddresses(), async available => {
         IDisposable? mcpPause = null;
-        IDisposable? browserPause = null;
         WebApplication? lanApp = null;
         try {
           mcpPause = mcp.PauseAgentToolsForLan();
-          browserPause = manager.PausePlaywrightForLan();
           lanApp = CreateApplication(available, origin.Port, manager, providers, eventHub, markdown,
               preferences, store, () => Volatile.Read(ref servedOrigin), lanAccess, errorLog, lan: true);
           await lanApp.StartAsync(stopping);
-          return new LanListener(lanApp, browserPause, mcpPause);
+          return new LanListener(lanApp, mcpPause);
         } catch {
           try {
             if (lanApp is not null)
               await lanApp.DisposeAsync();
           } finally {
             mcpPause?.Dispose();
-            browserPause?.Dispose();
           }
           throw;
         }
@@ -253,6 +244,7 @@ internal static class Program {
     WebApplication app = builder.Build();
     app.Use(next => new HttpErrorLogging(next, errorLog, lan).InvokeAsync);
     app.Use(next => new LocalBrowserGate(next, servedOrigin, lanAccess).InvokeAsync);
+    app.UseWebSockets();
     if (Directory.Exists(Path.Combine(AppContext.BaseDirectory, "wwwroot"))) {
       app.UseDefaultFiles();
       app.UseStaticFiles(new StaticFileOptions {
@@ -267,6 +259,7 @@ internal static class Program {
         context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true
             ? Results.BadRequest() : Results.NoContent());
     app.MapSessions(manager);
+    app.MapBrowserViewer(manager);
     app.MapFiles();
     app.MapEvents(manager, eventHub);
     if (markdown is not null)
@@ -278,7 +271,7 @@ internal static class Program {
     return app;
   }
 
-  private sealed class LanListener(WebApplication app, IDisposable? browserPause, IDisposable mcpPause) : IAsyncDisposable {
+  private sealed class LanListener(WebApplication app, IDisposable mcpPause) : IAsyncDisposable {
     public async ValueTask DisposeAsync() {
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
       try {
@@ -291,7 +284,6 @@ internal static class Program {
         } finally {
           // LAN admission is already closed before the listener is disposed.
           mcpPause.Dispose();
-          browserPause?.Dispose();
         }
       }
     }

@@ -8,7 +8,7 @@ internal readonly record struct SessionSseRead(SessionSseEvent? Event, bool Clos
 internal sealed class SessionEventQueue {
   internal const int MaxOpenSessions = 128;
   internal const int MaxCreations = 128;
-  private const int MaxPendingEvents = MaxOpenSessions * 2 + MaxCreations;
+  private const int MaxPendingEvents = MaxOpenSessions * 3 + MaxCreations;
   private readonly object gate = new();
   private readonly LinkedList<SessionSseEvent> pending = new();
   private readonly Dictionary<EventKey, LinkedListNode<SessionSseEvent>> byKey = new();
@@ -55,7 +55,7 @@ internal sealed class SessionEventQueue {
       LinkedListNode<SessionSseEvent>? node = pending.First;
       while (node is not null) {
         LinkedListNode<SessionSseEvent>? next = node.Next;
-        if (node.Value.Session == sessionId && node.Value.Name is "status" or "change") {
+        if (node.Value.Session == sessionId && node.Value.Name is "status" or "change" or "browser") {
           byKey.Remove(new EventKey(node.Value.Name, sessionId));
           pending.Remove(node);
           removed = true;

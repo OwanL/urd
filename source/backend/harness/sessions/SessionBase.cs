@@ -27,6 +27,7 @@ public abstract partial class SessionBase {
   private readonly SessionStatus status;
   private bool acceptingUserMessages = true;
   private volatile bool closed;
+  private TaskCompletionSource? closeCleanup;
   private bool needsAttention;
   private bool? hasAcceptedInput;
 
@@ -81,11 +82,13 @@ public abstract partial class SessionBase {
   internal long HistoryRevision { get; private set; }
 
   // Caller holds the session lock.
-  internal bool IsAcceptingWork => !closed && acceptingUserMessages && !messageEditing.IsEditing && !IsSnoozed;
+  internal bool IsAcceptingWork => !closed && acceptingUserMessages && !messageEditing.IsEditing && !IsSnoozed
+      && snoozeCleanup is null;
   // Caller holds the session lock.
   internal bool CanStartWork => IsAcceptingWork && !needsAttention;
   // Caller holds the session lock.
-  internal bool CanAcceptEdits => !closed && acceptingUserMessages && !needsAttention && !IsSnoozed;
+  internal bool CanAcceptEdits => !closed && acceptingUserMessages && !needsAttention && !IsSnoozed
+      && snoozeCleanup is null;
 
   internal void ThrowIfClosed() {
     if (closed)
@@ -116,9 +119,27 @@ public abstract partial class SessionBase {
       return (SessionCloseStatus.NotFound, null);
 
     closed = true;
+    closeCleanup = new(TaskCreationOptions.RunContinuationsAsynchronously);
     Questions.ForgetRecipient();
     notifications.Close();
     return (SessionCloseStatus.Closed, deletedSessions);
+  }
+
+  internal void CompleteCloseCleanup(Exception? failure) {
+    if (failure is null)
+      closeCleanup!.TrySetResult();
+    else {
+      closeCleanup!.TrySetException(failure);
+      _ = closeCleanup.Task.Exception;
+    }
+  }
+
+  internal async Task JoinCloseCleanupAsync() {
+    Task? pending;
+    using (await sessionLock.AcquireAsync())
+      pending = closeCleanup?.Task;
+    if (pending is not null)
+      await pending;
   }
 
   // Caller holds the session lock.

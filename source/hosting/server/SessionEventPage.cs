@@ -30,6 +30,13 @@ internal sealed class SessionEventPage : IDisposable {
 
   internal void EnqueueBroadcast(SessionSseEvent message) => queue.Enqueue(message);
 
+  internal void EnqueueBrowserChange(Guid session) {
+    lock (gate) {
+      if (!disposed && registrations.ContainsKey(session))
+        queue.Enqueue(new SessionSseEvent("browser", session, new { session }));
+    }
+  }
+
   internal async Task UpdateAsync(SessionManager sessions, Guid[] open, Guid[] watched, CancellationToken cancellation) {
     await updateGate.WaitAsync(cancellation);
     try {
@@ -65,6 +72,8 @@ internal sealed class SessionEventPage : IDisposable {
           if (registration is null) {
             registration = new Registration(this, sessionId, watchedIds.Contains(sessionId));
             registrations.Add(sessionId, registration);
+            // Reconcile changes that occurred before this registration became visible.
+            queue.Enqueue(new SessionSseEvent("browser", sessionId, new { session = sessionId }));
           }
           refresh.Add((session, registration, added));
         }

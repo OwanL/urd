@@ -10,7 +10,7 @@ namespace Urd.Core.Sessions;
 // Runs bounded subagents and settles their resources.
 internal sealed class SubagentRuns(
     UrdStore store, PreferenceManager preferences, ModelSelector? modelSelector, AgentQuestions questions,
-    SessionRegistry registry, Func<SessionRecord, int, SubagentSession> createChild) {
+    SessionRegistry registry, Func<SessionRecord, int, SubagentSession> createChild, Func<Guid, Task> closeBrowserOwner) {
   // Runs one bounded child to its final report. The child is registered under the shutdown fence
   // before any of its work runs, cancellation stops and joins it, and its processes and registry
   // entry are released only after the run finishes. Cross-session waits hold no manager locks.
@@ -33,9 +33,9 @@ internal sealed class SubagentRuns(
 
   private async Task CleanupChildAsync(SubagentSession child) {
     try {
-      await child.KillProcessesAsync();
+      await Task.WhenAll(child.KillProcessesAsync(), closeBrowserOwner(child.Id));
     } catch (Exception failure) {
-      throw new ToolCleanupException("Subagent process cleanup failed.", failure);
+      throw new ToolCleanupException("Subagent resource cleanup failed.", failure);
     } finally {
       questions.CloseRecipient(child.Id);
       await registry.UntrackChildAsync(child.Id);

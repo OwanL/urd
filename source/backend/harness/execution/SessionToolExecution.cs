@@ -32,14 +32,7 @@ internal sealed class SessionToolExecution {
   private bool IsStopping => stopToken.IsCancellationRequested;
   internal bool HasRunningBackgroundTools => Volatile.Read(ref runningBackgroundTools) != 0;
   internal void CancelBackgroundTools() => pendingToolCalls.RequestCancelExecution(ExecutionId);
-  internal async Task JoinAsync() {
-    try {
-      await pendingToolCalls.JoinExecutionAsync(ExecutionId);
-    } finally {
-      if (tools.OfType<PlaywrightTool>().FirstOrDefault() is { } browser)
-        await browser.ReleaseAsync(ExecutionId);
-    }
-  }
+  internal Task JoinAsync() => pendingToolCalls.JoinExecutionAsync(ExecutionId);
 
   // The effective background mode is decided before the durable claim: a tool whose arguments
   // force it, such as an ask with wake false, must be claimed as background work directly.

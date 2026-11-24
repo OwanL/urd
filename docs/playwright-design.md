@@ -1,7 +1,7 @@
 # Browser automation
 
 Status: browser host, session tool and viewer implemented. Google sign-in passed in the spike;
-the finished app is not release-qualified until the real-account checks below pass. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
+release is blocked: the isolated staged-build check failed at Google sign-in on 2026-11-24. Replaces the shipped preview (shared profile, restricted tool, headed sign-in
 relaunch, network proxy). The earlier design and probes are in Git history before this revision.
 
 ## Goals
@@ -169,7 +169,9 @@ more per loaded page. Idle shutdown is what keeps resource use low.
 
 - Qualification difference: the spike changed how the automated browser identified itself. The
   implementation currently uses standard Playwright identification. The spike's successful result
-  is not evidence that this configuration passes; a refusal in the finished app blocks release.
+  does not carry over: on 2026-11-24 the owner opened Gmail in the staged viewer on a fresh
+  profile and Google reported that the browser may not be secure. The refusal does not identify
+  the exact trigger. Restart persistence and third-party Google sign-in were not reached.
 - Risk: Chrome for Testing identifies as plain Chromium, and a pinned build ages between Urd
   updates. If Google starts refusing it, revisit using an installed browser.
 - If Google still refuses headless, run headed with an off-screen window; the screencast viewer

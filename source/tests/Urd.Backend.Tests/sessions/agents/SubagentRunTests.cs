@@ -757,6 +757,148 @@ public sealed class SubagentRunTests {
     }
   }
 
+  [Theory]
+  [InlineData("option A", true)]
+  [InlineData("a freeform answer", true)]
+  [InlineData("option A", false)]
+  public async Task AnsweredUserQuestionIsInheritedTogetherAndReinherited(string answer, bool nestedIncludesUserInput) {
+    const string question = "Which route should we take?";
+    const string context = "The northern route is shorter.";
+    const string unrelated = "unrelated tool result";
+    const string nestedTask = "nested question mission";
+    ScriptedRequest? childRequest = null;
+    ScriptedRequest? nestedRequest = null;
+    var client = new ScriptedChatClient(Route);
+    var lookup = new TestAgentTool("lookup", (_, _, _) => Task.FromResult(new ToolOutput(unrelated, [])));
+    await using var fixture = await SubagentRunFixture.OpenAsync(client, [lookup]);
+    new PreferenceManager(fixture.Store).SetMaxSubagentDepth(2);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid execution = await StartParentAsync(parent);
+    try {
+      PendingUserQuestion pending = Assert.Single(await WaitForQuestionsAsync(parent));
+      Assert.Equal(question, pending.Question);
+      Assert.True(await parent.AnswerUserQuestionAsync(pending.Id, answer));
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+      Assert.NotNull(childRequest);
+      Assert.NotNull(nestedRequest);
+      SubagentContextEntry[] childEntries = ContextEntries(childRequest);
+      string exchange = Assert.Single(childEntries, entry => entry.Tool == "ask_user").Text;
+      using JsonDocument details = JsonDocument.Parse(exchange);
+      JsonElement agent = details.RootElement.GetProperty("agent");
+      Assert.Equal(question, agent.GetProperty("question").GetString());
+      Assert.Equal(context, agent.GetProperty("context").GetString());
+      Assert.Equal(new[] { "option A", "option B" }, agent.GetProperty("choices").EnumerateArray().Select(choice => choice.GetString()));
+      Assert.Equal(answer, details.RootElement.GetProperty("human").GetProperty("answer").GetString());
+      string childContext = string.Join('\n', childEntries.Select(entry => entry.Text));
+      Assert.DoesNotContain(unrelated, childContext, StringComparison.Ordinal);
+      SubagentContextEntry[] nestedEntries = ContextEntries(nestedRequest);
+      if (nestedIncludesUserInput) {
+        string nestedContext = string.Join('\n', nestedEntries.Select(entry => entry.Text));
+        Assert.Equal(exchange, Assert.Single(nestedEntries, entry => entry.Tool == "ask_user").Text);
+        Assert.DoesNotContain(unrelated, nestedContext, StringComparison.Ordinal);
+      } else {
+        Assert.Empty(nestedEntries);
+      }
+    } finally {
+      await parent.StopExecutionAsync().WaitAsync(TestTimeout);
+    }
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      if (request.Purpose == "title")
+        return TextUpdates([ChildTitle], token);
+      if (request.Purpose != "conversation")
+        return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+      if (HasUserText(request, nestedTask)) {
+        nestedRequest = request;
+        return TextUpdates([ChildReport], token);
+      }
+      if (HasUserText(request, AssignmentTask)) {
+        if (HasResult(request, "inner-question"))
+          return TextUpdates([ChildReport], token);
+        childRequest = request;
+        return ToolBatch(token, Delegate("inner-question", nestedTask, includeUserInput: nestedIncludesUserInput));
+      }
+      if (HasResult(request, "outer-question"))
+        return Complete(token);
+      if (HasResult(request, "lookup-question"))
+        return ToolBatch(token, Delegate("outer-question", AssignmentTask, includeUserInput: true));
+      if (HasResult(request, "ask-question"))
+        return ToolBatch(token, new FunctionCallContent("lookup-question", "lookup"));
+      return ToolBatch(token, new FunctionCallContent("ask-question", "ask_user", new Dictionary<string, object?> {
+        ["question"] = question, ["context"] = context, ["choices"] = new[] { "option A", "option B" }
+      }));
+    }
+  }
+
+  [Fact]
+  public async Task PendingBackgroundUserQuestionAndItsFutureAnswerAreNotInherited() {
+    const string question = "A background question?";
+    const string context = "Background question context";
+    const string answer = "future answer";
+    var allowDelegation = Signal();
+    var childEntered = Signal();
+    var releaseChild = Signal();
+    ScriptedRequest? childRequest = null;
+    var client = new ScriptedChatClient(Route);
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    PrimarySession parent = await fixture.Manager.CreatePrimaryAsync();
+    Guid execution = await StartParentAsync(parent);
+    try {
+      PendingUserQuestion pending = Assert.Single(await WaitForQuestionsAsync(parent));
+      allowDelegation.TrySetResult();
+      await childEntered.Task.WaitAsync(TestTimeout);
+      Assert.True(await parent.AnswerUserQuestionAsync(pending.Id, answer));
+      releaseChild.TrySetResult();
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await parent.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout)).Outcome);
+      Assert.NotNull(childRequest);
+      SubagentContextEntry[] entries = ContextEntries(childRequest);
+      Assert.DoesNotContain(entries, entry => entry.Text.Contains(question, StringComparison.Ordinal)
+          || entry.Text.Contains(context, StringComparison.Ordinal) || entry.Text.Contains(answer, StringComparison.Ordinal));
+    } finally {
+      allowDelegation.TrySetResult();
+      releaseChild.TrySetResult();
+      await parent.StopExecutionAsync().WaitAsync(TestTimeout);
+    }
+
+    IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
+      if (request.Purpose == "title")
+        return TextUpdates([ChildTitle], token);
+      if (request.Purpose != "conversation")
+        return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
+      if (HasUserText(request, AssignmentTask)) {
+        childRequest = request;
+        return Paused(childEntered, releaseChild, token);
+      }
+      if (HasResult(request, "pending-delegate"))
+        return Complete(token);
+      if (HasResult(request, "pending-ask"))
+        return DelegateAfterPending(token);
+      return ToolBatch(token, new FunctionCallContent("pending-ask", "ask_user", new Dictionary<string, object?> {
+        ["question"] = question, ["context"] = context, ["choices"] = Array.Empty<string>(), ["background"] = true
+      }));
+    }
+
+    async IAsyncEnumerable<ChatResponseUpdate> DelegateAfterPending(
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken token) {
+      await allowDelegation.Task.WaitAsync(token);
+      await foreach (ChatResponseUpdate update in ToolBatch(token,
+          Delegate("pending-delegate", AssignmentTask, includeUserInput: true)))
+        yield return update;
+    }
+  }
+
+  private static async Task<PendingUserQuestion[]> WaitForQuestionsAsync(PrimarySession parent) {
+    using var timeout = new CancellationTokenSource(TestTimeout);
+    while (true) {
+      PendingUserQuestion[] questions = await parent.ReadUserQuestionsAsync(timeout.Token);
+      if (questions.Length > 0)
+        return questions;
+      await Task.Delay(10, timeout.Token);
+    }
+  }
+
   [Fact]
   public async Task ListsOpenPrimariesAndNestedChildrenThroughTheToolUntilDisposal() {
     const string nestedTask = "nested list mission";

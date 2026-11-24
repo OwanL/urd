@@ -9,6 +9,23 @@ namespace Urd.Backend.Tests.Context;
 
 public sealed class SubagentContextTests {
   [Fact]
+  public void ReadsAnsweredQuestionsAndClaimedBackgroundAnswersBeforeSteeredInput() {
+    using var fixture = new ParentHistory();
+    fixture.AddAnsweredQuestions();
+    SubagentContextEntry[] entries = Entries(fixture.Read());
+    Assert.Collection(entries.Where(entry => entry.CallId is not null || entry.Text == "steered human"),
+        entry => {
+          Assert.Equal(("foreground-question", "ask_user"), (entry.CallId, entry.Tool));
+          Assert.Contains("foreground answer", entry.Text, StringComparison.Ordinal);
+        },
+        entry => {
+          Assert.Equal(("background-question", "ask_user"), (entry.CallId, entry.Tool));
+          Assert.Contains("background answer", entry.Text, StringComparison.Ordinal);
+        },
+        entry => Assert.Equal(("human input", "steered human"), (entry.Source, entry.Text)));
+  }
+
+  [Fact]
   public void ReadsOnlyAttemptedHumanInputsAcrossCompactionAndLegacyInheritedContext() {
     using var fixture = new ParentHistory();
     string? captured = fixture.Read();
@@ -33,6 +50,8 @@ public sealed class SubagentContextTests {
   private sealed class ParentHistory : IDisposable {
     private const string Result = """{"text":"answer","images":[],"details":null,"isError":false}""";
     private const string EmptyArguments = "{}";
+    private const string ForegroundQuestionArguments = """{"question":"foreground question","choices":[]}""";
+    private const string BackgroundQuestionArguments = """{"question":"background question","choices":[]}""";
     private readonly TemporaryDatabase storage = new();
     private readonly Database database;
     private readonly SubagentContextReader reader;
@@ -78,6 +97,27 @@ public sealed class SubagentContextTests {
     }
 
     internal Guid Sender { get; } = Guid.NewGuid();
+
+    internal void AddAnsweredQuestions() {
+      Guid completion = Guid.NewGuid();
+      storage.Execute($"""
+        INSERT INTO execution_tools (run_id, request_id, call_index, call_id, name, started, background, outcome,
+            arguments_json, result_json) VALUES
+          ('{parent.ExecutionId}', '{old}', 0, 'foreground-question', 'ask_user', 1, 0, 0,
+              '{ForegroundQuestionArguments}', '{Result.Replace("answer", "foreground answer", StringComparison.Ordinal)}'),
+          ('{parent.ExecutionId}', '{old}', 1, 'background-question', 'ask_user', 1, 1, 0,
+              '{BackgroundQuestionArguments}', '{Result.Replace("answer", "background answer", StringComparison.Ordinal)}');
+        INSERT INTO execution_tool_completions
+            (completion_id, session_id, history_revision, request_id, call_id, created_at, claimed_request_id, published)
+        VALUES ('{completion}', '{parent.SessionId}', 0, '{old}', 'background-question',
+            '2026-11-12T00:00:00+00:00', '{invoking}', 1);
+        INSERT INTO execution_messages
+            (session_id, history_revision, run_id, role, message_id, request_id, call_id, tool_name)
+        VALUES ('{parent.SessionId}', 0, '{parent.ExecutionId}', 2, '{Guid.NewGuid()}', '{old}', 'foreground-question', 'ask_user'),
+            ('{parent.SessionId}', 0, '{parent.ExecutionId}', 2, '{Guid.NewGuid()}', '{old}', 'background-question', 'ask_user'),
+            ('{parent.SessionId}', 0, '{parent.ExecutionId}', 3, '{completion}', '{old}', 'background-question', 'ask_user');
+        """);
+    }
 
     internal string? Read(string callId = "delegating") => reader.Read(parent, invoking, callId);
 

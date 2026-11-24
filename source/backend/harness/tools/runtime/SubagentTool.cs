@@ -13,7 +13,7 @@ internal sealed class SubagentTool : HarnessTool {
       "type": "object",
       "properties": {
         "bucket": { "type": "string", "enum": ["small", "medium", "large"] },
-        "includeUserInput": { "type": "boolean", "description": "Include human input from the parent history as quoted context." },
+        "includeUserInput": { "type": "boolean", "description": "Include the parent’s human messages and answered ask_user questions, with their context and choices, as quoted history." },
         "task": { "type": "string" }
       },
       "required": ["bucket", "includeUserInput", "task"],

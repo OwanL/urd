@@ -118,15 +118,14 @@ The backend implements these runtime behaviors:
 ## Backend model-facing tool surface (settled 2026-11-16; implemented)
 
 The backend exposes the settled `subagent`, `list_agents`, `ask_agent` and `answer_agent` tools.
-At this milestone there was no `ask_user` tool; it has since been implemented. User-mode context
-retains human inputs rather than agent questions or answers.
+The `ask_user` tool also lets the calling session ask the human directly.
 
 ### `subagent`
 
 | Input | Meaning |
 | --- | --- |
 | `bucket` | `small`, `medium`, or `large`; selects a model in the requested tier under the session's enabled-provider policy. |
-| `includeUserInput` | Required boolean. `false` inherits no parent history; `true` adds only human messages from the parent's history that appeared in attempted requests, quoted as context. Nested inheritance remains limited to human inputs and requires opting in at each delegation. There is no recent-history option. |
+| `includeUserInput` | Required boolean. `false` inherits no parent history; `true` includes human messages and answered `ask_user` exchanges visible to the parent at delegation. The agent's question, context and choices accompany the human answer as quoted history. Nested delegation must opt in again. There is no recent-history option. |
 | `task` | Self-contained assignment. The parent is responsible for including the context the child needs. |
 
 The caller does **not** supply a title. Creation runs Urd's existing pruning/title prepass and

@@ -30,6 +30,7 @@ internal sealed class BrowserViewerStreams {
   private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(2);
   private static readonly TimeSpan PlaywrightTimeout = TimeSpan.FromSeconds(10);
   private static readonly TimeSpan ActivityInterval = TimeSpan.FromSeconds(1);
+  private static readonly TimeSpan InitialFrameGrace = TimeSpan.FromMilliseconds(300);
   private static readonly CloseReason PageClosed = new(WebSocketCloseStatus.NormalClosure, "The page closed.");
   private static readonly CloseReason BrowserTimedOut = new(WebSocketCloseStatus.InternalServerError, "The browser did not respond.");
 
@@ -170,21 +171,30 @@ internal sealed class BrowserViewerStreams {
       EventHandler<JsonElement?> handler = (_, frame) => OnFrame(stream, frames, frame);
       frameEvent.OnEvent += handler;
       stream.UnsubscribeFrames = () => frameEvent.OnEvent -= handler;
-      await devTools.SendAsync("Page.startScreencast", new Dictionary<string, object> {
+      if (await TryCdpAsync(() => StartScreencastAsync(frames))) {
+        // Chromium only streams frames on compositor damage, so a quiet page would otherwise
+        // stream nothing. One bounded screenshot after a grace covers that; no polling.
+        stream.FirstFrameEnd = new();
+        ObserveFailure(FirstFrameAsync(stream, frames, stream.FirstFrameEnd.Token));
+        return frames;
+      }
+    } catch (Exception error) when (IsBrowserFailure(error)) {
+      // The page or browser may have closed before the session was ready.
+    }
+    stream.UnsubscribeFrames?.Invoke();
+    stream.UnsubscribeFrames = null;
+    if (devTools is not null)
+      await TryCdpAsync(devTools.DetachAsync);
+    return null;
+  }
+
+  private static Task<JsonElement?> StartScreencastAsync(ICDPSession devTools) =>
+      devTools.SendAsync("Page.startScreencast", new Dictionary<string, object> {
         ["format"] = "jpeg",
         ["quality"] = FrameQuality,
         ["maxWidth"] = FrameBound,
         ["maxHeight"] = FrameBound
       });
-      return devTools;
-    } catch (Exception error) when (IsBrowserFailure(error)) {
-      stream.UnsubscribeFrames?.Invoke();
-      stream.UnsubscribeFrames = null;
-      if (devTools is not null)
-        await DetachOrParkAsync(stream.Input, devTools);
-      return null;
-    }
-  }
 
   private void OnFrame(PageStream stream, ICDPSession devTools, JsonElement? frame) {
     if (frame is not { ValueKind: JsonValueKind.Object } payload)
@@ -209,6 +219,44 @@ internal sealed class BrowserViewerStreams {
       if (stream.Closed || stream.Retiring is not null)
         return;
       stream.Latest = jpeg;
+      stream.FirstFrameEnd?.Cancel();
+      foreach (Viewer viewer in stream.Viewers)
+        viewer.Outgoing.Writer.TryWrite(jpeg);
+    }
+  }
+
+  // Chromium streams screencast frames only on compositor damage, so a page that stays
+  // quiet leaves its viewers blank. After a short grace with no frame, take one screenshot
+  // and publish it if the stream still has none. This is one attempt, never polled: the
+  // next compositor damage restarts the real stream of frames.
+  private async Task FirstFrameAsync(PageStream stream, ICDPSession devTools, CancellationToken cancellation) {
+    try {
+      await Task.Delay(InitialFrameGrace, cancellation);
+    } catch (OperationCanceledException) {
+      return;
+    }
+    lock (gate) {
+      // A modal may have stalled the browser work; issuing a screenshot there would queue
+      // behind it for the input lane. The one-shot skips rather than waits.
+      if (stream.Closed || stream.Retiring is not null || stream.Latest is not null || IsInputBlocked(stream.Input))
+        return;
+    }
+    JsonElement? screenshot;
+    try {
+      screenshot = await devTools.SendAsync("Page.captureScreenshot", new Dictionary<string, object> {
+        ["format"] = "jpeg",
+        ["quality"] = FrameQuality
+      });
+    } catch (Exception error) when (IsBrowserFailure(error)) {
+      return;
+    }
+    if (screenshot is not { } response || DecodeFrame(response) is not { } jpeg)
+      return;
+    lock (gate) {
+      // A compositor frame or retirement during the screenshot wins; never publish over it.
+      if (stream.Closed || stream.Retiring is not null || stream.Latest is not null || IsInputBlocked(stream.Input))
+        return;
+      stream.Latest = jpeg;
       foreach (Viewer viewer in stream.Viewers)
         viewer.Outgoing.Writer.TryWrite(jpeg);
     }
@@ -224,7 +272,8 @@ internal sealed class BrowserViewerStreams {
   }
 
   private static byte[]? DecodeFrame(JsonElement frame) {
-    if (!frame.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.String
+    if (frame.ValueKind != JsonValueKind.Object
+        || !frame.TryGetProperty("data", out JsonElement data) || data.ValueKind != JsonValueKind.String
         || data.GetString() is not { Length: > 0 and <= MaxEncodedFrameLength } encoded)
       return null;
     try {
@@ -264,13 +313,16 @@ internal sealed class BrowserViewerStreams {
     try {
       ICDPSession? devTools = await stream.Starting;
       stream.UnsubscribeFrames?.Invoke();
-      if (devTools is not null && !stream.Page.Page.IsClosed)
-        await QuietlyAsync(() => devTools.SendAsync("Page.stopScreencast"));
-      // A resize still applying (even if queued inside BrowserInteraction) must finish
-      // before admitting another generation or restoring the viewport.
+      // Retirement prevents a pending viewport change from issuing a restart. If a
+      // restart was already issued, finish that transition before sending the final stop.
+      bool canStop = await stream.Restarting;
+      bool stopped = canStop && devTools is not null && !stream.Page.Page.IsClosed
+          && await TryCdpAsync(() => devTools.SendAsync("Page.stopScreencast"));
+      // A viewport change still applying must finish before admitting another generation
+      // or restoring the viewport. Don't wait for unrelated input, which may open a modal.
       await stream.LastResize.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
       if (devTools is not null && !stream.Page.Page.IsClosed)
-        await DetachOrParkAsync(stream.Input, devTools);
+        await DetachOrParkAsync(stream.Input, devTools, stopped);
     } finally {
       lock (gate) {
         if (Forget(stream)) {
@@ -285,13 +337,13 @@ internal sealed class BrowserViewerStreams {
   private static bool IsInputBlocked(PageInput input) =>
       !input.Command.IsCompleted || input.Interaction.PendingDialog is not null;
 
-  private static async Task DetachOrParkAsync(PageInput input, ICDPSession devTools) {
-    // Chromium stops and restarts a screencast during a modal, but detach can stall.
-    // Reuse the stopped session on reopen instead of accumulating stalled detaches.
-    if (IsInputBlocked(input))
+  private static async Task DetachOrParkAsync(PageInput input, ICDPSession devTools, bool stopped) {
+    // Chromium can stop and start during a modal, but detach can stall. Only reuse a
+    // cleanly stopped session: a timed-out CDP command can still complete on the old one.
+    if (stopped && IsInputBlocked(input))
       input.ParkedSession = devTools;
     else
-      await QuietlyAsync(devTools.DetachAsync);
+      await TryCdpAsync(devTools.DetachAsync);
   }
 
   // Caller holds the gate after removing the last stream. Keep one deferred restore per page,
@@ -352,6 +404,7 @@ internal sealed class BrowserViewerStreams {
       return false;
     streams.Remove(stream.Page.Id);
     stream.Page.Page.Close -= stream.CloseHandler;
+    stream.FirstFrameEnd?.Cancel();
     return true;
   }
 
@@ -490,7 +543,7 @@ internal sealed class BrowserViewerStreams {
     }
   }
 
-  private static async Task RunInputAsync(PageStream stream, ViewerInput input, BrowserInteraction interaction,
+  private async Task RunInputAsync(PageStream stream, ViewerInput input, BrowserInteraction interaction,
       Task dialog, CancellationToken cancellation) {
     // Install the real command in the lane before issuing browser work.
     await Task.Yield();
@@ -518,10 +571,53 @@ internal sealed class BrowserViewerStreams {
         case InputKind.Resize:
           stream.Resized = true;
           await interaction.ResizeAsync(input.Width, input.Height);
+          await RestartAfterResizeAsync(stream);
           break;
       }
     } catch (Exception error) when (IsBrowserFailure(error)) {
       // An invalid key or a closing page needn't end the stream.
+    }
+  }
+
+  private async Task RestartAfterResizeAsync(PageStream stream) {
+    if (await stream.Starting is not { } devTools)
+      return;
+    Task<bool> restarting;
+    lock (gate) {
+      if (stream.Closed || stream.Retiring is not null || stream.RestartFailed)
+        return;
+      // Chromium can keep scaling damage to the old capture surface after a viewport
+      // change. Restart on the same session, in the lane that orders viewer inputs.
+      restarting = stream.Restarting = RestartScreencastAsync(stream, devTools);
+    }
+    if (!await restarting) {
+      lock (gate) {
+        stream.RestartFailed = true;
+        foreach (Viewer viewer in stream.Viewers)
+          viewer.End(BrowserTimedOut);
+      }
+    }
+  }
+
+  private async Task<bool> RestartScreencastAsync(PageStream stream, ICDPSession devTools) {
+    await Task.Yield();
+    if (!await TryCdpAsync(() => devTools.SendAsync("Page.stopScreencast")))
+      return false;
+    lock (gate) {
+      if (stream.Closed || stream.Retiring is not null)
+        return true;
+    }
+    return await TryCdpAsync(() => StartScreencastAsync(devTools));
+  }
+
+  private static async Task<bool> TryCdpAsync(Func<Task> issue) {
+    try {
+      Task command = issue();
+      ObserveFailure(command);
+      await command.WaitAsync(PlaywrightTimeout);
+      return true;
+    } catch (Exception error) when (error is TimeoutException || IsBrowserFailure(error)) {
+      return false;
     }
   }
 
@@ -592,8 +688,11 @@ internal sealed class BrowserViewerStreams {
     public EventHandler<IPage>? CloseHandler { get; set; }
     public Action? UnsubscribeFrames { get; set; }
     public Task LastResize { get; set; } = Task.CompletedTask;
+    public Task<bool> Restarting { get; set; } = Task.FromResult(true);
+    public bool RestartFailed { get; set; }
     public Task<ICDPSession?> Starting { get; set; } = null!;
     public TaskCompletionSource? Retiring { get; set; }
+    public CancellationTokenSource? FirstFrameEnd { get; set; }
     public byte[]? Latest { get; set; }
     public bool Closed { get; set; }
     public bool Resized { get; set; }

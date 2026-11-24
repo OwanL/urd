@@ -13,6 +13,8 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Hosting;
 
 public sealed class BrowserViewerStreamsTests {
+  private static readonly byte[] ScreenshotBytes = [1, 2, 3, 4];
+
   [Fact]
   public async Task InvalidUnicodeClosesAsInvalidPayload() {
     using var database = new TemporaryDatabase();
@@ -48,7 +50,7 @@ public sealed class BrowserViewerStreamsTests {
     try {
       await browser.ExpectAsync("Page.startScreencast");
       first.SendText("{\"type\":\"resize\",\"width\":640,\"height\":480}");
-      await browser.ExpectAsync("640x480");
+      await browser.ExpectResizeAsync("640x480");
       first.SendText(openingInput);
       await browser.ExpectAsync(openingMethod);
       Assert.NotNull(browser.Interaction.PendingDialog);
@@ -123,6 +125,66 @@ public sealed class BrowserViewerStreamsTests {
     }
   }
 
+  [Theory]
+  [InlineData("Page.stopScreencast", false)]
+  [InlineData("Page.startScreencast", false)]
+  [InlineData("Page.startScreencast", true)]
+  public async Task RetirementHandlesAnInFlightRestart(string heldCommand, bool timeOut) {
+    using var database = new TemporaryDatabase();
+    await using var host = new BrowserHost(Path.GetDirectoryName(database.Path)!, _ => Task.FromResult(false));
+    var browser = new ViewerPage(host);
+    var held = Signal();
+    using var first = new ViewerSocket();
+    using var second = new ViewerSocket();
+    using var end = new CancellationTokenSource();
+    Task firstWatch = browser.WatchAsync(first, end.Token);
+    Task secondWatch = Task.CompletedTask;
+    try {
+      await browser.ExpectAsync("Page.startScreencast");
+      int heldCalls = 0;
+      browser.OnCdp = command => command == heldCommand && Interlocked.Increment(ref heldCalls) == 1
+          ? held.Task : Task.CompletedTask;
+      first.SendText("{\"type\":\"resize\",\"width\":640,\"height\":480}");
+      await browser.ExpectAsync("640x480");
+      await browser.ExpectAsync("Page.stopScreencast");
+      if (heldCommand == "Page.startScreencast")
+        await browser.ExpectAsync("Page.startScreencast");
+      else
+        browser.OpenDialog();
+      if (timeOut) {
+        await first.ServerClosing.Task.WaitAsync(TimeSpan.FromSeconds(12));
+        Assert.Equal(WebSocketCloseStatus.InternalServerError, first.CloseStatus);
+        first.CloseFromClient();
+        await firstWatch.WaitAsync(TestTimeout);
+        // The timed-out start can't leave the page waiting to retire or be reused.
+        await browser.ExpectAsync("DetachAsync");
+        await browser.ExpectAsync("1280x800");
+      } else {
+        first.CloseFromClient();
+        await firstWatch.WaitAsync(TestTimeout);
+        await browser.ExpectNoCommandAsync();
+        held.TrySetResult();
+        await browser.ExpectAsync("Page.stopScreencast");
+        if (heldCommand == "Page.startScreencast") {
+          await browser.ExpectAsync("DetachAsync");
+          await browser.ExpectAsync("1280x800");
+        }
+      }
+      secondWatch = browser.WatchAsync(second, end.Token);
+      await browser.ExpectAsync("Page.startScreencast");
+      Assert.Equal(heldCommand == "Page.stopScreencast" ? 1 : 2, browser.SessionCount);
+      held.TrySetResult();
+      second.CloseFromClient();
+      await secondWatch.WaitAsync(TestTimeout);
+      await browser.ExpectAsync("Page.stopScreencast");
+    } finally {
+      held.TrySetResult();
+      await browser.Interaction.RespondDialogAsync(accept: true, promptText: null);
+      await end.CancelAsync();
+      await DrainAsync(firstWatch, secondWatch);
+    }
+  }
+
   [Fact]
   public async Task ReopenWaitsForAnIssuedDeferredRestore() {
     using var database = new TemporaryDatabase();
@@ -148,7 +210,7 @@ public sealed class BrowserViewerStreamsTests {
     try {
       await browser.ExpectAsync("Page.startScreencast");
       first.SendText("{\"type\":\"resize\",\"width\":640,\"height\":480}");
-      await browser.ExpectAsync("640x480");
+      await browser.ExpectResizeAsync("640x480");
       first.SendText("{\"type\":\"click\",\"x\":1,\"y\":2}");
       await browser.ExpectAsync("ClickAsync");
       first.CloseFromClient();
@@ -172,7 +234,7 @@ public sealed class BrowserViewerStreamsTests {
       await browser.ExpectNoCommandAsync();
       restore.TrySetResult();
       await browser.ExpectAsync("Page.startScreencast");
-      await browser.ExpectAsync("800x600");
+      await browser.ExpectResizeAsync("800x600");
     } finally {
       click.TrySetResult();
       restore.TrySetResult();
@@ -192,7 +254,7 @@ public sealed class BrowserViewerStreamsTests {
     try {
       await browser.ExpectAsync("Page.startScreencast");
       socket.SendText("{\"type\":\"resize\",\"width\":640,\"height\":480}");
-      await browser.ExpectAsync("640x480");
+      await browser.ExpectResizeAsync("640x480");
       browser.OpenDialog();
       socket.CloseFromClient();
       await watching.WaitAsync(TestTimeout);
@@ -271,6 +333,152 @@ public sealed class BrowserViewerStreamsTests {
     }
   }
 
+  [Fact]
+  public async Task QuietPageReceivesExactlyOneInitialFrame() {
+    using var database = new TemporaryDatabase();
+    await using var host = new BrowserHost(Path.GetDirectoryName(database.Path)!, _ => Task.FromResult(false));
+    var browser = new ViewerPage(host);
+    using var socket = new ViewerSocket();
+    using var end = new CancellationTokenSource();
+    Task watching = browser.WatchAsync(socket, end.Token);
+    try {
+      await browser.ExpectAsync("Page.startScreencast");
+      // No compositor event: the stream stays empty until the bounded initial shot.
+      using var beforeGrace = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(
+          () => socket.Frames.Reader.WaitToReadAsync(beforeGrace.Token).AsTask());
+      await browser.ExpectAsync("Page.captureScreenshot");
+      using var frameArrived = new CancellationTokenSource(TestTimeout);
+      Assert.Equal(ScreenshotBytes, await socket.Frames.Reader.ReadAsync(frameArrived.Token));
+      // One shot only: a still quiet page is never polled for more.
+      await Task.Delay(TimeSpan.FromMilliseconds(500), end.Token);
+      await browser.ExpectNoCommandAsync();
+      Assert.False(socket.Frames.Reader.TryRead(out _));
+    } finally {
+      await end.CancelAsync();
+      await DrainAsync(watching);
+    }
+  }
+
+  [Fact]
+  public async Task CompositorFrameSuppressesTheInitialShot() {
+    using var database = new TemporaryDatabase();
+    await using var host = new BrowserHost(Path.GetDirectoryName(database.Path)!, _ => Task.FromResult(false));
+    var browser = new ViewerPage(host);
+    using var socket = new ViewerSocket();
+    using var end = new CancellationTokenSource();
+    Task watching = browser.WatchAsync(socket, end.Token);
+    try {
+      await browser.ExpectAsync("Page.startScreencast");
+      browser.EmitFrame(7, Convert.ToBase64String([4, 5, 6]));
+      using var frameArrived = new CancellationTokenSource(TestTimeout);
+      Assert.Equal(new byte[] { 4, 5, 6 }, await socket.Frames.Reader.ReadAsync(frameArrived.Token));
+      await browser.ExpectAsync("Page.screencastFrameAck");
+      // The one-shot window passes: the real frame already seeded the stream.
+      await Task.Delay(TimeSpan.FromMilliseconds(500), end.Token);
+      await browser.ExpectNoCommandAsync();
+      Assert.False(socket.Frames.Reader.TryRead(out _));
+    } finally {
+      await end.CancelAsync();
+      await DrainAsync(watching);
+    }
+  }
+
+  [Fact]
+  public async Task InitialShotDoesNotPublishOverACompositorFrame() {
+    using var database = new TemporaryDatabase();
+    await using var host = new BrowserHost(Path.GetDirectoryName(database.Path)!, _ => Task.FromResult(false));
+    var browser = new ViewerPage(host);
+    var held = Signal();
+    browser.OnCdp = command => command == "Page.captureScreenshot" ? held.Task : Task.CompletedTask;
+    using var socket = new ViewerSocket();
+    using var end = new CancellationTokenSource();
+    Task watching = browser.WatchAsync(socket, end.Token);
+    try {
+      await browser.ExpectAsync("Page.startScreencast");
+      await browser.ExpectAsync("Page.captureScreenshot");
+      browser.EmitFrame(9, Convert.ToBase64String([5, 6, 7]));
+      using var frameArrived = new CancellationTokenSource(TestTimeout);
+      Assert.Equal(new byte[] { 5, 6, 7 }, await socket.Frames.Reader.ReadAsync(frameArrived.Token));
+      await browser.ExpectAsync("Page.screencastFrameAck");
+      // The stale screenshot resolves after the compositor frame and must not replace it.
+      held.TrySetResult();
+      await browser.ExpectNoCommandAsync();
+      Assert.False(socket.Frames.Reader.TryRead(out _));
+    } finally {
+      held.TrySetResult();
+      await end.CancelAsync();
+      await DrainAsync(watching);
+    }
+  }
+
+  [Fact]
+  public async Task ModalSuppressesTheInitialShotWithoutPolling() {
+    using var database = new TemporaryDatabase();
+    await using var host = new BrowserHost(Path.GetDirectoryName(database.Path)!, _ => Task.FromResult(false));
+    var browser = new ViewerPage(host);
+    using var socket = new ViewerSocket();
+    using var end = new CancellationTokenSource();
+    Task watching = browser.WatchAsync(socket, end.Token);
+    try {
+      await browser.ExpectAsync("Page.startScreencast");
+      browser.OpenDialog();
+      // The one-shot window passes under the modal: no screenshot is issued and none is
+      // queued behind it, nor retried once the dialog is gone.
+      await Task.Delay(TimeSpan.FromMilliseconds(500), end.Token);
+      await browser.ExpectNoCommandAsync();
+      Assert.True(await browser.Interaction.RespondDialogAsync(accept: true, promptText: null));
+      await Task.Delay(TimeSpan.FromMilliseconds(300), end.Token);
+      await browser.ExpectNoCommandAsync();
+      Assert.False(socket.Frames.Reader.TryRead(out _));
+    } finally {
+      await browser.Interaction.RespondDialogAsync(accept: true, promptText: null);
+      await end.CancelAsync();
+      await DrainAsync(watching);
+    }
+  }
+
+  [Fact]
+  public async Task RetiredStreamIsNotSeededByItsInitialShot() {
+    using var database = new TemporaryDatabase();
+    await using var host = new BrowserHost(Path.GetDirectoryName(database.Path)!, _ => Task.FromResult(false));
+    var browser = new ViewerPage(host);
+    var held = Signal();
+    browser.OnCdp = command => command == "Page.captureScreenshot" ? held.Task : Task.CompletedTask;
+    using var first = new ViewerSocket();
+    using var second = new ViewerSocket();
+    using var end = new CancellationTokenSource();
+    Task firstWatch = browser.WatchAsync(first, end.Token);
+    Task secondWatch = Task.CompletedTask;
+    try {
+      await browser.ExpectAsync("Page.startScreencast");
+      await browser.ExpectAsync("Page.captureScreenshot");
+      first.CloseFromClient();
+      await firstWatch.WaitAsync(TestTimeout);
+      await browser.ExpectAsync("Page.stopScreencast");
+      await browser.ExpectAsync("DetachAsync");
+      Assert.False(first.Frames.Reader.TryRead(out _));
+      // The late screenshot resolves after its stream retired; the reopened generation
+      // starts clean and gets its own initial frame.
+      held.TrySetResult();
+      browser.OnCdp = _ => Task.CompletedTask;
+      secondWatch = browser.WatchAsync(second, end.Token);
+      await browser.ExpectAsync("Page.startScreencast");
+      using var frameArrived = new CancellationTokenSource(TestTimeout);
+      Assert.Equal(ScreenshotBytes, await second.Frames.Reader.ReadAsync(frameArrived.Token));
+      await browser.ExpectAsync("Page.captureScreenshot");
+      second.CloseFromClient();
+      await secondWatch.WaitAsync(TestTimeout);
+      await browser.ExpectAsync("Page.stopScreencast");
+      await browser.ExpectAsync("DetachAsync");
+      Assert.Equal(2, browser.SessionCount);
+    } finally {
+      held.TrySetResult();
+      await end.CancelAsync();
+      await DrainAsync(firstWatch, secondWatch);
+    }
+  }
+
   private static async Task DrainAsync(params Task[] watching) =>
       await Task.WhenAll(watching).WaitAsync(TestTimeout).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
 
@@ -318,6 +526,7 @@ public sealed class BrowserViewerStreamsTests {
         _ when method.Name.StartsWith("add_", StringComparison.Ordinal) || method.Name.StartsWith("remove_", StringComparison.Ordinal) => null,
         _ => throw new NotSupportedException(method.Name)
       });
+      ScreenshotData = Convert.ToBase64String(ScreenshotBytes);
       registered = host.Pages.Register(Guid.NewGuid(), page).Page;
       Interaction = BrowserInteraction.For(page);
     }
@@ -325,11 +534,19 @@ public sealed class BrowserViewerStreamsTests {
     public BrowserPage<IPage> Page => registered;
     public BrowserInteraction Interaction { get; }
     public int SessionCount => Volatile.Read(ref sessionCount);
+    // Base64 payload returned for Page.captureScreenshot; null answers with nothing.
+    public string? ScreenshotData { get; set; }
     public Func<string, Task> OnInput { get; set; } = _ => Task.CompletedTask;
     public Func<string, Task> OnCdp { get; set; } = _ => Task.CompletedTask;
-    public void EmitFrame(int sessionId) => FrameReceived?.Invoke(this, JsonSerializer.SerializeToElement(new { sessionId }));
+    public void EmitFrame(int sessionId, string? data = null) =>
+        FrameReceived?.Invoke(this, JsonSerializer.SerializeToElement(new { sessionId, data }));
     public Task WatchAsync(WebSocket socket, CancellationToken cancellation) =>
         streams.RunAsync(host, registered.OwnerId, registered, socket, cancellation);
+    public async Task ExpectResizeAsync(string dimensions) {
+      await ExpectAsync(dimensions);
+      await ExpectAsync("Page.stopScreencast");
+      await ExpectAsync("Page.startScreencast");
+    }
     public async Task ExpectAsync(string expected) {
       using var timeout = new CancellationTokenSource(TestTimeout);
       Assert.Equal(expected, await commands.Reader.ReadAsync(timeout.Token));
@@ -359,7 +576,9 @@ public sealed class BrowserViewerStreamsTests {
     private async Task<JsonElement?> RecordCdp(string command) {
       commands.Writer.TryWrite(command);
       await OnCdp(command);
-      return null;
+      return command == "Page.captureScreenshot" && ScreenshotData is { } encoded
+          ? JsonSerializer.SerializeToElement(new { data = encoded })
+          : null;
     }
 
     private Task RecordInput(string command, object? argument = null) {
@@ -408,7 +627,11 @@ public sealed class BrowserViewerStreamsTests {
       return Task.CompletedTask;
     }
     public override Task SendAsync(ArraySegment<byte> buffer, WebSocketMessageType messageType, bool endOfMessage,
-        CancellationToken cancellationToken) => Task.CompletedTask;
+        CancellationToken cancellationToken) {
+      Frames.Writer.TryWrite(buffer.ToArray());
+      return Task.CompletedTask;
+    }
+    public Channel<byte[]> Frames { get; } = Channel.CreateUnbounded<byte[]>();
     public override async Task<WebSocketReceiveResult> ReceiveAsync(ArraySegment<byte> buffer, CancellationToken cancellationToken) {
       SocketMessage message;
       do {

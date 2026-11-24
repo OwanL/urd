@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { chromium, type Browser, type Page } from "playwright";
 import { createServer, type ViteDevServer } from "vite";
+import type { BrowserPage } from "../../chat/browser/BrowserPage.ts";
 
 let server: ViteDevServer;
 let browser: Browser;
@@ -64,6 +65,70 @@ async function pointer(type: string, x: number, y: number, pointerType = "touch"
   );
 }
 
+interface ViewerWindow {
+  viewerStream: {
+    open(): void;
+    close(): void;
+    frame(blob: Blob): void;
+  };
+  viewerDecode: {
+    stallNext(): void;
+    release(): void;
+    reset(): void;
+    stats(): { decodeRequests: number; inFlight: number; peakConcurrent: number };
+  };
+  viewerShowPage(page: BrowserPage): void;
+}
+
+async function decodeStats() {
+  return page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.stats());
+}
+
+// Paints a solid block into a fresh canvas and hands the encoded blob to the
+// page stream, exactly as the socket would deliver it.
+async function deliverFrame(fill: string): Promise<void> {
+  await page.evaluate((source) => {
+    const image = document.createElement("canvas");
+    image.width = 4;
+    image.height = 4;
+    const context = image.getContext("2d")!;
+    context.fillStyle = source;
+    context.fillRect(0, 0, 4, 4);
+    return new Promise<void>((resolve) => {
+      image.toBlob((blob) => {
+        (window as unknown as ViewerWindow).viewerStream.frame(blob!);
+        resolve();
+      });
+    });
+  }, fill);
+}
+
+async function canvasState(): Promise<{ width: number; pixel: number[] }> {
+  return page.locator("canvas").evaluate((canvas) => {
+    const frame = canvas as HTMLCanvasElement;
+    return {
+      width: frame.width,
+      pixel: [...frame.getContext("2d")!.getImageData(0, 0, 1, 1).data.slice(0, 4)],
+    };
+  });
+}
+
+function waitForCanvasPixel(color: [number, number, number]) {
+  return page.waitForFunction(([red, green, blue]) => {
+    const canvas = document.querySelector("canvas");
+    if (!canvas) return false;
+    const pixel = canvas.getContext("2d")!.getImageData(0, 0, 1, 1).data;
+    return pixel[0] === red && pixel[1] === green && pixel[2] === blue;
+  }, color);
+}
+
+async function waitForDecodesIdle() {
+  await page.waitForFunction(() => {
+    const decode = (window as unknown as ViewerWindow).viewerDecode;
+    return decode.stats().inFlight === 0;
+  });
+}
+
 void test("pointer taps map to frame coordinates and clamp outside the canvas", async () => {
   await commands();
   await pointer("pointerdown", 20, 10, "mouse");
@@ -120,4 +185,88 @@ void test("AltGr printable characters are forwarded once, but shortcuts remain l
   });
   assert.deepEqual(result, [true, false]);
   assert.deepEqual(await commands(), [{ type: "text", text: "@" }]);
+});
+
+// Frame-pipeline regressions; these run after the pointer tests so the canvas
+// keeps its setup size until a real frame is painted.
+
+void test("status stays visible until the first frame is actually drawn", async () => {
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.reset());
+  const status = page.locator(".browser-page-status");
+  assert.equal(await status.textContent(), "Waiting for first frame.");
+  await page.evaluate(() =>
+    (window as unknown as ViewerWindow).viewerStream.frame(
+      new Blob([new Uint8Array([21, 7, 4, 0])], { type: "image/jpeg" }),
+    ),
+  );
+  // Undecodable frames are dropped; the page is still waiting.
+  assert.equal(await status.textContent(), "Waiting for first frame.");
+  await deliverFrame("rgb(32, 96, 160)");
+  await waitForCanvasPixel([32, 96, 160]);
+  assert.equal(await status.count(), 0);
+  assert.deepEqual(await decodeStats(), { decodeRequests: 2, inFlight: 0, peakConcurrent: 1 });
+});
+
+void test("busy streams decode one frame at a time and keep only the latest", async () => {
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.reset());
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.stallNext());
+  await deliverFrame("rgb(200, 32, 32)");
+  await deliverFrame("rgb(32, 200, 32)");
+  await deliverFrame("rgb(64, 32, 255)");
+  // The stalled decode is the only one in flight; later frames just replace
+  // the queued one instead of piling up.
+  assert.deepEqual(await decodeStats(), { decodeRequests: 1, inFlight: 1, peakConcurrent: 1 });
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.release());
+  await waitForCanvasPixel([64, 32, 255]);
+  assert.deepEqual(await decodeStats(), { decodeRequests: 2, inFlight: 0, peakConcurrent: 1 });
+});
+
+void test("in-flight frames from the previous page are discarded on page switches", async () => {
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.reset());
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.stallNext());
+  await deliverFrame("rgb(200, 32, 32)");
+  await page.evaluate(() =>
+    (window as unknown as ViewerWindow).viewerShowPage({
+      id: "page-2",
+      ownerId: "owner",
+      title: "Second",
+      url: "https://example.org",
+      active: true,
+    }),
+  );
+  await page.locator(".browser-page-status").waitFor();
+  assert.equal(
+    await page.locator(".browser-page-status").textContent(),
+    "Waiting for first frame.",
+  );
+  await page
+    .locator("canvas")
+    .waitForFunction((canvas) => (canvas as HTMLCanvasElement).width === 1);
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.release());
+  await waitForDecodesIdle();
+  // The stalled frame belonged to the old page and is never painted.
+  assert.deepEqual(await canvasState(), { width: 1, pixel: [0, 0, 0, 0] });
+  await deliverFrame("rgb(32, 160, 96)");
+  await waitForCanvasPixel([32, 160, 96]);
+});
+
+void test("in-flight frames from a dropped connection are discarded on reconnect", async () => {
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.reset());
+  const status = page.locator(".browser-page-status");
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.stallNext());
+  await deliverFrame("rgb(200, 32, 32)");
+  await deliverFrame("rgb(200, 160, 32)");
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerStream.close());
+  assert.equal(await status.textContent(), "Connection lost.");
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerStream.open());
+  assert.equal(await status.textContent(), "Waiting for first frame.");
+  // Reconnecting before decode resolves must not allow an old or queued frame
+  // to paint as the first frame of the new connection.
+  await page.evaluate(() => (window as unknown as ViewerWindow).viewerDecode.release());
+  await waitForDecodesIdle();
+  assert.deepEqual(await canvasState(), { width: 4, pixel: [32, 160, 96, 255] });
+  assert.equal(await status.textContent(), "Waiting for first frame.");
+  assert.deepEqual(await decodeStats(), { decodeRequests: 1, inFlight: 0, peakConcurrent: 1 });
+  await deliverFrame("rgb(64, 32, 255)");
+  await waitForCanvasPixel([64, 32, 255]);
 });

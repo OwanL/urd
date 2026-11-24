@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
 import { pageTitle, readBrowserPages, type BrowserPage } from "./BrowserPage.ts";
@@ -80,6 +80,28 @@ export function BrowserViewer({
   }, [openRequest, pages, active]);
 
   const floating = mode === "floating" || (mode === "minimized" && minimizedFrom === "floating");
+  const hasFloatingPosition = floatingPosition !== null;
+  // A dragged position is viewport-relative and may no longer fit after a resize
+  // or after restoring a floating panel from maximized mode.
+  useLayoutEffect(() => {
+    if (!floating || !viewerOpen || !hasFloatingPosition) return;
+    const keepInViewport = () => {
+      const bounds = panel.current?.getBoundingClientRect();
+      if (!bounds) return;
+      const maxLeft = Math.max(8, window.innerWidth - bounds.width - 8);
+      const maxTop = Math.max(8, window.innerHeight - bounds.height - 8);
+      setFloatingPosition((current) => {
+        if (!current) return current;
+        const left = Math.min(Math.max(current.left, 8), maxLeft);
+        const top = Math.min(Math.max(current.top, 8), maxTop);
+        return left === current.left && top === current.top ? current : { left, top };
+      });
+    };
+    keepInViewport();
+    window.addEventListener("resize", keepInViewport);
+    return () => window.removeEventListener("resize", keepInViewport);
+  }, [floating, viewerOpen, hasFloatingPosition]);
+
   const closeViewer = () => {
     setViewerOpen(false);
     chip.current?.focus({ preventScroll: true });

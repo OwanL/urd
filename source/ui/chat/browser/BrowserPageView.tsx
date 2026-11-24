@@ -53,23 +53,13 @@ function clampPixel(value: number, extent: number): number {
   return Math.min(Math.max(Math.round(value), 0), extent - 1);
 }
 
-async function drawFrame(
-  canvas: HTMLCanvasElement,
-  frame: Blob,
-  current: () => boolean,
-): Promise<void> {
-  let bitmap: ImageBitmap;
-  try {
-    bitmap = await createImageBitmap(frame);
-  } catch {
-    return; // Undecodable frames are dropped; the next frame repaints.
-  }
-  if (current() && canvas.isConnected) {
-    if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
-    if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
-    canvas.getContext("2d")?.drawImage(bitmap, 0, 0);
-  }
-  bitmap.close();
+function paintFrame(canvas: HTMLCanvasElement, bitmap: ImageBitmap): boolean {
+  if (canvas.width !== bitmap.width) canvas.width = bitmap.width;
+  if (canvas.height !== bitmap.height) canvas.height = bitmap.height;
+  const context = canvas.getContext("2d");
+  if (!context) return false;
+  context.drawImage(bitmap, 0, 0);
+  return true;
 }
 
 export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewProps) {
@@ -77,7 +67,9 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
   const frame = useRef<HTMLCanvasElement>(null);
   const textInput = useRef<HTMLInputElement>(null);
   const stream = useRef<BrowserPageStream | null>(null);
+  const drawnRef = useRef(false);
   const [state, setState] = useState<BrowserPageStreamState>("connecting");
+  const [drawn, setDrawn] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [text, setText] = useState("");
   const sendResize = useRef<() => void>(() => {});
@@ -110,17 +102,71 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
   useEffect(() => {
     if (!enabled) return;
     let live = true;
-    let sequence = 0;
+    let connected = false;
+    let connectionVersion = 0;
+    let painting = false;
+    let latestFrame: { blob: Blob; connectionVersion: number } | null = null;
+    drawnRef.current = false;
+    setDrawn(false);
+
+    // One decode in flight; frames landing mid-decode queue only the latest
+    // so a busy stream cannot starve decoding or draw itself further behind.
+    const paintQueuedFrames = async (): Promise<void> => {
+      painting = true;
+      try {
+        while (live) {
+          const queuedFrame = latestFrame;
+          latestFrame = null;
+          if (!queuedFrame) return;
+          if (queuedFrame.connectionVersion !== connectionVersion) continue;
+          let bitmap: ImageBitmap;
+          try {
+            bitmap = await createImageBitmap(queuedFrame.blob);
+          } catch {
+            continue; // Undecodable frames are dropped; the next frame repaints.
+          }
+          const canvas = frame.current;
+          // Late images from an earlier page or a dropped connection are
+          // discarded instead of painted over the current stream.
+          if (
+            live &&
+            connected &&
+            queuedFrame.connectionVersion === connectionVersion &&
+            canvas?.isConnected &&
+            paintFrame(canvas, bitmap)
+          ) {
+            if (!drawnRef.current) {
+              drawnRef.current = true;
+              setDrawn(true);
+            }
+          }
+          bitmap.close();
+        }
+      } finally {
+        painting = false;
+      }
+    };
+
     const pageStream = new BrowserPageStream(sessionId, page.id, {
       frame: (data) => {
-        const current = ++sequence;
-        if (live && frame.current)
-          void drawFrame(frame.current, data, () => live && current === sequence);
+        if (!live || !connected) return;
+        latestFrame = { blob: data, connectionVersion };
+        if (painting) return;
+        void paintQueuedFrames();
       },
       stateChange: (next, streamFailure) => {
         setState(next);
         setFailure(streamFailure);
-        if (next === "open") sendResize.current();
+        if (next === "open") {
+          connected = true;
+          sendResize.current();
+        } else {
+          connected = false;
+          connectionVersion += 1;
+          latestFrame = null;
+          drawnRef.current = false;
+          setDrawn(false);
+        }
       },
     });
     stream.current = pageStream;
@@ -275,9 +321,9 @@ export function BrowserPageView({ sessionId, page, enabled }: BrowserPageViewPro
             if (pointer.current?.id === event.pointerId) pointer.current = null;
           }}
         />
-        {state !== "open" && (
+        {(state !== "open" || !drawn) && (
           <p class="browser-page-status" role="status">
-            {failure ?? "Connecting."}
+            {state !== "open" ? (failure ?? "Connecting.") : "Waiting for first frame."}
           </p>
         )}
       </div>

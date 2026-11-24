@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
+using System.Threading.Channels;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -8,6 +9,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Playwright;
+using SkiaSharp;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -135,7 +137,16 @@ public sealed class BrowserViewerLoopbackTests {
     await using WebApplication app = builder.Build();
     app.Use(next => new LocalBrowserGate(next, () => origin).InvokeAsync);
     app.UseWebSockets();
-    app.MapGet("/fixture", () => Results.Content("<!doctype html><input id='input' autofocus>", "text/html"));
+    app.MapGet("/fixture", () => Results.Content("""
+      <!doctype html>
+      <style>
+        html,body{margin:0;overflow:hidden}
+        #content{width:1800px;height:1200px;background:#ddd}
+        #target{position:fixed;width:48px;height:48px;border:0;display:none}
+      </style>
+      <main id="content"><input id="input"><button id="target" aria-label="Click target"
+        onclick="this.dataset.click = `${event.clientX},${event.clientY}`"></button></main>
+      """, "text/html"));
     app.MapBrowserViewer(manager);
     await app.StartAsync(deadline.Token);
     origin = new Uri(app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()!.Addresses.Single());
@@ -177,14 +188,122 @@ public sealed class BrowserViewerLoopbackTests {
     } while (!result.EndOfMessage);
     byte[] jpeg = frame.ToArray();
     Assert.True(jpeg.Length > 4 && jpeg[0] == 0xff && jpeg[1] == 0xd8 && jpeg[^2] == 0xff && jpeg[^1] == 0xd9);
+    Assert.Equal((1280, 800), ReadJpegDimensions(jpeg));
 
+    var streamedFrames = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(8) { FullMode = BoundedChannelFullMode.DropOldest });
+    Task readingFrames = ReadStreamFramesAsync();
+    foreach ((int width, int height) in new[] { (600, 320), (1400, 900), (360, 650) }) {
+      await SendAsync($"{{\"type\":\"resize\",\"width\":{width},\"height\":{height}}}");
+      await page.WaitForFunctionAsync($"innerWidth === {width} && innerHeight === {height}", null, new() { Timeout = 10000 });
+      int[] bounds = await page.EvaluateAsync<int[]>("""() => [innerWidth, innerHeight, document.querySelector('#content').getBoundingClientRect().width, document.querySelector('#content').getBoundingClientRect().height]""");
+      Assert.Equal(new[] { width, height, 1800, 1200 }, bounds);
+
+      // A quiet resize must produce a correctly sized frame without an extra paint probe.
+      await ExpectFrameAsync(width, height);
+
+      // Move and recolor a visible target to require two fresh compositor frames, not the
+      // startup screenshot or a stale resize frame with coincidentally matching dimensions.
+      int y = height - 63;
+      int x = width - 160;
+      await MoveTargetAsync(x, y, "red");
+      await ExpectFrameAsync(width, height, x, y, SKColors.Red);
+      x = width - 59;
+      await MoveTargetAsync(x, y, "blue");
+      await ExpectFrameAsync(width, height, x, y, SKColors.Blue);
+      await SendAsync($"{{\"type\":\"click\",\"x\":{x},\"y\":{y}}}");
+      await page.WaitForFunctionAsync("click => document.querySelector('#target').dataset.click === click", $"{x},{y}", new() { Timeout = 10000 });
+    }
+
+    await page.Locator("#input").FocusAsync();
     await SendAsync("{\"type\":\"text\",\"text\":\"viewer input\"}");
     await page.WaitForFunctionAsync("document.querySelector('#input').value === 'viewer input'", null, new() { Timeout = 10000 });
     await SendAsync("{\"type\":\"resize\",\"width\":640,\"height\":480}");
     await page.WaitForFunctionAsync("innerWidth === 640 && innerHeight === 480", null, new() { Timeout = 10000 });
     await socket.CloseOutputAsync(WebSocketCloseStatus.NormalClosure, "", deadline.Token);
     await page.WaitForFunctionAsync("innerWidth === 1280 && innerHeight === 800", null, new() { Timeout = 10000 });
+    await readingFrames.WaitAsync(TimeSpan.FromSeconds(5));
+
+    Task MoveTargetAsync(int x, int y, string color) => page.EvaluateAsync("""
+      ({ x, y, color }) => {
+        const target = document.querySelector('#target');
+        delete target.dataset.click;
+        Object.assign(target.style, { display: 'block', left: `${x - 24}px`, top: `${y - 24}px`, background: color });
+      }
+      """, new { x, y, color });
+
+    async Task ExpectFrameAsync(int width, int height, int x = 0, int y = 0, SKColor? color = null) {
+      using var resizeDeadline = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token);
+      resizeDeadline.CancelAfter(TimeSpan.FromSeconds(3));
+      var observedDimensions = new HashSet<(int Width, int Height)>();
+      try {
+        while (await streamedFrames.Reader.WaitToReadAsync(resizeDeadline.Token)) {
+          while (streamedFrames.Reader.TryRead(out byte[]? received)) {
+            var dimensions = ReadJpegDimensions(received);
+            observedDimensions.Add(dimensions);
+            if (dimensions != (width, height))
+              continue;
+            if (color is not { } expected)
+              return;
+            using SKBitmap bitmap = SKBitmap.Decode(received);
+            SKColor pixel = bitmap.GetPixel(x, y);
+            if (Math.Abs(pixel.Red - expected.Red) < 25 && Math.Abs(pixel.Green - expected.Green) < 25
+                && Math.Abs(pixel.Blue - expected.Blue) < 25)
+              return;
+          }
+        }
+      } catch (OperationCanceledException) when (!deadline.IsCancellationRequested) {
+        // Include every size observed before the wait expired.
+      }
+      Assert.Fail($"Expected viewer JPEG {width}x{height} (target {color} at {x},{y}); observed sizes: {string.Join(", ", observedDimensions)}.");
+    }
+
+    async Task ReadStreamFramesAsync() {
+      try {
+        while (!deadline.IsCancellationRequested) {
+          using var streamedFrame = new MemoryStream();
+          WebSocketReceiveResult framePart;
+          do {
+            framePart = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), deadline.Token);
+            if (framePart.MessageType == WebSocketMessageType.Close)
+              return;
+            if (framePart.MessageType != WebSocketMessageType.Binary)
+              throw new Xunit.Sdk.XunitException("Viewer sent a non-binary frame.");
+            await streamedFrame.WriteAsync(buffer.AsMemory(0, framePart.Count), deadline.Token);
+          } while (!framePart.EndOfMessage);
+          streamedFrames.Writer.TryWrite(streamedFrame.ToArray());
+        }
+      } catch (OperationCanceledException) when (deadline.IsCancellationRequested) {
+        // The test deadline closed the viewer.
+      } finally {
+        streamedFrames.Writer.TryComplete();
+      }
+    }
 
     async Task SendAsync(string json) => await socket.SendAsync(Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text, true, deadline.Token);
+  }
+
+  private static (int Width, int Height) ReadJpegDimensions(ReadOnlySpan<byte> jpeg) {
+    Assert.True(jpeg.Length >= 4 && jpeg[0] == 0xff && jpeg[1] == 0xd8, "Frame is not a JPEG.");
+    int offset = 2;
+    while (offset < jpeg.Length) {
+      Assert.Equal((byte)0xff, jpeg[offset++]);
+      while (offset < jpeg.Length && jpeg[offset] == 0xff)
+        offset++;
+      Assert.True(offset < jpeg.Length, "JPEG ended before its dimensions were found.");
+      byte marker = jpeg[offset++];
+      if (marker is 0xd8 or 0xd9 or 0x01 or >= 0xd0 and <= 0xd7)
+        continue;
+      Assert.True(offset + 1 < jpeg.Length, "JPEG marker has no segment length.");
+      int length = jpeg[offset] << 8 | jpeg[offset + 1];
+      Assert.True(length >= 2 && offset + length <= jpeg.Length, "JPEG marker has an invalid segment length.");
+      if (marker is 0xc0 or 0xc1 or 0xc2 or 0xc3 or 0xc5 or 0xc6 or 0xc7 or 0xc9 or 0xca or 0xcb or 0xcd or 0xce or 0xcf) {
+        Assert.True(length >= 7, "JPEG frame header is incomplete.");
+        int height = jpeg[offset + 3] << 8 | jpeg[offset + 4];
+        int width = jpeg[offset + 5] << 8 | jpeg[offset + 6];
+        return (width, height);
+      }
+      offset += length;
+    }
+    throw new Xunit.Sdk.XunitException("JPEG has no frame header.");
   }
 }

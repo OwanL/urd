@@ -7,6 +7,11 @@ export interface BrowserPageStreamHandlers {
   stateChange(state: BrowserPageStreamState, failure: string | null): void;
 }
 
+// The host seeds a newly connected stream with its first frame; an open
+// connection that stays silent gets a bounded number of retries.
+const firstFrameTimeoutMs = 3000;
+const firstFrameRetryLimit = 2;
+
 // One page's live JPEG stream on the session's host; reconnects with backoff
 // until its owner closes it.
 export class BrowserPageStream {
@@ -15,7 +20,10 @@ export class BrowserPageStream {
   private readonly handlers: BrowserPageStreamHandlers;
   private socket: WebSocket | null = null;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private firstFrameTimer: ReturnType<typeof setTimeout> | undefined;
   private failures = 0;
+  private silentOpens = 0;
+  private framesSinceOpen = 0;
   private closed = false;
 
   constructor(sessionId: string, pageId: string, handlers: BrowserPageStreamHandlers) {
@@ -33,6 +41,7 @@ export class BrowserPageStream {
     this.closed = true;
     clearTimeout(this.retryTimer);
     this.retryTimer = undefined;
+    this.clearFirstFrameTimer();
     this.socket?.close();
     this.socket = null;
   }
@@ -51,18 +60,24 @@ export class BrowserPageStream {
     );
     socket.binaryType = "blob";
     this.socket = socket;
+    this.framesSinceOpen = 0;
     this.handlers.stateChange("connecting", null);
     socket.onopen = () => {
       this.failures = 0;
+      this.watchForFirstFrame();
       this.handlers.stateChange("open", null);
     };
     socket.onmessage = (event) => {
       // The protocol only replies with JPEG frames; unexpected text is ignored.
       if (typeof event.data === "string") return;
+      this.framesSinceOpen += 1;
+      this.silentOpens = 0;
+      this.clearFirstFrameTimer();
       this.handlers.frame(event.data as Blob);
     };
     socket.onclose = (event) => {
       this.socket = null;
+      this.clearFirstFrameTimer();
       if (this.closed) return;
       this.failures += 1;
       this.handlers.stateChange("closed", event.reason || "Connection lost.");
@@ -72,5 +87,22 @@ export class BrowserPageStream {
         this.connect();
       }, delay);
     };
+  }
+
+  // A seeded stream should show its first frame quickly; an open connection
+  // that stays silent is dropped so the usual backoff can reconnect it.
+  private watchForFirstFrame(): void {
+    if (this.silentOpens >= firstFrameRetryLimit) return;
+    this.firstFrameTimer = setTimeout(() => {
+      this.firstFrameTimer = undefined;
+      if (this.framesSinceOpen > 0) return;
+      this.silentOpens += 1;
+      this.socket?.close();
+    }, firstFrameTimeoutMs);
+  }
+
+  private clearFirstFrameTimer(): void {
+    clearTimeout(this.firstFrameTimer);
+    this.firstFrameTimer = undefined;
   }
 }

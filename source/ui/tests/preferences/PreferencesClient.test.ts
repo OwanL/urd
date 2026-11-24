@@ -14,7 +14,7 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
       instructions: { bucket: "small", connectionId: null, modelId: null },
       title: { bucket: "small", connectionId: null, modelId: null },
       small: [
-        { connectionId: "connection-1", modelId: "small-model" },
+        { connectionId: "connection-1", modelId: "small-model", reasoningEffort: "low" as const },
         { connectionId: "connection-2", modelId: "small-model" },
       ],
       medium: [],
@@ -116,7 +116,7 @@ void test("preferences use the browser API contract", { timeout: 5_000 }, async 
         body: JSON.stringify({
           bucket: "small",
           models: [
-            { connectionId: "connection-1", modelId: "small-model" },
+            { connectionId: "connection-1", modelId: "small-model", reasoningEffort: "low" },
             { connectionId: "connection-2", modelId: "small-model" },
           ],
         }),

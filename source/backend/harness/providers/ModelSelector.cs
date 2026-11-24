@@ -56,15 +56,15 @@ public sealed class ModelSelector {
           ? $"No model is configured for the {BucketName(bucket)} bucket. Assign a model in Settings → Model buckets."
           : $"No model is configured for the {BucketName(bucket)} bucket.");
 
-    ILookup<Guid, string> modelsByConnection = assignments.ToLookup(model => model.ConnectionId, model => model.ModelId);
+    ILookup<Guid, ConfiguredModel> modelsByConnection = assignments.ToLookup(model => model.ConnectionId);
     IReadOnlyList<Guid> requestedConnections = modelsByConnection
         .Select(group => group.Key).Where(id => connectionIds?.Contains(id) != false).ToArray();
     var catalogs = await providers.ListAvailableModelCatalogsAsync(requestedConnections, cancellationToken);
-    var candidates = new List<(ProviderConnection Connection, ProviderModel Model)>();
+    var candidates = new List<(ProviderConnection Connection, ProviderModel Model, ConfiguredModel Assignment)>();
     foreach (var (connection, catalog) in catalogs) {
-      foreach (string modelId in modelsByConnection[connection.Id]) {
-        if (FindModel(catalog, modelId) is { } model)
-          candidates.Add((connection, model));
+      foreach (ConfiguredModel assignment in modelsByConnection[connection.Id]) {
+        if (FindModel(catalog, assignment.ModelId) is { } model)
+          candidates.Add((connection, model, assignment));
       }
     }
 
@@ -75,8 +75,8 @@ public sealed class ModelSelector {
           : $"No model is available for the {name} bucket.");
     }
 
-    var (chosenConnection, chosenModel) = candidates[Random.Shared.Next(candidates.Count)];
-    return await BuildSelectionAsync(chosenConnection, chosenModel, cancellationToken);
+    var (chosenConnection, chosenModel, chosenAssignment) = candidates[Random.Shared.Next(candidates.Count)];
+    return await BuildSelectionAsync(chosenConnection, chosenModel, chosenAssignment.ReasoningEffort, cancellationToken);
   }
 
   private async Task<LlmSelection> ResolveConfiguredAsync(ConfiguredModel configured, CancellationToken cancellationToken) {
@@ -91,11 +91,11 @@ public sealed class ModelSelector {
 
     ProviderModel model = FindModel(catalog, configured.ModelId)
         ?? throw new AuxiliaryModelUnavailableException("The configured model is unavailable; select a different model.");
-    return await BuildSelectionAsync(connection, model, cancellationToken);
+    return await BuildSelectionAsync(connection, model, configured.ReasoningEffort, cancellationToken);
   }
 
   private async Task<LlmSelection> BuildSelectionAsync(ProviderConnection connection, ProviderModel model,
-      CancellationToken cancellationToken) {
+      string? reasoningEffort, CancellationToken cancellationToken) {
     IReadOnlyList<ModelSettings> settings;
     try {
       settings = await providers.GetModelSettingsAsync(connection.Id, cancellationToken);
@@ -105,7 +105,7 @@ public sealed class ModelSelector {
 
     ModelSettings? modelSettings = settings.FirstOrDefault(candidate =>
         string.Equals(candidate.ModelId, model.Id, StringComparison.Ordinal));
-    return new LlmSelection(connection, model.Id, "high", modelSettings?.Family ?? ModelFamily.Other,
+    return new LlmSelection(connection, model.Id, reasoningEffort ?? "high", modelSettings?.Family ?? ModelFamily.Other,
         modelSettings?.SupportsImages ?? true, modelSettings?.ContextWindow ?? model.ContextWindow);
   }
 

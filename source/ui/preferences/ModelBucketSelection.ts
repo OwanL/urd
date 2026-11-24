@@ -2,6 +2,7 @@ import type {
   AuxiliaryModelPreferences,
   ConfiguredModel,
   ModelBucket,
+  ReasoningEffort,
 } from "./PreferencesClient.ts";
 
 export function modelKey(model: ConfiguredModel): string {
@@ -22,6 +23,22 @@ export function removeBucketModel(
 ): readonly ConfiguredModel[] {
   const key = modelKey(model);
   return models.filter((member) => modelKey(member) !== key);
+}
+
+// Replaces the effort of the entry matching the pair; an unchanged list returns the input.
+export function setBucketModelEffort(
+  models: readonly ConfiguredModel[],
+  model: ConfiguredModel,
+  effort: ReasoningEffort,
+): readonly ConfiguredModel[] {
+  const key = modelKey(model);
+  let changed = false;
+  const next = models.map((member) => {
+    if (modelKey(member) !== key || member.reasoningEffort === effort) return member;
+    changed = true;
+    return { ...member, reasoningEffort: effort };
+  });
+  return changed ? next : models;
 }
 
 export function describeBucket(models: readonly ConfiguredModel[]): string {

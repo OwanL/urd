@@ -42,6 +42,9 @@ public sealed class ModelSelectorTests {
       Assert.True(selection.SupportsImages);
       Assert.Equal(64_000, selection.ContextWindow);
       Assert.Equal("high", selection.ReasoningEffort);
+      preferences.SetBucketModels(bucket, [new(bucketConnection.Id, "bucket-model", "extraHigh")]);
+      Assert.Equal("extraHigh", (await selector.ResolveAsync(bucket, preferences.Read()).WaitAsync(TestTimeout)).ReasoningEffort);
+      Assert.Equal("high", overrideSelection.ReasoningEffort);
       Assert.Equal(overrideConnection, overrideSelection.Connection);
       Assert.Equal("override-model", overrideSelection.ModelId);
       Assert.Equal(ModelFamily.Google, overrideSelection.Family);
@@ -75,10 +78,11 @@ public sealed class ModelSelectorTests {
           selector.ResolveSubagentAsync(bucket, preferences.Read(), [allowed.Id]).WaitAsync(TestTimeout));
       Assert.Contains("Settings → Model buckets", stale.Message);
 
-      preferences.SetBucketModels(tier, [new(allowed.Id, "stale"), new(allowed.Id, "assigned"), new(excluded.Id, "assigned")]);
+      preferences.SetBucketModels(tier, [new(allowed.Id, "stale"), new(allowed.Id, "assigned", "low"), new(excluded.Id, "assigned")]);
       LlmSelection selection = await selector.ResolveSubagentAsync(bucket, preferences.Read(), [allowed.Id]).WaitAsync(TestTimeout);
       Assert.Equal(allowed, selection.Connection);
       Assert.Equal("assigned", selection.ModelId);
+      Assert.Equal("low", selection.ReasoningEffort);
       Assert.True(selection.SupportsImages);
 
       await Assert.ThrowsAsync<AuxiliaryModelUnavailableException>(() =>

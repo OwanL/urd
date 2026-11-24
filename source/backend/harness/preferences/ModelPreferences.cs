@@ -5,10 +5,12 @@ public enum AuxiliaryModelPurpose { Tools, Skills, Instructions, Title }
 public enum ProtectedResourceCategory { Tools, Skills, Instructions }
 
 // A user-configured provider/model pair used to fill a bucket or override one operation.
-public sealed record ConfiguredModel(Guid ConnectionId, string ModelId) {
+public sealed record ConfiguredModel(Guid ConnectionId, string ModelId, string? ReasoningEffort = null) {
   internal void Validate() {
     if (ConnectionId == Guid.Empty || !ModelChoice.IsValidModelId(ModelId))
       throw new ArgumentException("Select a valid provider/model pair.");
+    if (ReasoningEffort is not (null or "none" or "low" or "medium" or "high" or "extraHigh"))
+      throw new ArgumentException("Reasoning effort must be none, low, medium, high or extraHigh.");
   }
 }
 

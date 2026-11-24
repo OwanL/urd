@@ -186,8 +186,8 @@ public sealed class PreferencesRoutesTests {
     using (HttpResponseMessage bucket = await RequestAsync(server.Client, HttpMethod.Post,
         "/api/preferences/model-bucket", JsonBody(JsonSerializer.Serialize(new {
           bucket = "small", models = new[] {
-            new { connectionId, modelId = "small-model" },
-            new { connectionId, modelId = "another-small-model" }
+            new { connectionId, modelId = "small-model", reasoningEffort = (string?)"extraHigh" },
+            new { connectionId, modelId = "another-small-model", reasoningEffort = (string?)null }
           }
         }))))
       Assert.Equal(HttpStatusCode.OK, bucket.StatusCode);
@@ -212,6 +212,8 @@ public sealed class PreferencesRoutesTests {
       Assert.Equal(new[] { "small-model", "another-small-model" },
           small.Select(model => model.GetProperty("modelId").GetString()));
       Assert.All(small, model => Assert.Equal(connectionId, model.GetProperty("connectionId").GetGuid()));
+      Assert.Equal("extraHigh", small[0].GetProperty("reasoningEffort").GetString());
+      Assert.Equal(JsonValueKind.Null, small[1].GetProperty("reasoningEffort").ValueKind);
       Assert.Empty(models.GetProperty("medium").EnumerateArray());
       Assert.Equal(JsonValueKind.Null, models.GetProperty("skills").GetProperty("bucket").ValueKind);
       Assert.Equal("skills-model", models.GetProperty("skills").GetProperty("modelId").GetString());

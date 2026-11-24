@@ -102,7 +102,7 @@ public sealed class PreferencesTests {
   [Fact]
   public void AuxiliaryModelChoicesBucketMappingsAndProtectionsPersistIndependently() {
     using var database = new TemporaryDatabase();
-    var model = new ConfiguredModel(Guid.NewGuid(), "configured-model");
+    var model = new ConfiguredModel(Guid.NewGuid(), "configured-model", "medium");
     var another = new ConfiguredModel(Guid.NewGuid(), "another-model");
     string skillSource = Path.Combine(Path.GetTempPath(), "skills", "cleaner", "SKILL.md");
     string instructionSource = Path.Combine(Path.GetTempPath(), "AGENTS.md");
@@ -119,6 +119,7 @@ public sealed class PreferencesTests {
       }, defaults.ProtectedResources.Tools);
 
       preferences.SetBucketModels(ModelBucket.Small, [model, another]);
+      preferences.SetBucketModels(ModelBucket.Medium, [model with { ReasoningEffort = "low" }]);
       preferences.SetModelChoice(AuxiliaryModelPurpose.Skills, ModelChoice.ForModel(model.ConnectionId, model.ModelId));
       preferences.SetProtectedItems(ProtectedResourceCategory.Tools, ["bash"]);
       preferences.SetProtectedItems(ProtectedResourceCategory.Skills, [skillSource]);
@@ -132,10 +133,25 @@ public sealed class PreferencesTests {
     Assert.Equal(ModelChoice.ForBucket(ModelBucket.Small), saved.ModelChoices.Tools);
     Assert.Equal(ModelChoice.ForModel(model.ConnectionId, model.ModelId), saved.ModelChoices.Skills);
     Assert.Equal(new[] { model, another }, saved.ModelChoices.Small);
-    Assert.Empty(saved.ModelChoices.Medium);
+    Assert.Equal(new[] { model with { ReasoningEffort = "low" } }, saved.ModelChoices.Medium);
     Assert.Equal(new[] { "bash" }, saved.ProtectedResources.Tools);
     Assert.Equal(new[] { skillSource }, saved.ProtectedResources.Skills);
     Assert.Equal(new[] { instructionSource }, saved.ProtectedResources.Instructions);
+  }
+
+  [Fact]
+  public void LegacyBucketEntriesWithoutReasoningEffortLoad() {
+    using var database = new TemporaryDatabase();
+    Guid connectionId = Guid.NewGuid();
+    using (UrdStore store = UrdStore.Open(database.Path))
+      new PreferenceManager(store).SetLanHostingEnabled(true);
+    database.Execute($$"""
+      UPDATE preferences SET model_choices_json = '{"Small":[{"ConnectionId":"{{connectionId}}","ModelId":"legacy"}]}'
+      WHERE singleton = 1;
+      """);
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Equal(new ConfiguredModel(connectionId, "legacy"),
+        Assert.Single(new PreferenceManager(reopened).Read().ModelChoices.Small));
   }
 
   [Fact]
@@ -169,7 +185,8 @@ public sealed class PreferencesTests {
     preferences.SetBucketModels(ModelBucket.Small, input);
 
     input[0] = alternate;
-    Assert.Throws<ArgumentException>(() => preferences.SetBucketModels(ModelBucket.Small, [model, model]));
+    Assert.Throws<ArgumentException>(() => preferences.SetBucketModels(ModelBucket.Small, [model, model with { ReasoningEffort = "low" }]));
+    Assert.Throws<ArgumentException>(() => preferences.SetBucketModels(ModelBucket.Small, [model with { ReasoningEffort = "invalid" }]));
     Assert.Throws<ArgumentException>(() => preferences.SetBucketModels(ModelBucket.Small, [new(Guid.Empty, "model")]));
     Assert.Throws<ArgumentException>(() => preferences.SetBucketModels(ModelBucket.Small, [new(model.ConnectionId, " ")]));
     Assert.Throws<ArgumentNullException>(() => preferences.SetBucketModels(ModelBucket.Small, [null!]));

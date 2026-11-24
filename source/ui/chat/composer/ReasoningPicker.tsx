@@ -4,6 +4,15 @@ import { useId, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { Popover, scrollOptionIntoView } from "../../controls/Popover.tsx";
 import { Tooltip } from "../../controls/Tooltip.tsx";
+import type { ReasoningEffort } from "../../preferences/PreferencesClient.ts";
+
+export const reasoningEffortOptions: readonly ReasoningEffort[] = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "extraHigh",
+];
 
 interface ReasoningPickerProps {
   effort: string | null;
@@ -97,11 +106,11 @@ export function ReasoningPicker({
   }
 
   return (
-    <div class="composer-reasoning">
+    <div class="reasoning-picker">
       <Tooltip content="Reasoning effort" disabled={expanded}>
         <button
           ref={trigger}
-          class="selector composer-reasoning-trigger"
+          class="selector reasoning-picker-trigger"
           type="button"
           disabled={disabled}
           aria-label={`Reasoning effort: ${effortLabel(effort)}`}
@@ -124,7 +133,7 @@ export function ReasoningPicker({
           anchor={trigger}
           initialFocus={activeOption}
           id={id}
-          class="composer-reasoning-popover"
+          class="reasoning-picker-popover"
           placement="above"
           role="listbox"
           label="Reasoning effort"
@@ -134,7 +143,7 @@ export function ReasoningPicker({
             <button
               key={`effort:${choice.value}`}
               ref={index === activeIndex ? activeOption : null}
-              class={`composer-reasoning-option${index === activeIndex ? " is-active" : ""}`}
+              class={`reasoning-picker-option${index === activeIndex ? " is-active" : ""}`}
               type="button"
               role="option"
               aria-selected={choice.value === effort}

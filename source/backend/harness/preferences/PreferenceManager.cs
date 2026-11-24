@@ -52,11 +52,11 @@ public sealed class PreferenceManager {
       throw new ArgumentOutOfRangeException(nameof(bucket));
 
     ConfiguredModel[] savedModels = models.ToArray();
-    var seen = new HashSet<ConfiguredModel>();
+    var seen = new HashSet<(Guid ConnectionId, string ModelId)>();
     foreach (ConfiguredModel model in savedModels) {
       ArgumentNullException.ThrowIfNull(model);
       model.Validate();
-      if (!seen.Add(model))
+      if (!seen.Add((model.ConnectionId, model.ModelId)))
         throw new ArgumentException("Bucket provider/model pairs must be unique.", nameof(models));
     }
 

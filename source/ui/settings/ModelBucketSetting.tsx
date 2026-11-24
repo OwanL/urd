@@ -2,13 +2,15 @@ import { useMemo, useRef } from "preact/hooks";
 import type { ModelPickerOption } from "../providers/models/ModelPicker.tsx";
 import { ModelPicker } from "../providers/models/ModelPicker.tsx";
 import { IconButton } from "../controls/IconButton.tsx";
+import { ReasoningPicker, reasoningEffortOptions } from "../chat/composer/ReasoningPicker.tsx";
 import {
   addBucketModel,
   describeBucket,
   modelKey,
   removeBucketModel,
+  setBucketModelEffort,
 } from "../preferences/ModelBucketSelection.ts";
-import type { ConfiguredModel } from "../preferences/PreferencesClient.ts";
+import type { ConfiguredModel, ReasoningEffort } from "../preferences/PreferencesClient.ts";
 
 export function ModelBucketSetting({
   name,
@@ -78,6 +80,14 @@ export function ModelBucketSetting({
             return (
               <li key={modelKey(model)}>
                 <span>{modelLabel}</span>
+                <ReasoningPicker
+                  effort={model.reasoningEffort ?? null}
+                  options={reasoningEffortOptions}
+                  disabled={busy}
+                  onChange={(effort) =>
+                    void save(setBucketModelEffort(members, model, effort as ReasoningEffort))
+                  }
+                />
                 <IconButton
                   icon="close"
                   label={`Remove ${modelLabel} from ${name} bucket`}

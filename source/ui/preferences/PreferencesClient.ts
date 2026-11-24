@@ -4,10 +4,13 @@ import type { SubagentProviderConnectionIds } from "../providers/subagents/Subag
 export type AuxiliaryModelPurpose = "tools" | "skills" | "instructions" | "title";
 export type ProtectedResourceCategory = "tools" | "skills" | "instructions";
 export type ModelBucket = "small" | "medium" | "large";
+export type ReasoningEffort = "none" | "low" | "medium" | "high" | "extraHigh";
 
 export interface ConfiguredModel {
   readonly connectionId: string;
   readonly modelId: string;
+  // Effort used whenever this entry is resolved; missing resolves to high.
+  readonly reasoningEffort?: ReasoningEffort | null;
 }
 
 export interface ModelChoice {

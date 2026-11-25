@@ -109,9 +109,19 @@ A disposable probe already showed frame display and click mapping on headless Ch
 
 ## Agent tool
 
-One `browser` tool (replacing `playwright`), shaped like Playwright MCP. As there, every action returns a full snapshot of
-the active page, with no browser-specific trimming. Oversized results use the general tool output
-cap (prerequisite below).
+One `browser` tool. Navigation, a new document and explicit `snapshot` return the full page tree.
+Otherwise send only changed subtrees and removals since the last inline view of that page, with
+reordered siblings in their new order. Fall back to full when there is no baseline or the diff
+is at least half the full snapshot. Output truncation does not advance the baseline. If a ref is
+stale, the action directs the caller to request `snapshot` explicitly; it does not auto-refresh or
+retry. Oversized results use the general tool output cap (prerequisite below).
+
+C is the rollout choice: in three fresh, state-graded runs per task/variant, it reduced cost by
+35.4% on the large applications versus full snapshots (A), with both at 9/9 correct and no
+browser-call errors. Small-task costs varied, and the gated alternative (D) reduced but did not
+remove its small-task penalty; three repetitions do not establish an optimal gate. See the
+[local experiment report](../../../scratch/urd-browser-exp/experiment/REPORT.md) on scratch branch
+`experiment/browser-state` (not published externally).
 
 | Action | Arguments |
 | --- | --- |

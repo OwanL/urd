@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Microsoft.Playwright;
 using Urd.Core.Tools;
 using Xunit;
 
@@ -340,6 +341,95 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
+  public async Task ConsoleErrorsAndFailedRequestsAreReportedOncePerDocument() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    string url = sandbox.Site.Url("/click");
+    await sandbox.CallAsync(owner, "navigate", ("url", url));
+    const string expression = "async () => { console.error('noise'); await fetch('http://127.0.0.1:1/noise').catch(() => {}); return 'done'; }";
+
+    ToolOutput first = await sandbox.CallAsync(owner, "evaluate", ("expression", expression));
+    Assert.Contains("Console error: noise", first.Text);
+    Assert.Contains("Failed request: GET http://127.0.0.1:1/noise", first.Text);
+    ToolOutput repeated = await sandbox.CallAsync(owner, "evaluate", ("expression", expression));
+    Assert.DoesNotContain("Console error:", repeated.Text);
+    Assert.DoesNotContain("Failed request:", repeated.Text);
+    await sandbox.CallAsync(owner, "evaluate", ("expression", "location.hash = 'section'"));
+    ToolOutput sameDocument = await sandbox.CallAsync(owner, "evaluate", ("expression", expression));
+    Assert.DoesNotContain("Console error:", sameDocument.Text);
+    Assert.DoesNotContain("Failed request:", sameDocument.Text);
+    ToolOutput fresh = await sandbox.CallAsync(owner, "evaluate", ("expression", "console.error('new noise')"));
+    Assert.Contains("Console error: new noise", fresh.Text);
+    Assert.DoesNotContain("Console error: noise", fresh.Text);
+
+    await sandbox.CallAsync(owner, "navigate", ("url", url));
+    ToolOutput reloaded = await sandbox.CallAsync(owner, "evaluate", ("expression", expression));
+    Assert.Contains("Console error: noise", reloaded.Text);
+    Assert.Contains("Failed request: GET http://127.0.0.1:1/noise", reloaded.Text);
+  }
+
+  [Fact]
+  public async Task PendingNavigationDoesNotResetDiagnosticsUntilTheNewDocumentCommits() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/click")));
+    IPage page = sandbox.PageOf(owner);
+    string failure = sandbox.Site.Url("/failed-diagnostic");
+    string emit = $$"""
+      async () => { console.error('pending noise'); await fetch('{{failure}}').catch(() => {}); }
+      """;
+    await page.RouteAsync(failure, route => route.AbortAsync());
+    ToolOutput seeded = await sandbox.CallAsync(owner, "evaluate", ("expression", emit));
+    Assert.Contains("Console error: pending noise", seeded.Text);
+    Assert.Contains("Failed request: GET " + failure, seeded.Text);
+
+    // The old document waits on a fetch that is answered only after the next navigation
+    // request arrives. A separate listener holds the navigation response until we check dedup.
+    using LoopbackSite nextSite = new();
+    TaskCompletionSource requested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    sandbox.Site.Add("/trigger-history", "trigger", () => requested.Task.WaitAsync(StepTimeout));
+    string destination = nextSite.Url("/next-document");
+    nextSite.Add("/next-document", $"<script>window.diagnostics = ({emit})()</script>", () => {
+      requested.SetResult();
+      return release.Task.WaitAsync(StepTimeout);
+    });
+    TaskCompletionSource historyChanged = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    page.FrameNavigated += (_, frame) => {
+      if (frame == page.MainFrame && frame.Url == sandbox.Site.Url("/click#old-document"))
+        historyChanged.TrySetResult();
+    };
+    TaskCompletionSource requestFailed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    page.RequestFailed += (_, request) => {
+      if (request.Url == failure)
+        requestFailed.TrySetResult();
+    };
+    await page.EvaluateAsync($$"""
+      () => {
+        fetch('/trigger-history').then(() => {
+          history.pushState(null, '', '#old-document');
+          return ({{emit}})();
+        });
+      }
+      """);
+    Task<IResponse?> navigation = page.GotoAsync(destination);
+    (string[] Errors, string[] FailedRequests) repeated;
+    try {
+      await historyChanged.Task.WaitAsync(StepTimeout);
+      await requestFailed.Task.WaitAsync(StepTimeout);
+      repeated = sandbox.InteractionOf(owner).DrainEvents();
+    } finally {
+      release.SetResult();
+    }
+    await navigation.WaitAsync(StepTimeout);
+    ToolOutput committed = await sandbox.CallAsync(owner, "evaluate", ("expression", "window.diagnostics"));
+    Assert.DoesNotContain(repeated.Errors, error => error.StartsWith("pending noise", StringComparison.Ordinal));
+    Assert.DoesNotContain(repeated.FailedRequests, request => request.StartsWith("GET " + failure, StringComparison.Ordinal));
+    Assert.Contains("Console error: pending noise", committed.Text);
+    Assert.Contains("Failed request: GET " + failure, committed.Text);
+  }
+
+  [Fact]
   public async Task OversizedSnapshotSpillsOnceAndStillBecomesTheDiffBaseline() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     Guid owner = Guid.NewGuid();
@@ -402,6 +492,40 @@ public sealed class BrowserToolLoopbackTests {
     Assert.DoesNotContain("Outside context", clicked.Text);
   }
 
+  // The ref matches nothing, so the scoped snapshot fails fast; the diagnostics it drained must
+  // come back for the next action instead of disappearing with the failed result.
+  [Fact]
+  public async Task FailedScopedSnapshotKeepsItsDrainedDiagnosticsForTheNextAction() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/click")));
+    // Recorded directly on the page, so no tool result has reported or drained them yet.
+    await sandbox.PageOf(owner)
+        .EvaluateAsync("() => { console.error('sticky'); fetch('http://127.0.0.1:1/sticky').catch(() => {}); }");
+
+    await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        sandbox.CallAsync(owner, "snapshot", ("ref", "e999")));
+
+    ToolOutput later = await sandbox.CallAsync(owner, "evaluate", ("expression", "'kept'"));
+    Assert.Contains("Evaluated: \"kept\"", later.Text);
+    Assert.Contains("Console error: sticky", later.Text);
+    Assert.Contains("Failed request: GET http://127.0.0.1:1/sticky", later.Text);
+  }
+
+  [Fact]
+  public async Task CancelledSnapshotKeepsItsDrainedDiagnosticsForTheNextAction() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/click")));
+    await sandbox.PageOf(owner).EvaluateAsync("() => console.error('cancelled snapshot')");
+
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        sandbox.CallAsync(owner, "snapshot", new CancellationToken(true)));
+
+    ToolOutput later = await sandbox.CallAsync(owner, "evaluate", ("expression", "'kept'"));
+    Assert.Contains("Console error: cancelled snapshot", later.Text);
+  }
+
   [Fact]
   public async Task ActingOnAStaleRefFailsAndPointsToTheSnapshotAction() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
@@ -416,6 +540,31 @@ public sealed class BrowserToolLoopbackTests {
         () => sandbox.CallAsync(owner, "click", ("ref", target)));
     Assert.Contains("snapshot", stale.Message);
     Assert.Equal("quiet", await sandbox.OutTextAsync(owner));
+  }
+
+  // The loopback site serves the download as an attachment, so Chromium starts a real download
+  // from a main-frame navigation request that never commits a document.
+  [Fact]
+  public async Task DownloadsDoNotResetTheErrorMarkerForSameDocumentChanges() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/download", """
+      <!doctype html><html><body>
+      <button onclick="location.href = '/files/report.txt'">Get</button>
+      </body></html>
+      """);
+    sandbox.Site.AddAttachment("/files/report.txt", "report.txt", "saved report"u8.ToArray());
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/download")));
+    ToolOutput seeded = await sandbox.CallAsync(owner, "evaluate", ("expression", "console.error('sticky')"));
+    Assert.Contains("Console error: sticky", seeded.Text);
+
+    await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Get")));
+    await sandbox.WaitForSnapshotTextAsync(owner, "Saved download");
+
+    // The download navigation never commits, so the same-document history must survive it.
+    await sandbox.CallAsync(owner, "evaluate", ("expression", "history.pushState(null, '', '#mark')"));
+    ToolOutput repeated = await sandbox.CallAsync(owner, "evaluate", ("expression", "console.error('sticky')"));
+    Assert.DoesNotContain("Console error:", repeated.Text);
   }
 
   private static async Task ResizeLoopAsync(BrowserInteraction interaction, TimeSpan startDelay,
@@ -610,9 +759,17 @@ public sealed class BrowserToolLoopbackTests {
     }
 
     public BrowserInteraction InteractionOf(Guid owner) =>
-        BrowserInteraction.For(host.Pages.Selected(owner)!.Page);
+        BrowserInteraction.For(PageOf(owner));
 
-    public async Task<ToolOutput> CallAsync(Guid owner, string action, params (string Name, JsonNode? Value)[] options) {
+    // Direct page access, bypassing the tool's drains, for arming page state between tool calls.
+    public IPage PageOf(Guid owner) =>
+        (host.Pages.Selected(owner) ?? throw new InvalidOperationException("No page is open for this session.")).Page;
+
+    public Task<ToolOutput> CallAsync(Guid owner, string action, params (string Name, JsonNode? Value)[] options) =>
+        CallAsync(owner, action, CancellationToken.None, options);
+
+    public async Task<ToolOutput> CallAsync(Guid owner, string action, CancellationToken cancellation,
+        params (string Name, JsonNode? Value)[] options) {
       JsonObject values = new() { ["action"] = action };
       foreach ((string name, JsonNode? value) in options)
         values[name] = value;
@@ -621,7 +778,7 @@ public sealed class BrowserToolLoopbackTests {
         values.WriteTo(writer);
       JsonElement arguments = JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
       var context = new HarnessToolContext(owner, owner, "call", null!) { RequestId = Guid.NewGuid() };
-      ToolOutput result = await Tool.RunAsync(arguments, context, CancellationToken.None).WaitAsync(StepTimeout);
+      ToolOutput result = await Tool.RunAsync(arguments, context, cancellation).WaitAsync(StepTimeout, CancellationToken.None);
       // Production applies the shared output cap to every tool result; mirror it here so spill
       // behavior is exercised the way the model actually receives it.
       ToolOutput bounded = await ToolOutputLimit.ApplyAsync("browser", result);
@@ -650,7 +807,8 @@ public sealed class BrowserToolLoopbackTests {
 
   private sealed class LoopbackSite : IDisposable {
     private readonly HttpListener listener = new();
-    private readonly Dictionary<string, string> pages = [];
+    private readonly Dictionary<string, (string Html, Func<Task>? BeforeResponse)> pages = [];
+    private readonly Dictionary<string, (string Name, byte[] Body)> attachments = [];
     private readonly Task serving;
 
     public LoopbackSite() {
@@ -668,7 +826,10 @@ public sealed class BrowserToolLoopbackTests {
 
     public string Url(string path) => new Uri(Base, path.TrimStart('/')).AbsoluteUri;
 
-    public void Add(string path, string html) => pages[path] = html;
+    public void Add(string path, string html, Func<Task>? beforeResponse = null) =>
+        pages[path] = (html, beforeResponse);
+
+    public void AddAttachment(string path, string name, byte[] body) => attachments[path] = (name, body);
 
     private async Task ServeAsync() {
       while (listener.IsListening) {
@@ -685,8 +846,18 @@ public sealed class BrowserToolLoopbackTests {
     private async Task RespondAsync(HttpListenerContext context) {
       try {
         string path = context.Request.Url!.AbsolutePath;
-        bool known = pages.TryGetValue(path, out string? html);
-        byte[] body = Encoding.UTF8.GetBytes(known ? html! : "not found");
+        if (attachments.TryGetValue(path, out (string Name, byte[] Body) attachment)) {
+          context.Response.StatusCode = 200;
+          context.Response.ContentType = "application/octet-stream";
+          context.Response.ContentLength64 = attachment.Body.Length;
+          context.Response.AddHeader("Content-Disposition", $"attachment; filename=\"{attachment.Name}\"");
+          await context.Response.OutputStream.WriteAsync(attachment.Body).ConfigureAwait(false);
+          return;
+        }
+        bool known = pages.TryGetValue(path, out var page);
+        if (page.BeforeResponse is not null)
+          await page.BeforeResponse().ConfigureAwait(false);
+        byte[] body = Encoding.UTF8.GetBytes(known ? page.Html : "not found");
         context.Response.StatusCode = known ? 200 : 404;
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.ContentLength64 = body.Length;

@@ -64,6 +64,7 @@ internal sealed class BrowserHost : IAsyncDisposable {
     try {
       PersistentContext browser = await BeginLaunchAsync(cancellation);
       opening = await browser.Context.NewPageAsync();
+      await BrowserInteraction.For(opening).WatchDocumentCommitsAsync();
       BrowserPage<IPage> registered;
       BrowserPage<IPage>? evicted;
       lock (gate) {
@@ -263,7 +264,6 @@ internal sealed class BrowserHost : IAsyncDisposable {
   private void Attach(Guid owner, Guid page, IPage live) {
     // Popups and downloads belong to the opener's owner. A page closed outside the host, by a
     // site or by the browser, removes itself so listings stay truthful.
-    _ = BrowserInteraction.For(live);
     live.FrameNavigated += (_, frame) => {
       if (frame == live.MainFrame)
         NotifyChanged(owner);
@@ -291,7 +291,13 @@ internal sealed class BrowserHost : IAsyncDisposable {
       await CloseQuietlyAsync(popup);
       return;
     }
+    BrowserInteraction interaction = BrowserInteraction.For(popup);
     Attach(owner, registered.Id, popup);
+    try {
+      await interaction.WatchDocumentCommitsAsync();
+    } catch (PlaywrightException) {
+      // A popup may close while the browser is attaching its DevTools session.
+    }
     NotifyChanged(owner);
     if (evicted is not null)
       await CloseEvictedAsync(owner, evicted);

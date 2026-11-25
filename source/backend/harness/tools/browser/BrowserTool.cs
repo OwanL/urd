@@ -447,20 +447,27 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
       lines.Add(DialogBlock(open));
     } else {
       (string[] errors, string[] failed) = interaction.DrainEvents();
-      lines.AddRange(errors.Select(text => $"Console error: {text}"));
-      lines.AddRange(failed.Select(text => $"Failed request: {text}"));
-      if (withSnapshot) {
-        lines.Add(active.Page.Url);
-        try {
-          string text = await snapshots.DescribeAsync(active.Page, interaction, Body(lines), full, @ref,
-              cancellation).ConfigureAwait(false);
-          return new ToolOutput(text, images);
-        } catch (Exception error) when (error is PlaywrightException or TimeoutException) {
-          // The page may have opened a dialog while the action ran; that stays the headline.
-          if (interaction.PendingDialog is not { } appeared)
-            throw;
-          lines.Add(DialogBlock(appeared));
+      try {
+        lines.AddRange(errors.Select(text => $"Console error: {text}"));
+        lines.AddRange(failed.Select(text => $"Failed request: {text}"));
+        if (withSnapshot) {
+          lines.Add(active.Page.Url);
+          try {
+            string text = await snapshots.DescribeAsync(active.Page, interaction, Body(lines), full, @ref,
+                cancellation).ConfigureAwait(false);
+            return new ToolOutput(text, images);
+          } catch (Exception error) when (error is PlaywrightException or TimeoutException) {
+            // The page may have opened a dialog while the action ran; that stays the headline.
+            if (interaction.PendingDialog is not { } appeared)
+              throw;
+            lines.Add(DialogBlock(appeared));
+          }
         }
+        return new ToolOutput(Body(lines), images);
+      } catch {
+        // A result was not built, so deduplicated events must be available to the next action.
+        interaction.RestoreEvents(errors, failed);
+        throw;
       }
     }
     return new ToolOutput(Body(lines), images);

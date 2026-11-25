@@ -146,8 +146,10 @@ Measured with gpt-6.1-terra agents, 3 runs per task: on large app-like pages (gr
 
 An open dialog (alert, confirm, prompt, leave-page) is reported in the result and waits for
 `dialog` rather than being dismissed silently. Results also list new console errors and failed
-requests, when there are any, for testing web apps. Drag is omitted as rare; the agent asks the
-user instead.
+requests, when there are any, for testing web apps. Each distinct error or failed request is
+reported once per page document. Only a main-frame document commit resets deduplication;
+fragment/history changes and downloads do not, even while a navigation is pending. Drag is
+omitted as rare; the agent asks the user instead.
 
 Downloads save to a per-session folder in the OS temp directory, removed when the chat closes;
 the agent moves files elsewhere if they should be kept. The action result gives the path. Headless

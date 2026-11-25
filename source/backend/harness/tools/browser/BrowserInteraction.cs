@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using Microsoft.Playwright;
 
 namespace Urd.Core.Tools;
@@ -22,6 +23,8 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
   private readonly SemaphoreSlim viewportGate = new(1, 1);
   private readonly Queue<string> pageErrors = new();
   private readonly Queue<string> failedRequests = new();
+  private readonly HashSet<string> seenErrors = new();
+  private readonly HashSet<string> seenRequests = new();
   private PendingDialog? openDialog;
   private ScreenshotRecord? screenshot;
   private TaskCompletionSource dialogAppeared = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -36,9 +39,25 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
     page.Console += OnConsole;
     page.RequestFailed += OnRequestFailed;
     page.FrameNavigated += (_, frame) => {
+      // Keep invalidating snapshot captures on URL changes within the document too.
       if (frame == page.MainFrame)
         Interlocked.Increment(ref document);
     };
+  }
+
+  // Playwright's FrameNavigated conflates document commits with history/fragment changes.
+  // Chromium reports those separately. The page-target session ends when the page closes.
+  internal async Task WatchDocumentCommitsAsync() {
+    ICDPSession session = await page.Context.NewCDPSessionAsync(page).ConfigureAwait(false);
+    session.Event("Page.frameNavigated").OnEvent += (sender, data) => {
+      if (data is not JsonElement navigation || navigation.GetProperty("frame").TryGetProperty("parentId", out _))
+        return;
+      lock (gate) {
+        seenErrors.Clear();
+        seenRequests.Clear();
+      }
+    };
+    await session.SendAsync("Page.enable").ConfigureAwait(false);
   }
 
   // Creates the state on first use and attaches its handlers; later calls return the same state.
@@ -124,8 +143,34 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
   }
 
   internal (string[] Errors, string[] FailedRequests) DrainEvents() {
-    lock (gate)
-      return ([.. pageErrors], [.. failedRequests]);
+    lock (gate) {
+      (string[] Errors, string[] FailedRequests) events = ([.. pageErrors], [.. failedRequests]);
+      pageErrors.Clear();
+      failedRequests.Clear();
+      return events;
+    }
+  }
+
+  // Puts drained events back when the result that drained them fails: the events were never
+  // reported, and deduplication never records them again, so without this they would be lost.
+  internal void RestoreEvents(string[] errors, string[] failed) {
+    if (errors.Length is 0 && failed.Length is 0)
+      return;
+    lock (gate) {
+      Restore(pageErrors, errors);
+      Restore(failedRequests, failed);
+    }
+  }
+
+  // Caller holds the gate. Restored events are older than anything recorded after the drain,
+  // and the newest are kept when the queue overflows, as Record does.
+  private static void Restore(Queue<string> queue, string[] events) {
+    List<string> merged = [.. events, .. queue];
+    queue.Clear();
+    if (merged.Count > EventLimit)
+      merged.RemoveRange(0, merged.Count - EventLimit);
+    foreach (string line in merged)
+      queue.Enqueue(line);
   }
 
   // Serialized against screenshots on the same page, so a viewer resize and an agent screenshot
@@ -186,14 +231,19 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
   private void OnConsole(object? sender, IConsoleMessage message) {
     if (!string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
       return;
-    lock (gate)
-      Record(pageErrors, message.Text, message.Location);
+    lock (gate) {
+      if (seenErrors.Add(message.Text))
+        Record(pageErrors, message.Text, message.Location);
+    }
   }
 
   private void OnRequestFailed(object? sender, IRequest request) {
     string detail = string.IsNullOrWhiteSpace(request.Failure) ? "" : $" - {request.Failure}";
-    lock (gate)
-      Record(failedRequests, $"{request.Method} {request.Url}{detail}", null);
+    string text = $"{request.Method} {request.Url}{detail}";
+    lock (gate) {
+      if (seenRequests.Add(text))
+        Record(failedRequests, text, null);
+    }
   }
 
   // Caller holds the gate. Keeps one burst from flooding the action result.

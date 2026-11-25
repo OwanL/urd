@@ -19,6 +19,20 @@ belongs under `execution/`. This cleanup changes neither pruning behavior nor co
 snapshot preparation, activation or reuse; [backend development](backend-development.md#starting-context)
 describes resource discovery.
 
+**Subagent inheritance decision (2026-11-26):** subagents do not prune tools or
+instructions. At its initial boundary a child inherits its parent's active selection of
+both; after its own compaction it keeps its own previous selection. The inherited names
+and paths are reapplied to the child's fresh discovery and tool catalog, together with the
+child's current protections, so missing resources drop out and current file text is used.
+Skills are still pruned per child. If no inheritable selection exists, for example a parent
+snapshot saved before instruction paths were recorded, that category prunes as before.
+Inherited categories record no pruning row. Evidence from schema 34/35 subagent sessions:
+every child's instruction selection was a subset of its parent's, and the only tools children
+added were `answer_agent` and `cancel_pending_calls`, which are now protected by default. In 12
+of 15 children, the child's skill selection added skills the parent lacked, mostly
+review/testing/TDD skills, and the children read them. This removes about a fifth of a
+subagent's prepass cost; skill pruning still holds up the child's start.
+
 ## Selected direction
 
 Run three category-specific pruning conversations in parallel:

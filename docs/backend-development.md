@@ -111,7 +111,9 @@ directory with short model-facing IDs; unknown and duplicate returned IDs are ig
 On ordinary category failure, skills and instructions retain only protected resources,
 while tools retain all candidates; successful siblings still apply. Confirmed
 instruction-context overflow retries instruction selection with the largest unprotected files
-omitted first (by UTF-8 body size) and surfaces a cumulative warning. Stop cancels and
+omitted first (by UTF-8 body size) and surfaces a cumulative warning. Subagents prune only
+skills: they inherit tool names and instruction paths from their parent's active snapshot,
+or from their own after compaction (see the [pruning plan](pruning-plan.md)). Stop cancels and
 joins preparation instead of falling back. Core tool
 protections are defaults, not mandatory; running background tools gain runtime protection
 after compaction.

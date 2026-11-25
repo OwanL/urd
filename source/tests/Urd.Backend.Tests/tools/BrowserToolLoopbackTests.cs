@@ -69,6 +69,63 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
+  public async Task AbortedNavigationDoesNotEndTheWaitForItsSameUrlReplacement() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    using LoopbackSite trigger = new();
+    TaskCompletionSource replace = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    trigger.Add("/replace", "", () => replace.Task.WaitAsync(StepTimeout));
+    // Start a POST, then replace it with a GET to the same URL while the POST is still pending.
+    sandbox.Site.Add("/depart", $$"""
+      <!doctype html><html><body>
+      <form action="/arrival" method="post"
+            onsubmit="fetch('{{trigger.Url("/replace")}}', { mode: 'no-cors' }).then(() => location.href = '/arrival')">
+      <input aria-label="Depart"></form>
+      </body></html>
+      """);
+    TaskCompletionSource firstRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource firstAborted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource replacementRequested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    int requests = 0;
+    sandbox.Site.Add("/arrival", "<h1>Replacement ready</h1>", () => {
+      if (++requests == 1) {
+        firstRequested.SetResult();
+        return firstAborted.Task.WaitAsync(StepTimeout);
+      }
+      replacementRequested.TrySetResult();
+      return release.Task.WaitAsync(StepTimeout);
+    });
+    Guid owner = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/depart")));
+    IPage page = sandbox.PageOf(owner);
+    BrowserNavigation navigation = sandbox.InteractionOf(owner).Navigation;
+    int version = navigation.Version;
+    page.RequestFailed += (_, request) => {
+      if (request is { IsNavigationRequest: true, Method: "POST", Failure: "net::ERR_ABORTED" }
+          && request.Url == sandbox.Site.Url("/arrival"))
+        firstAborted.TrySetResult();
+    };
+    await page.GetByRole(AriaRole.Textbox, new() { Name = "Depart" }).FocusAsync();
+    Task<ToolOutput> press = sandbox.CallAsync(owner, "press", ("key", "Enter"));
+    try {
+      await firstRequested.Task.WaitAsync(StepTimeout);
+      // Check the navigation wait itself: Playwright's snapshot can independently wait for commit.
+      Task<bool> loading = navigation.WaitAfterAsync(version, allowGrace: false, CancellationToken.None);
+      replace.SetResult();
+      await replacementRequested.Task.WaitAsync(StepTimeout);
+      await Assert.ThrowsAsync<TimeoutException>(() => loading.WaitAsync(TimeSpan.FromMilliseconds(500)));
+    } finally {
+      replace.TrySetResult();
+      firstAborted.TrySetResult();
+      release.SetResult();
+    }
+
+    ToolOutput result = await press;
+    Assert.Contains("Replacement ready", result.Text);
+    Assert.DoesNotContain("Navigation did not reach", result.Text);
+  }
+
+  [Fact]
   public async Task InPageClickDoesNotWaitForAnOutstandingRequest() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     sandbox.Site.Add("/background", """

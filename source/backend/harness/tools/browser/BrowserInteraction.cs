@@ -244,7 +244,6 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
   }
 
   private void OnRequestFailed(object? sender, IRequest request) {
-    Navigation.RequestFailed(request, page.MainFrame);
     string detail = string.IsNullOrWhiteSpace(request.Failure) ? "" : $" - {request.Failure}";
     string text = Trim($"{request.Method} {request.Url}{detail}");
     lock (gate) {

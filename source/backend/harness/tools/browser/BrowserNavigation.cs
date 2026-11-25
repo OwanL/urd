@@ -12,7 +12,7 @@ internal sealed class BrowserNavigation {
   private readonly Lock gate = new();
   private string? mainFrame;
   private string? loader;
-  private string? requestUrl;
+  private string? requestedUrl;
   private bool committed;
   private bool contentLoaded;
   private bool finished = true;
@@ -28,7 +28,8 @@ internal sealed class BrowserNavigation {
     session.Event("Page.frameStartedNavigating").OnEvent += (_, data) => Started(data!.Value);
     session.Event("Page.frameNavigated").OnEvent += (_, data) => Committed(data!.Value);
     session.Event("Page.lifecycleEvent").OnEvent += (_, data) => Lifecycle(data!.Value);
-    session.Event("Page.downloadWillBegin").OnEvent += (_, data) => DownloadStarted(data!.Value);
+    session.Event("Network.loadingFailed").OnEvent += (_, data) => RequestFailed(data!.Value);
+    await session.SendAsync("Network.enable").ConfigureAwait(false);
     await session.SendAsync("Page.enable").ConfigureAwait(false);
     await session.SendAsync("Page.setLifecycleEventsEnabled", new Dictionary<string, object> { ["enabled"] = true })
         .ConfigureAwait(false);
@@ -74,7 +75,7 @@ internal sealed class BrowserNavigation {
   private void SameDocument(JsonElement data) {
     lock (gate) {
       if (loader is null && data.GetProperty("frameId").GetString() == mainFrame
-          && data.GetProperty("url").GetString() == requestUrl)
+          && data.GetProperty("url").GetString() == requestedUrl)
         Finish();
     }
   }
@@ -85,7 +86,7 @@ internal sealed class BrowserNavigation {
     lock (gate) {
       string? id = data.GetProperty("loaderId").GetString();
       if (data.GetProperty("frameId").GetString() == mainFrame && id != loader)
-        Start(id, data.GetProperty("url").GetString());
+        Start(id, null);
     }
   }
 
@@ -116,32 +117,13 @@ internal sealed class BrowserNavigation {
     }
   }
 
-  internal void RequestFailed(IRequest request, IFrame main) {
-    if (!request.IsNavigationRequest || request.Failure != "net::ERR_ABORTED")
+  private void RequestFailed(JsonElement data) {
+    if (data.GetProperty("type").GetString() != "Document" || data.GetProperty("errorText").GetString() != "net::ERR_ABORTED")
       return;
-    // Redirects keep the loader but Playwright reports the failure on the last request.
-    while (request.RedirectedFrom is { } previous)
-      request = previous;
+    // Chromium uses the loader ID as the document request ID, including across redirects.
+    // Downloads also abort their document request; an older abort cannot end a newer wait.
     lock (gate) {
-      if (!committed && !finished && requestUrl is not null && IsFrameRequest(request, main, requestUrl))
-        Finish();
-    }
-  }
-
-  private static bool IsFrameRequest(IRequest request, IFrame frame, string url) {
-    if (request.Url.Split('#')[0] != url.Split('#')[0])
-      return false;
-    try {
-      return request.Frame == frame;
-    } catch (PlaywrightException) {
-      // A request can fail before Playwright has attached its frame.
-      return false;
-    }
-  }
-
-  private void DownloadStarted(JsonElement data) {
-    lock (gate) {
-      if (!committed && data.GetProperty("frameId").GetString() == mainFrame)
+      if (!committed && !finished && loader is not null && data.GetProperty("requestId").GetString() == loader)
         Finish();
     }
   }
@@ -154,7 +136,7 @@ internal sealed class BrowserNavigation {
   // Caller holds the gate. If another navigation supersedes this one, keep the same wait budget.
   private void Start(string? id, string? url) {
     loader = id;
-    requestUrl = url;
+    requestedUrl = url;
     committed = contentLoaded = finished = false;
     Interlocked.Increment(ref version);
     nextStart?.TrySetResult();

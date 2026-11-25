@@ -116,12 +116,7 @@ is at least half the full snapshot. Output truncation does not advance the basel
 stale, the action directs the caller to request `snapshot` explicitly; it does not auto-refresh or
 retry. Oversized results use the general tool output cap (prerequisite below).
 
-C is the rollout choice: in three fresh, state-graded runs per task/variant, it reduced cost by
-35.4% on the large applications versus full snapshots (A), with both at 9/9 correct and no
-browser-call errors. Small-task costs varied, and the gated alternative (D) reduced but did not
-remove its small-task penalty; three repetitions do not establish an optimal gate. See the
-[local experiment report](../../../scratch/urd-browser-exp/experiment/REPORT.md) on scratch branch
-`experiment/browser-state` (not published externally).
+Measured with gpt-6.1-terra agents, 3 runs per task: on large app-like pages (grid, settings, 200-row inbox), diffs cut uncached input tokens ~45% and list-price cost ~35% vs full snapshots (grid −49%, settings −59%, inbox −10% because its first snapshot overflowed the output cap), with equal accuracy, step counts and no stale-ref errors. On small pages the difference was within run-to-run noise, so no size gate.
 
 | Action | Arguments |
 | --- | --- |

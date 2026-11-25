@@ -193,6 +193,19 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
+  public async Task ActionReturnsFullSnapshotWhenChangesAffectMostOfThePage() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/many-change")));
+    Assert.Contains("Initial row 1", navigated.Text);
+
+    ToolOutput changed = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Change most")));
+    Assert.Contains("Updated row 6", changed.Text);
+    Assert.Contains("Stable row 7", changed.Text);
+    Assert.DoesNotContain("Changed since the previous action:", changed.Text);
+  }
+
+  [Fact]
   public async Task NavigatingToTheSameUrlReturnsTheFullSnapshotForTheNewDocument() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     Guid owner = Guid.NewGuid();
@@ -343,6 +356,19 @@ public sealed class BrowserToolLoopbackTests {
         <button onclick="document.getElementById('out').textContent = 'swapped'; document.getElementById('temp').remove()">Swap</button>
         <button id="temp">Temporary</button>
         <div id="out">initial</div>
+        </body></html>
+        """);
+      sandbox.Site.Add("/many-change", """
+        <!doctype html><html><body>
+        <button onclick="for (let i = 1; i <= 6; i++) document.getElementById('row-' + i).textContent = 'Updated row ' + i + ': ' + 'changed '.repeat(12)">Change most</button>
+        <button id="row-1">Initial row 1: original original original original original original original original original original original original</button>
+        <button id="row-2">Initial row 2: original original original original original original original original original original original original</button>
+        <button id="row-3">Initial row 3: original original original original original original original original original original original original</button>
+        <button id="row-4">Initial row 4: original original original original original original original original original original original original</button>
+        <button id="row-5">Initial row 5: original original original original original original original original original original original original</button>
+        <button id="row-6">Initial row 6: original original original original original original original original original original original original</button>
+        <button id="row-7">Stable row 7: original original original original original original original original original original original original</button>
+        <button id="row-8">Stable row 8: original original original original original original original original original original original original</button>
         </body></html>
         """);
       sandbox.Site.Add("/reload", """

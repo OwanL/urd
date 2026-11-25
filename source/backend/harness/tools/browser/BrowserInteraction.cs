@@ -26,12 +26,19 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
   private ScreenshotRecord? screenshot;
   private TaskCompletionSource dialogAppeared = new(TaskCreationOptions.RunContinuationsAsynchronously);
   private int epoch;
+  private int document;
+
+  internal int Document => Volatile.Read(ref document);
 
   private BrowserInteraction(IPage page) {
     this.page = page;
     page.Dialog += OnDialog;
     page.Console += OnConsole;
     page.RequestFailed += OnRequestFailed;
+    page.FrameNavigated += (_, frame) => {
+      if (frame == page.MainFrame)
+        Interlocked.Increment(ref document);
+    };
   }
 
   // Creates the state on first use and attaches its handlers; later calls return the same state.

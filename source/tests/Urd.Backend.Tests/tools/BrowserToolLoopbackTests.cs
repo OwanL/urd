@@ -10,9 +10,11 @@ using Xunit;
 namespace Urd.Backend.Tests.Tools;
 
 // Real BrowserTool on a real BrowserHost, served pages on 127.0.0.1 and a disposable browser
-// profile: ref clicks must act, every action must return the post-action snapshot, screenshot
-// coordinates must reject stale or outside viewports even under concurrent resizes, and dialogs
-// must be reported instead of hanging the tool call.
+// profile: ref clicks must act, every action must return the post-action state (a diff against
+// the last snapshot a result could show, full whenever the document changed or a result spilled),
+// screenshot coordinates must reject stale or outside viewports even under concurrent resizes,
+// stale refs must fail and point at the snapshot action, and dialogs must be reported instead of
+// hanging the tool call.
 public sealed class BrowserToolLoopbackTests {
   private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(30);
 
@@ -171,6 +173,94 @@ public sealed class BrowserToolLoopbackTests {
     Assert.True(landed >= 10, $"Only {landed} of 30 click_at calls landed; the atomic path was barely exercised.");
   }
 
+  [Fact]
+  public async Task ActionResultRepeatsOnlyWhatChangedOnThePage() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/grow")));
+    Assert.Contains("parked", navigated.Text);
+
+    ToolOutput swapped = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Swap")));
+    Assert.Contains("swapped", swapped.Text);
+    Assert.Contains("Removed:", swapped.Text);
+    Assert.Contains(RefFor(navigated.Text, "Temporary"), swapped.Text);
+    // The diff must not replay content the last seen snapshot already showed.
+    Assert.DoesNotContain("parked", swapped.Text);
+
+    ToolOutput snapshot = await sandbox.CallAsync(owner, "snapshot");
+    Assert.Contains("parked", snapshot.Text);
+    Assert.Contains("swapped", snapshot.Text);
+  }
+
+  [Fact]
+  public async Task NavigatingToTheSameUrlReturnsTheFullSnapshotForTheNewDocument() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    ToolOutput first = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/reload")));
+    ToolOutput reloaded = await sandbox.CallAsync(owner, "click", ("ref", RefFor(first.Text, "Reload")));
+    Assert.Contains("Venus", reloaded.Text);
+    Assert.Contains("Earth", reloaded.Text);
+    Assert.Contains("Mars", reloaded.Text);
+
+    ToolOutput marked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(reloaded.Text, "Mark")));
+    Assert.Contains("marked", marked.Text);
+  }
+
+  [Fact]
+  public async Task ReorderNamesTheMovedItemAndItsFreshRefStillTargetsIt() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/reorder")));
+
+    ToolOutput moved = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Move")));
+    Assert.DoesNotContain("astronomy note", moved.Text);
+
+    int venus = moved.Text.IndexOf("Venus", StringComparison.Ordinal);
+    int earth = moved.Text.IndexOf("Earth", StringComparison.Ordinal);
+    int mercury = moved.Text.IndexOf("Mercury", StringComparison.Ordinal);
+    Assert.True(venus >= 0 && earth > venus && mercury > earth,
+        $"The reordered snapshot should list Venus, Earth, Mercury:\n{moved.Text}");
+
+    // The moved element is where the reordered snapshot says it is.
+    await sandbox.CallAsync(owner, "click", ("ref", RefFor(moved.Text, "Mercury")));
+    Assert.Equal("Mercury", await sandbox.OutTextAsync(owner));
+  }
+
+  [Fact]
+  public async Task SpilledResultsDoNotAdvanceTheDiffBaseline() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/flood")));
+    string flood = RefFor(navigated.Text, "Flood");
+
+    ToolOutput flooded = await sandbox.CallAsync(owner, "click", ("ref", flood));
+    // The flooded page overflows the shared output cap, so the result spilled and the model
+    // never saw that snapshot inline; it cannot become the baseline later diffs refer to.
+    Assert.Contains("Output truncated", flooded.Text);
+
+    // The button sits above the list, so its ref is still inside the spilled preview.
+    string append = RefFor(flooded.Text, "Append");
+    ToolOutput appended = await sandbox.CallAsync(owner, "click", ("ref", append));
+    // A diff against the spilled snapshot would hide the flood and report only the append.
+    Assert.Contains("item-0001", appended.Text);
+  }
+
+  [Fact]
+  public async Task ActingOnAStaleRefFailsAndPointsToTheSnapshotAction() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/stale")));
+    string target = RefFor(navigated.Text, "Target");
+
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/elsewhere")));
+    // The old document's ref must not resolve against the new document, even where the new
+    // snapshot reuses the same ref number for a different element.
+    InvalidOperationException stale = await Assert.ThrowsAsync<InvalidOperationException>(
+        () => sandbox.CallAsync(owner, "click", ("ref", target)));
+    Assert.Contains("snapshot", stale.Message);
+    Assert.Equal("quiet", await sandbox.OutTextAsync(owner));
+  }
+
   private static async Task ResizeLoopAsync(BrowserInteraction interaction, TimeSpan startDelay,
       CancellationToken cancellation) {
     try {
@@ -245,6 +335,65 @@ public sealed class BrowserToolLoopbackTests {
         <div id="out"></div>
         </body></html>
         """);
+      sandbox.Site.Add("/grow", """
+        <!doctype html><html><body>
+        <p>parked: this information stays visible across edits, and must not be repeated in the update.</p>
+        <p>The document also has a second unchanged paragraph to make a partial result worthwhile.</p>
+        <p>This third bit of stationary content remains visible after the temporary button goes away.</p>
+        <button onclick="document.getElementById('out').textContent = 'swapped'; document.getElementById('temp').remove()">Swap</button>
+        <button id="temp">Temporary</button>
+        <div id="out">initial</div>
+        </body></html>
+        """);
+      sandbox.Site.Add("/reload", """
+        <!doctype html><html><body>
+        <ul><li>Venus</li><li>Earth</li><li>Mars</li></ul><button onclick="location.reload()">Reload</button>
+        <button onclick="document.getElementById('out').textContent = 'marked'">Mark</button>
+        <div id="out">blank</div>
+        </body></html>
+        """);
+      sandbox.Site.Add("/reorder", """
+        <!doctype html><html><body>
+        <p>An unchanged astronomy note: the objects are shown in their current order below.</p>
+        <p>Observatories track the position and motion of these planets over many years.</p>
+        <p>The list can be sorted without changing the surrounding page or opening a new tab.</p>
+        <p>Choose a planet to see its name, or move the first item to the end of the list.</p>
+        <ul id="list">
+          <li><button onclick="document.getElementById('out').textContent += 'Mercury'">Mercury</button></li>
+          <li><button onclick="document.getElementById('out').textContent += 'Venus'">Venus</button></li>
+          <li><button onclick="document.getElementById('out').textContent += 'Earth'">Earth</button></li>
+        </ul>
+        <button onclick="document.getElementById('list').appendChild(document.getElementById('list').firstElementChild)">Move</button>
+        <div id="out"></div>
+        </body></html>
+        """);
+      sandbox.Site.Add("/stale", """
+        <!doctype html><html><body>
+        <button onclick="document.getElementById('out').textContent = 'hit'">Target</button>
+        <div id="out">quiet</div>
+        </body></html>
+        """);
+      sandbox.Site.Add("/elsewhere", """
+        <!doctype html><html><body>
+        <button onclick="document.getElementById('out').textContent = 'struck'">Fallback</button>
+        <div id="out">quiet</div>
+        </body></html>
+        """);
+      sandbox.Site.Add("/flood", """
+        <!doctype html><html><body>
+        <button onclick="document.getElementById('list').insertAdjacentHTML('beforeend', '<li>zed marker</li>')">Append</button>
+        <button onclick="flood()">Flood</button>
+        <ul id="list"></ul>
+        <script>
+        function flood() {
+          let html = '';
+          for (let i = 1; i <= 900; i++)
+            html += '<li>item-' + String(i).padStart(4, '0') + ' ridge lantern meadow kettle arch vault plume cedar</li>';
+          document.getElementById('list').innerHTML = html;
+        }
+        </script>
+        </body></html>
+        """);
       sandbox.host = new BrowserHost(sandbox.profileRoot, _ => Task.FromResult(false));
       sandbox.Tool = new BrowserTool(sandbox.host);
       // Provisioning surfaces here, before any assertion, on the machine's first run.
@@ -280,8 +429,11 @@ public sealed class BrowserToolLoopbackTests {
       using (var writer = new Utf8JsonWriter(stream))
         values.WriteTo(writer);
       JsonElement arguments = JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
-      var context = new HarnessToolContext(owner, Guid.NewGuid(), "call", null!);
-      return await Tool.RunAsync(arguments, context, CancellationToken.None).WaitAsync(StepTimeout);
+      var context = new HarnessToolContext(owner, owner, "call", null!) { RequestId = Guid.NewGuid() };
+      ToolOutput result = await Tool.RunAsync(arguments, context, CancellationToken.None).WaitAsync(StepTimeout);
+      // Production applies the shared output cap to every tool result; mirror it here so spill
+      // behavior is exercised the way the model actually receives it.
+      return await ToolOutputLimit.ApplyAsync("browser", result);
     }
 
     public async Task<ToolOutput> WaitForSnapshotTextAsync(Guid owner, string expected) {

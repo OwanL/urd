@@ -134,8 +134,8 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    if (!await RunPagedCommandAsync(interaction, () => page.Page.GotoAsync(url).WaitAsync(cancellation), cancellation)
-            .ConfigureAwait(false))
+    if (await RunPagedCommandAsync(interaction, () => page.Page.GotoAsync(url).WaitAsync(cancellation), cancellation)
+            .ConfigureAwait(false) == PageCommandResult.Dialog)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
     host.Touch(owner, page.Id);
     string note = newTab ? $"Opened {url} in a new page." : $"Navigated to {url}.";
@@ -243,8 +243,8 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    if (!await RunPagedCommandAsync(interaction, () => page.Page.GoBackAsync(), cancellation)
-            .ConfigureAwait(false))
+    if (await RunPagedCommandAsync(interaction, () => page.Page.GoBackAsync(), cancellation)
+            .ConfigureAwait(false) == PageCommandResult.Dialog)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
     return await ResultAsync(owner, ["Navigated back."], cancellation, full: true).ConfigureAwait(false);
   }
@@ -377,7 +377,8 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     if (interaction.PendingDialog is not null)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
     Task<JsonElement> evaluation = page.Page.EvaluateAsync<JsonElement>(expression).WaitAsync(cancellation);
-    if (!await RunPagedCommandAsync(interaction, () => evaluation, cancellation).ConfigureAwait(false))
+    if (await RunPagedCommandAsync(interaction, () => evaluation, cancellation)
+        .ConfigureAwait(false) == PageCommandResult.Dialog)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
     JsonElement outcome = evaluation.Result;
     string value = outcome.ValueKind is JsonValueKind.Undefined ? "undefined" : JsonSerializer.Serialize(outcome);
@@ -395,14 +396,20 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
   private async Task<ToolOutput> RunActionAsync(Guid owner, BrowserInteraction interaction, string note,
       Func<Task> command, CancellationToken cancellation, bool allowGrace = false) {
     List<string> notes = [note];
-    if (!await RunPagedCommandAsync(interaction, command, cancellation, notes, allowGrace).ConfigureAwait(false))
+    PageCommandResult result = await RunPagedCommandAsync(interaction, command, cancellation, notes, allowGrace)
+        .ConfigureAwait(false);
+    if (result == PageCommandResult.Dialog)
       notes.Clear();
-    return await ResultAsync(owner, notes, cancellation).ConfigureAwait(false);
+    // Playwright's accessibility snapshot can itself wait for commit, defeating the action's timeout.
+    return await ResultAsync(owner, notes, [], withSnapshot: result != PageCommandResult.NavigationPending,
+        cancellation).ConfigureAwait(false);
   }
+
+  private enum PageCommandResult { Ready, Dialog, NavigationPending }
 
   // The dialog signal covers both the command and any navigation it started. Stop waiting on
   // cancellation or a dialog without retrying input that may already have taken effect.
-  private static async Task<bool> RunPagedCommandAsync(BrowserInteraction interaction, Func<Task> command,
+  private static async Task<PageCommandResult> RunPagedCommandAsync(BrowserInteraction interaction, Func<Task> command,
       CancellationToken cancellation, List<string>? actionNotes = null, bool allowGrace = false) {
     cancellation.ThrowIfCancellationRequested();
     using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
@@ -411,28 +418,36 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     try {
       if (dialogPending.IsCompleted) {
         cancellation.ThrowIfCancellationRequested();
-        return false;
+        return PageCommandResult.Dialog;
       }
       Task commandTask = command();
       if (await Task.WhenAny(commandTask, dialogPending).ConfigureAwait(false) != commandTask) {
         _ = AwaitQuietlyAsync(commandTask);
         cancellation.ThrowIfCancellationRequested();
-        return false;
+        return PageCommandResult.Dialog;
       }
       if (cancellation.IsCancellationRequested || interaction.PendingDialog is not null) {
         _ = AwaitQuietlyAsync(commandTask);
         cancellation.ThrowIfCancellationRequested();
-        return false;
+        return PageCommandResult.Dialog;
       }
       await commandTask.ConfigureAwait(false);
+      NavigationWait navigation = NavigationWait.Ready;
       if (actionNotes is not null) {
-        Task<bool> loading = interaction.Navigation.WaitAfterAsync(before, allowGrace, waiting.Token);
-        if (await Task.WhenAny(loading, dialogPending).ConfigureAwait(false) == loading
-            && !await loading.ConfigureAwait(false))
-          actionNotes.Add("Navigation did not reach DOMContentLoaded within 10 seconds; the page view may be incomplete.");
+        Task<NavigationWait> loading = interaction.Navigation.WaitAfterAsync(before, allowGrace, waiting.Token);
+        if (await Task.WhenAny(loading, dialogPending).ConfigureAwait(false) == loading)
+          navigation = await loading.ConfigureAwait(false);
       }
       cancellation.ThrowIfCancellationRequested();
-      return !dialogPending.IsCompleted;
+      if (dialogPending.IsCompleted)
+        return PageCommandResult.Dialog;
+      if (navigation == NavigationWait.TimedOutBeforeCommit) {
+        actionNotes!.Add("Navigation did not commit within 10 seconds. Page view omitted; use snapshot after the page loads.");
+        return PageCommandResult.NavigationPending;
+      }
+      if (navigation == NavigationWait.TimedOutAfterCommit)
+        actionNotes!.Add("Navigation did not reach DOMContentLoaded within 10 seconds; the page view may be incomplete.");
+      return PageCommandResult.Ready;
     } finally {
       await waiting.CancelAsync().ConfigureAwait(false);
     }

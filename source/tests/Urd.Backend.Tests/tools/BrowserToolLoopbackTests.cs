@@ -110,7 +110,7 @@ public sealed class BrowserToolLoopbackTests {
     try {
       await firstRequested.Task.WaitAsync(StepTimeout);
       // Check the navigation wait itself: Playwright's snapshot can independently wait for commit.
-      Task<bool> loading = navigation.WaitAfterAsync(version, allowGrace: false, CancellationToken.None);
+      Task<NavigationWait> loading = navigation.WaitAfterAsync(version, allowGrace: false, CancellationToken.None);
       replace.SetResult();
       await replacementRequested.Task.WaitAsync(StepTimeout);
       await Assert.ThrowsAsync<TimeoutException>(() => loading.WaitAsync(TimeSpan.FromMilliseconds(500)));
@@ -185,6 +185,35 @@ public sealed class BrowserToolLoopbackTests {
     } finally {
       release.SetResult();
     }
+  }
+
+  [Fact]
+  public async Task ActionNavigationReportsATimeoutWhileTheDocumentResponseIsStillHeld() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/depart", "<a href='/held'>Depart</a><h1>Old document</h1>");
+    TaskCompletionSource requested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    sandbox.Site.Add("/held", "<h1>New document</h1>", () => {
+      requested.SetResult();
+      return release.Task.WaitAsync(StepTimeout);
+    });
+    Guid owner = Guid.NewGuid();
+    ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/depart")));
+    string @ref = RefFor(before.Text, "Depart");
+    Task<ToolOutput> click = sandbox.CallAsync(owner, "click", ("ref", @ref));
+    try {
+      await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      ToolOutput result = await click.WaitAsync(TimeSpan.FromSeconds(15));
+      Assert.Contains($"Clicked {@ref}.", result.Text);
+      Assert.Contains("Navigation did not commit within 10 seconds", result.Text);
+      Assert.Contains("Page view omitted", result.Text);
+      Assert.DoesNotContain("Old document", result.Text);
+      Assert.DoesNotContain("New document", result.Text);
+    } finally {
+      release.SetResult();
+    }
+
+    await sandbox.WaitForSnapshotTextAsync(owner, "New document");
   }
 
   [Fact]

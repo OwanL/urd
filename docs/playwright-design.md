@@ -117,7 +117,9 @@ structured diff is at least half its size.
 
 When an input action starts a main-frame document navigation, the tool waits for that document
 (not the old one) to reach `DOMContentLoaded` before taking the page view. The wait is capped at
-10 seconds after input returns; on timeout the result warns that the view may be incomplete.
+10 seconds after input returns. If the new document hasn't committed by then, the result warns
+that navigation is still pending and omits the page view rather than waiting for a snapshot.
+If it has committed, the result includes the view with a warning that it may be incomplete.
 A dialog interrupts the wait. An aborted document request, including an attachment download,
 ends the wait only if it still belongs to the tracked navigation after 40 ms. History traversal
 can report the abort before the replacement starts; the replacement shares the original timeout.

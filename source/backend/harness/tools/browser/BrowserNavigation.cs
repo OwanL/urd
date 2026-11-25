@@ -41,7 +41,7 @@ internal sealed class BrowserNavigation {
 
   // Input can return just before Chromium emits its navigation event. Only give direct
   // click/key input a short grace, and stop it immediately when an event is received.
-  internal async Task<bool> WaitAfterAsync(int before, bool allowGrace, CancellationToken cancellation) {
+  internal async Task<NavigationWait> WaitAfterAsync(int before, bool allowGrace, CancellationToken cancellation) {
     Task? start;
     lock (gate)
       start = before == version && allowGrace
@@ -53,14 +53,18 @@ internal sealed class BrowserNavigation {
     Task loading;
     lock (gate) {
       if (before == version || finished)
-        return true;
+        return NavigationWait.Ready;
       loading = (completion ??= new(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
     }
     try {
       await loading.WaitAsync(LoadTimeout, cancellation).ConfigureAwait(false);
-      return true;
+      return NavigationWait.Ready;
     } catch (TimeoutException) {
-      return false;
+      lock (gate) {
+        if (finished)
+          return NavigationWait.Ready;
+        return committed ? NavigationWait.TimedOutAfterCommit : NavigationWait.TimedOutBeforeCommit;
+      }
     }
   }
 
@@ -159,3 +163,5 @@ internal sealed class BrowserNavigation {
     completion = null;
   }
 }
+
+internal enum NavigationWait { Ready, TimedOutBeforeCommit, TimedOutAfterCommit }

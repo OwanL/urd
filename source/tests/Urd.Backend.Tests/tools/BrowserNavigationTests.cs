@@ -18,7 +18,7 @@ public sealed class BrowserNavigationTests {
     session.Emit("Page.frameStartedNavigating", """
       {"frameId":"main","loaderId":"pending","navigationType":"differentDocument"}
       """);
-    Task<bool>? loading = waitBeforeAbort ? navigation.WaitAfterAsync(before, false, cancellation.Token) : null;
+    Task<NavigationWait>? loading = waitBeforeAbort ? navigation.WaitAfterAsync(before, false, cancellation.Token) : null;
 
     // history.back() can abort the active request before reporting the history loader.
     session.Emit("Network.loadingFailed", """
@@ -36,7 +36,7 @@ public sealed class BrowserNavigationTests {
     session.Emit("Page.lifecycleEvent", """
       {"frameId":"main","loaderId":"history","name":"DOMContentLoaded"}
       """);
-    Assert.True(await loading);
+    Assert.Equal(NavigationWait.Ready, await loading);
   }
 
   private sealed class NavigationSession : ICDPSession {

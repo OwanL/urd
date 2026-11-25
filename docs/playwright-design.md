@@ -113,7 +113,8 @@ One `browser` tool. Navigation, a new document and `snapshot` without a ref retu
 view. Otherwise send changed subtrees and removals since the last full-page capture, with
 reordered siblings in their new order. With no baseline or no reliable diff, return the full
 view. Prefer whichever view fits inline if only one fits; otherwise use the full view when the
-structured diff is at least half its size.
+structured diff is at least half its size. A `tabs` listing returns page IDs and URLs without a
+page view; selecting a page returns its normal diff, unchanged notice or full view.
 
 When an input action starts a main-frame document navigation, the tool waits for that document
 (not the old one) to reach `DOMContentLoaded` before taking the page view. The wait is capped at
@@ -150,7 +151,7 @@ Measured with gpt-6.1-terra agents, 3 runs per task: on large app-like pages (gr
 | `press` | `key` |
 | `select` | `ref`, `values` |
 | `back` | |
-| `tabs` | optional `select` or `close` page id |
+| `tabs` | omit both IDs to list without a page view; optional `select` or `close` page ID |
 | `screenshot` | returns an image for vision-capable models |
 | `click_at` | `x`, `y` from the last screenshot (e.g. canvas controls) |
 | `wait` | `text` or `ms` |

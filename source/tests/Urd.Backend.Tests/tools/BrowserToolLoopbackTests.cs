@@ -278,14 +278,60 @@ public sealed class BrowserToolLoopbackTests {
     ToolOutput omitted = await sandbox.CallAsync(owner, "tabs");
     string pageId = PageIdFor(omitted.Text, url);
     Assert.Contains("Open pages (oldest first):", omitted.Text);
+    Assert.DoesNotContain("Act", omitted.Text);
+    Assert.DoesNotContain("idle", omitted.Text);
 
     ToolOutput empty = await sandbox.CallAsync(owner, "tabs", ("select", ""), ("close", ""));
     Assert.Contains("Open pages (oldest first):", empty.Text);
     Assert.Contains(pageId, empty.Text);
+    Assert.DoesNotContain("Act", empty.Text);
+    Assert.DoesNotContain("idle", empty.Text);
 
     ToolOutput whitespace = await sandbox.CallAsync(owner, "tabs", ("select", " "), ("close", "\t"));
     Assert.Contains("Open pages (oldest first):", whitespace.Text);
     Assert.Contains(pageId, whitespace.Text);
+    Assert.DoesNotContain("Act", whitespace.Text);
+    Assert.DoesNotContain("idle", whitespace.Text);
+  }
+
+  [Fact]
+  public async Task TabsSelectReturnsTheSelectedPagesNormalDiffAndUnchangedView() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    string firstUrl = sandbox.Site.Url("/grow");
+    await sandbox.CallAsync(owner, "navigate", ("url", firstUrl));
+    ToolOutput listing = await sandbox.CallAsync(owner, "tabs");
+    string firstId = PageIdFor(listing.Text, firstUrl);
+
+    await sandbox.CallAsync(owner, "evaluate",
+        ("expression", "document.getElementById('out').textContent = 'changed while unselected'"));
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/click")), ("new_tab", true));
+
+    ToolOutput selected = await sandbox.CallAsync(owner, "tabs", ("select", firstId));
+    Assert.Contains("Changed since the previous action:", selected.Text);
+    Assert.Contains("changed while unselected", selected.Text);
+    Assert.DoesNotContain("parked:", selected.Text);
+
+    ToolOutput unchanged = await sandbox.CallAsync(owner, "tabs", ("select", firstId));
+    Assert.Contains("Page unchanged.", unchanged.Text);
+  }
+
+  [Fact]
+  public async Task TabsListDoesNotSetTheBaselineForASelectedPagesFirstView() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/unseen", "<main>first view without a baseline</main>");
+    Guid owner = Guid.NewGuid();
+    BrowserPage<IPage> page = await sandbox.OpenPageAsync(owner);
+    await page.Page.GotoAsync(sandbox.Site.Url("/unseen"));
+
+    ToolOutput listing = await sandbox.CallAsync(owner, "tabs");
+    Assert.Contains(page.Id.ToString(), listing.Text);
+    Assert.DoesNotContain("first view without a baseline", listing.Text);
+
+    ToolOutput selected = await sandbox.CallAsync(owner, "tabs", ("select", page.Id.ToString()));
+    Assert.Contains("first view without a baseline", selected.Text);
+    Assert.DoesNotContain("Changed since the previous action:", selected.Text);
+    Assert.DoesNotContain("Page unchanged.", selected.Text);
   }
 
   [Fact]
@@ -1037,6 +1083,9 @@ public sealed class BrowserToolLoopbackTests {
 
     public BrowserInteraction InteractionOf(Guid owner) =>
         BrowserInteraction.For(PageOf(owner));
+
+    public Task<BrowserPage<IPage>> OpenPageAsync(Guid owner) =>
+        host.OpenAsync(owner, CancellationToken.None).WaitAsync(StepTimeout);
 
     // Direct page access, bypassing the tool's drains, for arming page state between tool calls.
     public IPage PageOf(Guid owner) =>

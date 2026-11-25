@@ -37,6 +37,139 @@ public sealed class BrowserToolLoopbackTests {
     Assert.Contains("clicked", snapshot.Text);
   }
 
+  [Theory]
+  [InlineData("press")]
+  [InlineData("click")]
+  public async Task NavigationTriggeredByAnActionReturnsTheLoadedDocument(string action) {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/depart", """
+      <!doctype html><html><body>
+      <form action="/slow-arrival"><input autofocus aria-label="Search"></form>
+      <a href="/slow-arrival">Depart</a>
+      </body></html>
+      """);
+    sandbox.Site.Add("/slow-arrival", """
+      <!doctype html><html><head><script defer src="/arrival-script"></script></head>
+      <body><h1>New document</h1><p id="status">Loading</p></body></html>
+      """, () => Task.Delay(250));
+    sandbox.Site.Add("/arrival-script", "document.getElementById('status').textContent = 'Arrival ready';",
+        () => Task.Delay(500), contentType: "text/javascript; charset=utf-8");
+    Guid owner = Guid.NewGuid();
+    ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/depart")));
+    await sandbox.PageOf(owner).GetByRole(AriaRole.Textbox, new() { Name = "Search" }).FocusAsync();
+
+    ToolOutput result = action == "press"
+        ? await sandbox.CallAsync(owner, "press", ("key", "Enter"))
+        : await sandbox.CallAsync(owner, "click", ("ref", RefFor(before.Text, "Depart")));
+
+    Assert.Contains(sandbox.Site.Url("/slow-arrival"), result.Text);
+    Assert.Contains("New document", result.Text);
+    Assert.Contains("Arrival ready", result.Text);
+    Assert.DoesNotContain("Changed since the previous action:", result.Text);
+  }
+
+  [Fact]
+  public async Task InPageClickDoesNotWaitForAnOutstandingRequest() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/background", """
+      <!doctype html><html><body>
+      <button onclick="fetch('/held'); document.getElementById('out').textContent = 'still here'">Fetch</button>
+      <p id="out"></p>
+      </body></html>
+      """);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    sandbox.Site.Add("/held", "held", () => release.Task.WaitAsync(StepTimeout));
+    Guid owner = Guid.NewGuid();
+    ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/background")));
+
+    try {
+      ToolOutput result = await sandbox.CallAsync(owner, "click", ("ref", RefFor(before.Text, "Fetch")))
+          .WaitAsync(TimeSpan.FromSeconds(5));
+      Assert.Contains("still here", result.Text);
+      Assert.DoesNotContain("Navigation did not reach", result.Text);
+    } finally {
+      release.SetResult();
+    }
+  }
+
+  [Fact]
+  public async Task FragmentClickDoesNotWaitForADocumentCommit() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    string url = sandbox.Site.Url("/fragment");
+    sandbox.Site.Add("/fragment", "<a href='#section'>Jump</a><h1 id='section'>Section</h1>");
+    Guid owner = Guid.NewGuid();
+    ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", url));
+
+    ToolOutput result = await sandbox.CallAsync(owner, "click", ("ref", RefFor(before.Text, "Jump")))
+        .WaitAsync(TimeSpan.FromSeconds(5));
+
+    Assert.Contains(url + "#section", result.Text);
+    Assert.DoesNotContain("Navigation did not reach", result.Text);
+  }
+
+  [Fact]
+  public async Task ActionNavigationReportsATimeoutWithoutLosingTheCurrentView() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/depart", "<a href='/stalled'>Depart</a>");
+    sandbox.Site.Add("/stalled", """
+      <!doctype html><html><head><script defer src="/held"></script></head><body>Waiting for script</body></html>
+      """);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    sandbox.Site.Add("/held", "", () => release.Task.WaitAsync(StepTimeout), contentType: "text/javascript");
+    Guid owner = Guid.NewGuid();
+    ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/depart")));
+
+    try {
+      ToolOutput result = await sandbox.CallAsync(owner, "click", ("ref", RefFor(before.Text, "Depart")))
+          .WaitAsync(TimeSpan.FromSeconds(15));
+      Assert.Contains("Navigation did not reach DOMContentLoaded within 10 seconds", result.Text);
+      Assert.Contains(sandbox.Site.Url("/stalled"), result.Text);
+      Assert.Contains("Waiting for script", result.Text);
+    } finally {
+      release.SetResult();
+    }
+  }
+
+  [Fact]
+  public async Task ActionNavigationWaitCanBeCancelledBeforeCommit() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/depart", "<a href='/held'>Depart</a>");
+    TaskCompletionSource requested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    sandbox.Site.Add("/held", "<p>Arrived after cancellation</p>", () => {
+      requested.SetResult();
+      return release.Task.WaitAsync(StepTimeout);
+    });
+    Guid owner = Guid.NewGuid();
+    ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/depart")));
+    using CancellationTokenSource cancellation = new();
+    Task<ToolOutput> click = sandbox.CallAsync(owner, "click", cancellation.Token, ("ref", RefFor(before.Text, "Depart")));
+    try {
+      await requested.Task.WaitAsync(StepTimeout);
+      await cancellation.CancelAsync();
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => click.WaitAsync(TimeSpan.FromSeconds(5)));
+    } finally {
+      release.SetResult();
+    }
+
+    await sandbox.WaitForSnapshotTextAsync(owner, "Arrived after cancellation");
+  }
+
+  [Fact]
+  public async Task DialogInActionNavigationIsReportedBeforeTheNewDocumentLoads() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/depart", "<a href='/alert-load'>Depart</a>");
+    Guid owner = Guid.NewGuid();
+    ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/depart")));
+
+    ToolOutput result = await sandbox.CallAsync(owner, "click", ("ref", RefFor(before.Text, "Depart")))
+        .WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Contains("A dialog blocks this page: alert \"on load\"", result.Text);
+
+    await sandbox.CallAsync(owner, "dialog", ("dismiss", true));
+    await sandbox.WaitForSnapshotTextAsync(owner, "arrived");
+  }
+
   [Fact]
   public async Task TabsTreatsEmptyAndOmittedIdsAsListRequests() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
@@ -601,8 +734,11 @@ public sealed class BrowserToolLoopbackTests {
     ToolOutput seeded = await sandbox.CallAsync(owner, "evaluate", ("expression", "console.error('sticky')"));
     Assert.Contains("Console error: sticky", seeded.Text);
 
-    await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Get")));
-    await sandbox.WaitForSnapshotTextAsync(owner, "Saved download");
+    ToolOutput result = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Get")))
+        .WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.DoesNotContain("Navigation did not reach", result.Text);
+    if (!result.Text.Contains("Saved download", StringComparison.Ordinal))
+      await sandbox.WaitForSnapshotTextAsync(owner, "Saved download");
 
     // The download navigation never commits, so the same-document history must survive it.
     await sandbox.CallAsync(owner, "evaluate", ("expression", "history.pushState(null, '', '#mark')"));
@@ -850,7 +986,7 @@ public sealed class BrowserToolLoopbackTests {
 
   private sealed class LoopbackSite : IDisposable {
     private readonly HttpListener listener = new();
-    private readonly Dictionary<string, (string Html, Func<Task>? BeforeResponse)> pages = [];
+    private readonly Dictionary<string, (string Body, Func<Task>? BeforeResponse, string ContentType)> pages = [];
     private readonly Dictionary<string, (string Name, byte[] Body)> attachments = [];
     private readonly Task serving;
 
@@ -869,8 +1005,8 @@ public sealed class BrowserToolLoopbackTests {
 
     public string Url(string path) => new Uri(Base, path.TrimStart('/')).AbsoluteUri;
 
-    public void Add(string path, string html, Func<Task>? beforeResponse = null) =>
-        pages[path] = (html, beforeResponse);
+    public void Add(string path, string body, Func<Task>? beforeResponse = null, string contentType = "text/html; charset=utf-8") =>
+        pages[path] = (body, beforeResponse, contentType);
 
     public void AddAttachment(string path, string name, byte[] body) => attachments[path] = (name, body);
 
@@ -900,9 +1036,9 @@ public sealed class BrowserToolLoopbackTests {
         bool known = pages.TryGetValue(path, out var page);
         if (page.BeforeResponse is not null)
           await page.BeforeResponse().ConfigureAwait(false);
-        byte[] body = Encoding.UTF8.GetBytes(known ? page.Html : "not found");
+        byte[] body = Encoding.UTF8.GetBytes(known ? page.Body : "not found");
         context.Response.StatusCode = known ? 200 : 404;
-        context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.ContentType = known ? page.ContentType : "text/plain; charset=utf-8";
         context.Response.ContentLength64 = body.Length;
         await context.Response.OutputStream.WriteAsync(body).ConfigureAwait(false);
       } finally {

@@ -115,6 +115,16 @@ reordered siblings in their new order. With no baseline or no reliable diff, ret
 view. Prefer whichever view fits inline if only one fits; otherwise use the full view when the
 structured diff is at least half its size.
 
+When an input action starts a main-frame document navigation, the tool waits for that document
+(not the old one) to reach `DOMContentLoaded` before taking the page view. The wait is capped at
+10 seconds after input returns; on timeout the result warns that the view may be incomplete.
+A dialog interrupts the wait, and an attachment download does not require a document commit.
+Cancellation stops waiting, but cannot undo input or stop a navigation already underway.
+Chromium can report navigation just after input returns, so `click`, `click_at`, `press` and
+`type` give the browser up to 40 ms to report a start if none was seen during input. Other input
+actions have no grace period. There is no network-idle wait: fragment changes, subframes,
+background requests and script timers beyond that window do not hold up the result.
+
 Oversized results use only the general tool output cap (prerequisite below), which includes one
 notice pointing to the complete result on disk. The baseline still advances to the complete page
 capture: later diffs describe what actually changed, rather than repeatedly spilling the same

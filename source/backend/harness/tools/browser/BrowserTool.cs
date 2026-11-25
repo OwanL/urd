@@ -148,11 +148,8 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    if (!await RunPagedCommandAsync(interaction,
-            () => page.Page.GetByRef(@ref).ClickAsync(new LocatorClickOptions { Timeout = ElementTimeoutMilliseconds }),
-            cancellation).ConfigureAwait(false))
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await ResultAsync(owner, [$"Clicked {@ref}."], cancellation).ConfigureAwait(false);
+    return await RunActionAsync(owner, interaction, $"Clicked {@ref}.", () => page.Page.GetByRef(@ref)
+        .ClickAsync(InputClickOptions()), cancellation, allowGrace: true).ConfigureAwait(false);
   }
 
   private async Task<ToolOutput> TypeAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
@@ -165,16 +162,13 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
     ILocator target = page.Page.GetByRef(@ref);
     async Task TypeIntoAsync() {
-      await target.ClickAsync(new LocatorClickOptions { Timeout = ElementTimeoutMilliseconds }).ConfigureAwait(false);
+      await target.ClickAsync(InputClickOptions()).ConfigureAwait(false);
       await target.PressSequentiallyAsync(text).ConfigureAwait(false);
       if (submit)
-        await target.PressAsync("Enter", new LocatorPressOptions { Timeout = ElementTimeoutMilliseconds })
-            .ConfigureAwait(false);
+        await target.PressAsync("Enter", InputPressOptions()).ConfigureAwait(false);
     }
-    if (!await RunPagedCommandAsync(interaction, TypeIntoAsync, cancellation).ConfigureAwait(false))
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await ResultAsync(owner, [$"Typed into {@ref}.{(submit ? " Submitted with Enter." : "")}"],
-        cancellation).ConfigureAwait(false);
+    return await RunActionAsync(owner, interaction, $"Typed into {@ref}.{(submit ? " Submitted with Enter." : "")}",
+        TypeIntoAsync, cancellation, allowGrace: true).ConfigureAwait(false);
   }
 
   private async Task<ToolOutput> FillFormAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
@@ -202,9 +196,8 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
         }
       }
     }
-    if (!await RunPagedCommandAsync(interaction, FillFieldsAsync, cancellation).ConfigureAwait(false))
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await ResultAsync(owner, [$"Filled {fields.Length} form fields."], cancellation).ConfigureAwait(false);
+    return await RunActionAsync(owner, interaction, $"Filled {fields.Length} form fields.", FillFieldsAsync, cancellation)
+        .ConfigureAwait(false);
   }
 
   private static bool Ticked(string value) {
@@ -219,11 +212,8 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    if (!await RunPagedCommandAsync(interaction,
-            () => page.Page.GetByRef(@ref).HoverAsync(new LocatorHoverOptions { Timeout = ElementTimeoutMilliseconds }),
-            cancellation).ConfigureAwait(false))
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await ResultAsync(owner, [$"Hovered {@ref}."], cancellation).ConfigureAwait(false);
+    return await RunActionAsync(owner, interaction, $"Hovered {@ref}.", () => page.Page.GetByRef(@ref)
+        .HoverAsync(new LocatorHoverOptions { Timeout = ElementTimeoutMilliseconds }), cancellation).ConfigureAwait(false);
   }
 
   private async Task<ToolOutput> PressAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
@@ -232,10 +222,8 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    if (!await RunPagedCommandAsync(interaction, () => page.Page.Keyboard.PressAsync(key), cancellation)
-            .ConfigureAwait(false))
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await ResultAsync(owner, [$"Pressed {key}."], cancellation).ConfigureAwait(false);
+    return await RunActionAsync(owner, interaction, $"Pressed {key}.", () => page.Page.Keyboard.PressAsync(key),
+        cancellation, allowGrace: true).ConfigureAwait(false);
   }
 
   private async Task<ToolOutput> SelectAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
@@ -245,12 +233,9 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
       return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    if (!await RunPagedCommandAsync(interaction,
-            () => page.Page.GetByRef(@ref).SelectOptionAsync(values,
-                new LocatorSelectOptionOptions { Timeout = ElementTimeoutMilliseconds }),
-            cancellation).ConfigureAwait(false))
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await ResultAsync(owner, [$"Selected {string.Join(", ", values)} in {@ref}."], cancellation).ConfigureAwait(false);
+    return await RunActionAsync(owner, interaction, $"Selected {string.Join(", ", values)} in {@ref}.",
+        () => page.Page.GetByRef(@ref).SelectOptionAsync(values, new() { Timeout = ElementTimeoutMilliseconds }),
+        cancellation).ConfigureAwait(false);
   }
 
   private async Task<ToolOutput> BackAsync(Guid owner, CancellationToken cancellation) {
@@ -320,10 +305,9 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     if (x < 0 || x >= basis.Width || y < 0 || y >= basis.Height)
       throw new ArgumentException($"Coordinates must be inside the {basis.Width}x{basis.Height} screenshot.");
     // The epoch check and the click are atomic against resize and capture on the same page.
-    if (!await RunPagedCommandAsync(interaction, () => interaction.ClickScreenshotAsync(basis, x, y, cancellation),
-            cancellation).ConfigureAwait(false))
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await ResultAsync(owner, [$"Clicked at {x},{y}."], cancellation).ConfigureAwait(false);
+    return await RunActionAsync(owner, interaction, $"Clicked at {x},{y}.",
+        () => interaction.ClickScreenshotAsync(basis, x, y, cancellation), cancellation, allowGrace: true)
+        .ConfigureAwait(false);
   }
 
   private async Task<ToolOutput> WaitAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
@@ -366,11 +350,9 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
         throw new ArgumentException($"No file at \"{full}\".");
       return full;
     }).ToArray();
-    if (!await RunPagedCommandAsync(interaction, () => page.Page.GetByRef(@ref)
-            .SetInputFilesAsync(files, new LocatorSetInputFilesOptions { Timeout = ElementTimeoutMilliseconds }),
-        cancellation).ConfigureAwait(false))
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await ResultAsync(owner, [$"Uploaded {files.Length} file(s) into {@ref}."], cancellation).ConfigureAwait(false);
+    return await RunActionAsync(owner, interaction, $"Uploaded {files.Length} file(s) into {@ref}.",
+        () => page.Page.GetByRef(@ref).SetInputFilesAsync(files, new() { Timeout = ElementTimeoutMilliseconds }),
+        cancellation).ConfigureAwait(false);
   }
 
   private async Task<ToolOutput> DialogAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
@@ -403,22 +385,57 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
         .ConfigureAwait(false);
   }
 
-  // Runs one page command, abandoning it the moment a dialog becomes pending: the command may be
-  // waiting on scripting the dialog blocks, and the result must report the dialog instead of
-  // hanging. The abandoned command finishes quietly once the dialog is answered or the page goes.
-  // Returns false when a dialog took over the page mid-command, which leaves the command
-  // discarded; callers then let the block in the shared result carry the action.
+  // The pinned Playwright still honors these flags despite the obsolete attributes. Let the
+  // tool own the navigation wait instead of letting the input command time out before commit.
+#pragma warning disable CS0612
+  private static LocatorClickOptions InputClickOptions() => new() { Timeout = ElementTimeoutMilliseconds, NoWaitAfter = true };
+  private static LocatorPressOptions InputPressOptions() => new() { Timeout = ElementTimeoutMilliseconds, NoWaitAfter = true };
+#pragma warning restore CS0612
+
+  private async Task<ToolOutput> RunActionAsync(Guid owner, BrowserInteraction interaction, string note,
+      Func<Task> command, CancellationToken cancellation, bool allowGrace = false) {
+    List<string> notes = [note];
+    if (!await RunPagedCommandAsync(interaction, command, cancellation, notes, allowGrace).ConfigureAwait(false))
+      notes.Clear();
+    return await ResultAsync(owner, notes, cancellation).ConfigureAwait(false);
+  }
+
+  // The dialog signal covers both the command and any navigation it started. Stop waiting on
+  // cancellation or a dialog without retrying input that may already have taken effect.
   private static async Task<bool> RunPagedCommandAsync(BrowserInteraction interaction, Func<Task> command,
-      CancellationToken cancellation) {
-    Task dialogPending = interaction.WaitDialogPendingAsync(cancellation);
-    Task commandTask = command();
-    if (await Task.WhenAny(commandTask, dialogPending).ConfigureAwait(false) != commandTask) {
-      _ = AwaitQuietlyAsync(commandTask);
-      await dialogPending.ConfigureAwait(false);
-      return false;
+      CancellationToken cancellation, List<string>? actionNotes = null, bool allowGrace = false) {
+    cancellation.ThrowIfCancellationRequested();
+    using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+    Task dialogPending = interaction.WaitDialogPendingAsync(waiting.Token);
+    int before = interaction.Navigation.Version;
+    try {
+      if (dialogPending.IsCompleted) {
+        cancellation.ThrowIfCancellationRequested();
+        return false;
+      }
+      Task commandTask = command();
+      if (await Task.WhenAny(commandTask, dialogPending).ConfigureAwait(false) != commandTask) {
+        _ = AwaitQuietlyAsync(commandTask);
+        cancellation.ThrowIfCancellationRequested();
+        return false;
+      }
+      if (cancellation.IsCancellationRequested || interaction.PendingDialog is not null) {
+        _ = AwaitQuietlyAsync(commandTask);
+        cancellation.ThrowIfCancellationRequested();
+        return false;
+      }
+      await commandTask.ConfigureAwait(false);
+      if (actionNotes is not null) {
+        Task<bool> loading = interaction.Navigation.WaitAfterAsync(before, allowGrace, waiting.Token);
+        if (await Task.WhenAny(loading, dialogPending).ConfigureAwait(false) == loading
+            && !await loading.ConfigureAwait(false))
+          actionNotes.Add("Navigation did not reach DOMContentLoaded within 10 seconds; the page view may be incomplete.");
+      }
+      cancellation.ThrowIfCancellationRequested();
+      return !dialogPending.IsCompleted;
+    } finally {
+      await waiting.CancelAsync().ConfigureAwait(false);
     }
-    await commandTask.ConfigureAwait(false);
-    return true;
   }
 
   private static async Task AwaitQuietlyAsync(Task command) {

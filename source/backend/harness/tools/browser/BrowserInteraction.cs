@@ -34,12 +34,15 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
   private int document;
 
   internal int Document => Volatile.Read(ref document);
+  internal BrowserNavigation Navigation { get; } = new();
 
   private BrowserInteraction(IPage page) {
     this.page = page;
     page.Dialog += OnDialog;
     page.Console += OnConsole;
     page.RequestFailed += OnRequestFailed;
+    page.Close += (_, _) => Navigation.Closed();
+    page.Crash += (_, _) => Navigation.Closed();
     page.FrameNavigated += (_, frame) => {
       // Keep invalidating snapshot captures on URL changes within the document too.
       if (frame == page.MainFrame)
@@ -49,7 +52,7 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
 
   // Playwright's FrameNavigated conflates document commits with history/fragment changes.
   // Chromium reports those separately. The page-target session ends when the page closes.
-  internal async Task WatchDocumentCommitsAsync() {
+  internal async Task WatchNavigationAsync() {
     ICDPSession session = await page.Context.NewCDPSessionAsync(page).ConfigureAwait(false);
     session.Event("Page.frameNavigated").OnEvent += (sender, data) => {
       if (data is not JsonElement navigation || navigation.GetProperty("frame").TryGetProperty("parentId", out _))
@@ -59,7 +62,7 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
         seenRequests.Clear();
       }
     };
-    await session.SendAsync("Page.enable").ConfigureAwait(false);
+    await Navigation.WatchAsync(session).ConfigureAwait(false);
   }
 
   // Creates the state on first use and attaches its handlers; later calls return the same state.
@@ -241,6 +244,7 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
   }
 
   private void OnRequestFailed(object? sender, IRequest request) {
+    Navigation.RequestFailed(request, page.MainFrame);
     string detail = string.IsNullOrWhiteSpace(request.Failure) ? "" : $" - {request.Failure}";
     string text = Trim($"{request.Method} {request.Url}{detail}");
     lock (gate) {

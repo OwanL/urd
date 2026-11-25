@@ -64,7 +64,7 @@ internal sealed class BrowserHost : IAsyncDisposable {
     try {
       PersistentContext browser = await BeginLaunchAsync(cancellation);
       opening = await browser.Context.NewPageAsync();
-      await BrowserInteraction.For(opening).WatchDocumentCommitsAsync();
+      await BrowserInteraction.For(opening).WatchNavigationAsync();
       BrowserPage<IPage> registered;
       BrowserPage<IPage>? evicted;
       lock (gate) {
@@ -294,7 +294,7 @@ internal sealed class BrowserHost : IAsyncDisposable {
     BrowserInteraction interaction = BrowserInteraction.For(popup);
     Attach(owner, registered.Id, popup);
     try {
-      await interaction.WatchDocumentCommitsAsync();
+      await interaction.WatchNavigationAsync();
     } catch (PlaywrightException) {
       // A popup may close while the browser is attaching its DevTools session.
     }

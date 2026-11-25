@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Providers;
+using Urd.Core.Tools;
 using Xunit;
 using static Urd.Backend.Tests.Support.OpenAIStreams;
 using static Urd.Backend.Tests.Support.ProviderModelStreams;
@@ -35,6 +36,80 @@ public sealed class OpenAIInferenceClientTests {
     Assert.Equal([expectedRole, expectedRole, "user"],
         input.EnumerateArray().Select(item => item.GetProperty("role").GetString()));
     Assert.Equal([ChatRole.System, ChatRole.System, ChatRole.User], history.Select(message => message.Role));
+  }
+
+  [Theory]
+  [InlineData(ProviderRoute.OpenAI, LlmApi.OpenAIResponses)]
+  [InlineData(ProviderRoute.Custom, LlmApi.OpenAIChatCompletions)]
+  [InlineData(ProviderRoute.ChatGpt, LlmApi.OpenAIResponses)]
+  public async Task BrowserOptionalArgumentsRemainOptionalOnWire(ProviderRoute route, LlmApi api) {
+    using var handler = new ScriptedOpenAIHandler(api == LlmApi.OpenAIResponses ? Responses([Message]) : ChatStream());
+    using var http = new HttpClient(handler);
+    var options = Options();
+    options.Tools = [AgentToolDeclaration.Create(new BrowserTool(null!))];
+
+    await foreach (var _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
+        State(api, route), History(), options, default)) { /* Drain before reading the wire. */ }
+
+    using var document = JsonDocument.Parse(Assert.Single(handler.Requests).Body);
+    JsonElement tool = Assert.Single(document.RootElement.GetProperty("tools").EnumerateArray());
+    if (route == ProviderRoute.ChatGpt)
+      tool = Assert.Single(tool.GetProperty("tools").EnumerateArray());
+    else if (api == LlmApi.OpenAIChatCompletions)
+      tool = tool.GetProperty("function");
+    Assert.Equal("browser", tool.GetProperty("name").GetString());
+    Assert.True(tool.TryGetProperty("strict", out JsonElement strict));
+    Assert.False(strict.GetBoolean());
+    AssertBrowserSchema(tool.GetProperty("parameters"));
+  }
+
+  [Theory]
+  [InlineData(true, true)]
+  [InlineData("true", true)]
+  [InlineData(null, true)]
+  [InlineData(false, false)]
+  public async Task ChatGptNamespaceRejectsStrictRequestsButAcceptsExplicitOptOut(object? strict, bool rejected) {
+    using var handler = new ScriptedOpenAIHandler(Responses([Message]));
+    using var http = new HttpClient(handler);
+    var options = Options();
+    options.Tools = [AIFunctionFactory.Create((string key) => key, new AIFunctionFactoryOptions {
+      Name = "lookup",
+      AdditionalProperties = new Dictionary<string, object?> { ["strict"] = strict }
+    })];
+    if (rejected) {
+      var error = await Assert.ThrowsAsync<ProviderOperationException>(async () => {
+        await foreach (var _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
+            State(route: ProviderRoute.ChatGpt), History(), options, default)) { /* Rejected before the wire. */ }
+      });
+
+      Assert.Equal(ProviderFailure.InvalidProviderResponse, error.Failure);
+      Assert.Empty(handler.Requests);
+      return;
+    }
+
+    await foreach (var _ in new OpenAIInferenceClient(http).GetStreamingResponseAsync(
+        State(route: ProviderRoute.ChatGpt), History(), options, default)) { /* Drain to read the namespace request. */ }
+
+    using var document = JsonDocument.Parse(Assert.Single(handler.Requests).Body);
+    JsonElement namespaceTool = Assert.Single(document.RootElement.GetProperty("tools").EnumerateArray());
+    Assert.Equal("namespace", namespaceTool.GetProperty("type").GetString());
+    JsonElement function = Assert.Single(namespaceTool.GetProperty("tools").EnumerateArray());
+    Assert.Equal("lookup", function.GetProperty("name").GetString());
+    Assert.False(function.GetProperty("strict").GetBoolean());
+  }
+
+  internal static void AssertBrowserSchema(JsonElement schema) {
+    Assert.Equal(new[] { "action" }, schema.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
+    Assert.False(schema.GetProperty("additionalProperties").GetBoolean());
+    JsonElement properties = schema.GetProperty("properties");
+    Assert.Equal("boolean", properties.GetProperty("background").GetProperty("type").GetString());
+    Assert.Equal("string", properties.GetProperty("url").GetProperty("type").GetString());
+    JsonElement item = properties.GetProperty("form").GetProperty("items");
+    Assert.Equal(new[] { "ref", "value" }, item.GetProperty("required").EnumerateArray().Select(value => value.GetString()));
+    Assert.False(item.GetProperty("additionalProperties").GetBoolean());
+    JsonElement type = item.GetProperty("properties").GetProperty("type");
+    Assert.Equal("string", type.GetProperty("type").GetString());
+    Assert.Equal(new[] { "text", "checkbox", "select" }, type.GetProperty("enum").EnumerateArray().Select(value => value.GetString()));
   }
 
   [Fact]
@@ -248,7 +323,9 @@ public sealed class OpenAIInferenceClientTests {
   private static ChatMessage[] History() => [new(ChatRole.User, "hello")];
 
   private static ProviderState State(LlmApi api = LlmApi.OpenAIResponses, ProviderRoute route = ProviderRoute.Custom) => new(
-      new(Guid.NewGuid(), "Fixture", route, api, new Uri("https://fixture.invalid/prefix/v1"), AuthenticationMethod.None),
+      new(Guid.NewGuid(), "Fixture", route, api,
+          route == ProviderRoute.ChatGpt ? new Uri("https://api.openai.com/v1/") : new Uri("https://fixture.invalid/prefix/v1"),
+          AuthenticationMethod.None),
       7, 2, null, null, false, null);
 }
 

@@ -124,6 +124,35 @@ public sealed class ResponsesTerminalDiagnosticsTests {
   }
 
   [Fact]
+  public async Task ChatGptSocketSendsBrowserWithOptionalArguments() {
+    var socket = new ScriptedSocket([Created, Failed]);
+    using var run = new ChatGptSocketRun();
+    using var handler = new ScriptedOpenAIHandler("unexpected");
+    using var http = new HttpClient(handler);
+    var inference = new OpenAIInferenceClient(http, connectSocket: (_, _, _) => Task.FromResult<WebSocket>(socket));
+    var options = Options();
+    options.Tools = [AgentToolDeclaration.Create(new BrowserTool(null!))];
+    options.AdditionalProperties = new() {
+      [OpenAIInferenceClient.SessionIdProperty] = Guid.NewGuid(),
+      [ChatGptSocketRun.PropertyName] = run
+    };
+
+    await Assert.ThrowsAsync<ProviderOperationException>(async () => {
+      await foreach (var _ in inference.GetStreamingResponseAsync(CreateState(ProviderRoute.ChatGpt), History(), options, default)) { /* Drain to the terminal. */ }
+    });
+
+    Assert.Empty(handler.Requests);
+    using var request = JsonDocument.Parse(Assert.Single(socket.Sends));
+    JsonElement namespaceTool = Assert.Single(request.RootElement.GetProperty("tools").EnumerateArray());
+    Assert.Equal("namespace", namespaceTool.GetProperty("type").GetString());
+    JsonElement function = Assert.Single(namespaceTool.GetProperty("tools").EnumerateArray());
+    Assert.Equal("browser", function.GetProperty("name").GetString());
+    Assert.True(function.TryGetProperty("strict", out JsonElement strict));
+    Assert.False(strict.GetBoolean());
+    OpenAIInferenceClientTests.AssertBrowserSchema(function.GetProperty("parameters"));
+  }
+
+  [Fact]
   public async Task ChatGptSocketSendsAskUserWithItsEffectiveSchema() {
     var socket = new ScriptedSocket([Created, Failed]);
     using var run = new ChatGptSocketRun();
@@ -149,6 +178,7 @@ public sealed class ResponsesTerminalDiagnosticsTests {
     Assert.Equal("urd", namespaceTool.GetProperty("name").GetString());
     JsonElement function = Assert.Single(namespaceTool.GetProperty("tools").EnumerateArray());
     Assert.Equal("ask_user", function.GetProperty("name").GetString());
+    Assert.False(function.GetProperty("strict").GetBoolean());
     JsonElement schema = function.GetProperty("parameters");
     JsonElement properties = schema.GetProperty("properties");
     Assert.Equal(new[] { "background", "choices", "context", "question" },

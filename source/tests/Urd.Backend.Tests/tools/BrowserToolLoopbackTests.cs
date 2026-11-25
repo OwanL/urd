@@ -36,6 +36,79 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
+  public async Task TabsTreatsEmptyAndOmittedIdsAsListRequests() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    string url = sandbox.Site.Url("/click");
+    await sandbox.CallAsync(owner, "navigate", ("url", url));
+
+    ToolOutput omitted = await sandbox.CallAsync(owner, "tabs");
+    string pageId = PageIdFor(omitted.Text, url);
+    Assert.Contains("Open pages (oldest first):", omitted.Text);
+
+    ToolOutput empty = await sandbox.CallAsync(owner, "tabs", ("select", ""), ("close", ""));
+    Assert.Contains("Open pages (oldest first):", empty.Text);
+    Assert.Contains(pageId, empty.Text);
+
+    ToolOutput whitespace = await sandbox.CallAsync(owner, "tabs", ("select", " "), ("close", "\t"));
+    Assert.Contains("Open pages (oldest first):", whitespace.Text);
+    Assert.Contains(pageId, whitespace.Text);
+  }
+
+  [Fact]
+  public async Task TabsAcceptsOnePageIdWhenTheOtherIdIsEmpty() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    string firstUrl = sandbox.Site.Url("/click");
+    string secondUrl = sandbox.Site.Url("/targets");
+    await sandbox.CallAsync(owner, "navigate", ("url", firstUrl));
+    await sandbox.CallAsync(owner, "navigate", ("url", secondUrl), ("new_tab", true));
+    ToolOutput listing = await sandbox.CallAsync(owner, "tabs");
+    string firstId = PageIdFor(listing.Text, firstUrl);
+    string secondId = PageIdFor(listing.Text, secondUrl);
+
+    ToolOutput selected = await sandbox.CallAsync(owner, "tabs", ("select", firstId), ("close", ""));
+    Assert.Contains($"Selected page {firstId}.", selected.Text);
+
+    ToolOutput closed = await sandbox.CallAsync(owner, "tabs", ("select", ""), ("close", secondId));
+    Assert.Contains($"Closed page {secondId}.", closed.Text);
+    Assert.Contains(firstUrl, closed.Text);
+    Assert.DoesNotContain(secondUrl, closed.Text);
+  }
+
+  [Fact]
+  public async Task TabsRejectsTwoPageIdsWithActionableGuidance() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    string firstUrl = sandbox.Site.Url("/click");
+    string secondUrl = sandbox.Site.Url("/targets");
+    await sandbox.CallAsync(owner, "navigate", ("url", firstUrl));
+    await sandbox.CallAsync(owner, "navigate", ("url", secondUrl), ("new_tab", true));
+    ToolOutput listing = await sandbox.CallAsync(owner, "tabs");
+    string firstId = PageIdFor(listing.Text, firstUrl);
+    string secondId = PageIdFor(listing.Text, secondUrl);
+
+    ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
+        sandbox.CallAsync(owner, "tabs", ("select", firstId), ("close", secondId)));
+
+    Assert.Equal("For tabs, omit both select and close to list pages, or supply only one with a page ID.", error.Message);
+  }
+
+  [Theory]
+  [InlineData("select")]
+  [InlineData("close")]
+  public async Task TabsStillRejectsInvalidNonblankPageIds(string field) {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+
+    ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
+        sandbox.CallAsync(owner, "tabs", (field, "not-a-page-id")));
+
+    Assert.Contains("not-a-page-id", error.Message);
+    Assert.Contains("not a page id from the tabs listing", error.Message);
+  }
+
+  [Fact]
   public async Task ClickTriggeredDialogIsReportedInsteadOfBlockingFurtherActions() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     Guid owner = Guid.NewGuid();
@@ -288,6 +361,14 @@ public sealed class BrowserToolLoopbackTests {
       // The round is over.
     }
   }
+
+  private static string PageIdFor(string listing, string url) =>
+      listing.Split('\n')
+          .Where(line => line.Contains(url, StringComparison.Ordinal))
+          .Select(line => Regex.Match(line, @"^[>-] ([0-9a-fA-F-]{36}) "))
+          .Where(match => match.Success)
+          .Select(match => match.Groups[1].Value)
+          .FirstOrDefault() ?? throw new InvalidOperationException($"No page id for {url} in:\n{listing}");
 
   private static string RefFor(string snapshot, string label) =>
       snapshot.Split('\n').Select(line => new { Line = line, Match = Regex.Match(line, @"\[ref=([fe\d]+)\]") })

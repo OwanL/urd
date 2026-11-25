@@ -9,6 +9,8 @@ using OpenAI.Responses;
 namespace Urd.Core.Providers;
 
 internal static class ProviderModelOptions {
+  internal const string StrictProperty = "strict";
+
   internal static ChatOptions Prepare(ProviderConnection connection, ChatOptions options) {
     ArgumentNullException.ThrowIfNull(options);
     if (string.IsNullOrWhiteSpace(options.ModelId) || options.RawRepresentationFactory is not null ||
@@ -30,9 +32,9 @@ internal static class ProviderModelOptions {
         (options.FrequencyPenalty is not null || options.PresencePenalty is not null || options.Seed is not null || options.StopSequences is { Count: > 0 }))
       throw Invalid();
     bool isChatGpt = connection.Route == ProviderRoute.ChatGpt;
-    // Namespace wrapping bypasses MEAI's strict-schema transformation; do not silently ignore it.
-    if (isChatGpt && options.Tools?.Any(tool => tool.AdditionalProperties.ContainsKey("strict")) == true)
-      throw Invalid();
+    // Namespace wrapping bypasses MEAI's strict-schema transformation, so any strict request but an
+    // explicit opt-out would be silently ignored.
+    if (isChatGpt && options.Tools?.Any(WouldSilentlyIgnoreStrict) == true) throw Invalid();
     if (isChatGpt && (connection.Api != LlmApi.OpenAIResponses || options.Temperature is not null || options.TopP is not null ||
         options.MaxOutputTokens is not null || options.FrequencyPenalty is not null || options.PresencePenalty is not null ||
         options.Seed is not null || options.StopSequences is { Count: > 0 } || options.AllowMultipleToolCalls is not null ||
@@ -40,6 +42,9 @@ internal static class ProviderModelOptions {
       throw Invalid();
 
     var result = options.Clone();
+    // An omitted "strict" invites Responses normalization to strict mode, which would demand optional
+    // fields as required; send an explicit opt-out instead.
+    result.AdditionalProperties = new() { [StrictProperty] = false };
     if (connection.Api == LlmApi.OpenAIResponses) {
       // Only our factory can supply SDK options. Callers cannot enable storage, continuation or hosted tools.
       result.RawRepresentationFactory = _ => ModelReaderWriter.Read<CreateResponseOptions>(BinaryData.FromString(
@@ -67,6 +72,7 @@ internal static class ProviderModelOptions {
         if (function.Description is not null) writer.WriteString("description", function.Description);
         writer.WritePropertyName("parameters");
         function.JsonSchema.WriteTo(writer);
+        writer.WriteBoolean("strict", false);
         writer.WriteEndObject();
       }
       writer.WriteEndArray();
@@ -75,6 +81,12 @@ internal static class ProviderModelOptions {
     if (buffer.Length > LlmProviderContext.MaximumBytes) throw Invalid();
     // Raw SDK tools retain the namespace schema even when the pinned SDK has no concrete namespace type.
     return ModelReaderWriter.Read<ResponseTool>(BinaryData.FromBytes(buffer.ToArray()))!;
+  }
+
+  private static bool WouldSilentlyIgnoreStrict(AITool tool) {
+    if (!tool.AdditionalProperties.TryGetValue(StrictProperty, out object? value))
+      return false;
+    return value is not false;
   }
 
   private static ProviderOperationException Invalid() => new(ProviderFailure.InvalidProviderResponse);

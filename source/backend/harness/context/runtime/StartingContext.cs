@@ -17,4 +17,7 @@ internal sealed record StartingContext(
   IReadOnlyList<ChatMessage> Instructions,
   IReadOnlyList<AIFunctionDeclaration> Tools) {
   internal Guid BoundaryId { get; init; }
+
+  // Paths of the discovered instruction documents it carries; null when the snapshot predates them.
+  internal IReadOnlyList<string>? InstructionPaths { get; init; }
 }

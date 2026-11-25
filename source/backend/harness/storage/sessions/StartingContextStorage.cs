@@ -48,7 +48,8 @@ internal sealed class StartingContextStorage(Database database) {
   internal void Activate(SqliteTransaction transaction, Guid sessionId, StartingContext context) {
     ArgumentNullException.ThrowIfNull(context);
     var document = new StartingContextDocument(
-        context.Instructions.Select(ToInstruction).ToArray(), context.Tools.Select(ToTool).ToArray());
+        context.Instructions.Select(ToInstruction).ToArray(), context.Tools.Select(ToTool).ToArray(),
+        context.InstructionPaths?.ToArray());
     string json = JsonSerializer.Serialize(document);
 
     database.Execute(transaction, """
@@ -93,13 +94,15 @@ internal sealed class StartingContextStorage(Database database) {
 
     if (document?.Instructions is null || document.Tools is null
         || document.Instructions.Any(instruction => instruction is null)
-        || document.Tools.Any(tool => tool is null))
+        || document.Tools.Any(tool => tool is null)
+        || document.InstructionPaths?.Any(path => path is null) == true)
       throw new InvalidDataException("The stored starting context is incomplete.");
 
     ChatMessage[] instructions = document.Instructions.Select(ReadInstruction).ToArray();
     AIFunctionDeclaration[] tools = document.Tools.Select(ReadTool).ToArray();
     return new(Array.AsReadOnly(instructions), Array.AsReadOnly(tools)) {
-      BoundaryId = boundaryId
+      BoundaryId = boundaryId,
+      InstructionPaths = document.InstructionPaths?.Select(path => path!).ToArray().AsReadOnly()
     };
   }
 
@@ -124,7 +127,9 @@ internal sealed class StartingContextStorage(Database database) {
     return AIFunctionFactory.CreateDeclaration(tool.Name, tool.Description, tool.JsonSchema.Clone());
   }
 
-  private sealed record StartingContextDocument(InstructionDocument?[]? Instructions, ToolDeclarationDocument?[]? Tools);
+  // InstructionPaths is absent from snapshots saved before subagents inherited instruction selection.
+  private sealed record StartingContextDocument(InstructionDocument?[]? Instructions, ToolDeclarationDocument?[]? Tools,
+      string?[]? InstructionPaths = null);
   private sealed record InstructionDocument(string? Role, string?[]? Contents);
   private sealed record ToolDeclarationDocument(string? Name, string? Description, JsonElement JsonSchema);
 }

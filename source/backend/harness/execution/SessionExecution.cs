@@ -244,7 +244,7 @@ internal sealed class SessionExecution : IDisposable {
     HashSet<string> protectedTools = boundary == Guid.Empty ? []
         : pending.List().Select(call => call.Name).ToHashSet(StringComparer.Ordinal);
     startingContext = await startingContextBuilder.PrepareAsync(ContextInput(), boundary, task,
-        captured, protectedTools, pruner, stop.Token);
+        captured, protectedTools, pruner, stop.Token, session.ReadInheritedSelection());
     stop.Token.ThrowIfCancellationRequested();
   }
 

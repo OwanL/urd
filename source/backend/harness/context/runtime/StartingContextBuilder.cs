@@ -30,6 +30,7 @@ internal sealed class StartingContextBuilder {
     return Compose(input, tools, cancellation);
   }
 
+  // A non-null inherited context supplies the tool and instruction selection instead of pruning them.
   internal async Task<StartingContext> PrepareAsync(
       StartingContextInput input,
       Guid boundaryId,
@@ -37,7 +38,8 @@ internal sealed class StartingContextBuilder {
       UserPreferences preferences,
       IReadOnlySet<string> runtimeProtectedTools,
       StartingResourcePruner pruner,
-      CancellationToken cancellation) {
+      CancellationToken cancellation,
+      StartingContext? inherited = null) {
     ArgumentNullException.ThrowIfNull(input);
     ArgumentNullException.ThrowIfNull(taskInput);
     ArgumentNullException.ThrowIfNull(preferences);
@@ -77,12 +79,17 @@ internal sealed class StartingContextBuilder {
 
     // Start every independent category before awaiting any result. Task.WhenAll does not
     // complete until all three operations have settled, including fatal and cancelled work.
-    Task<StartingResourcePruningResult<AIFunctionDeclaration>> toolPruning =
-        pruner.PruneAsync(toolCandidates, protectedToolCount, cancellation);
+    Task<StartingResourcePruningResult<AIFunctionDeclaration>> toolPruning = inherited is null
+        ? pruner.PruneAsync(toolCandidates, protectedToolCount, cancellation)
+        : Task.FromResult(Inherit(toolCandidates, tool => tool.Name,
+            inherited.Tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal)));
     Task<StartingResourcePruningResult<DiscoveredSkill>> skillPruning =
         pruner.PruneAsync(skillCandidates, protectedSkillCount, cancellation, indexWarning);
     Task<StartingResourcePruningResult<DiscoveredInstructionDocument>> instructionPruning =
-        pruner.PruneAsync(instructionCandidates, protectedInstructionCount, cancellation, indexWarning);
+        inherited?.InstructionPaths is { } inheritedPaths
+        ? Task.FromResult(Inherit(instructionCandidates, document => CanonicalPath(document.Identity),
+            inheritedPaths.Select(CanonicalPath).ToHashSet(pathComparer)))
+        : pruner.PruneAsync(instructionCandidates, protectedInstructionCount, cancellation, indexWarning);
     await Task.WhenAll(toolPruning, skillPruning, instructionPruning);
 
     cancellation.ThrowIfCancellationRequested();
@@ -117,8 +124,15 @@ internal sealed class StartingContextBuilder {
 
     StartingContext context = Compose(input, selectedTools, cancellation, selectedSkills, selectedInstructions);
     cancellation.ThrowIfCancellationRequested();
-    return context with { BoundaryId = boundaryId };
+    return context with {
+      BoundaryId = boundaryId,
+      InstructionPaths = selectedInstructions.Select(document => document.Identity).ToArray().AsReadOnly()
+    };
   }
+
+  private static StartingResourcePruningResult<T> Inherit<T>(
+      IEnumerable<T> candidates, Func<T, string> getIdentity, HashSet<string> inherited) =>
+      new(candidates.Where(candidate => inherited.Contains(getIdentity(candidate))).ToArray().AsReadOnly());
 
   private StartingContext Compose(
       StartingContextInput input,

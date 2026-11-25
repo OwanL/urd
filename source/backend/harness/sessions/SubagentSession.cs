@@ -37,4 +37,8 @@ public sealed class SubagentSession : SessionBase {
                 new UserMessageSubmission(Guid.NewGuid(), 0, task, selection)];
     return AdmitAssignmentAsync(inputs, ParentSessionId);
   }
+
+  // A child starts from its parent's active selection and keeps its own after compaction.
+  internal override StartingContext? ReadInheritedSelection() =>
+      ReadStartingContext() ?? ReadActiveStartingContext(ParentSessionId);
 }

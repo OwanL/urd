@@ -20,7 +20,7 @@ public sealed class StartingContextStorageTests {
         "You are Urd — assist with café requests. 🌍\nKeep this exact.",
         "Developer instruction: naïve façade; preserve order.",
         Tool("zeta_tool", "First tool — exact description.", firstSchema),
-        Tool("alpha_tool", "Second tool.", secondSchema));
+        Tool("alpha_tool", "Second tool.", secondSchema)) with { InstructionPaths = [@"C:\project\AGENTS.md"] };
     expected.Instructions[0].Contents.Add(new TextContent("Another text block.\n"));
 
     using (UrdStore store = UrdStore.Open(database.Path))
@@ -39,6 +39,7 @@ public sealed class StartingContextStorageTests {
     Assert.Equal(new[] { "First tool — exact description.", "Second tool." },
         restored.Tools.Select(tool => tool.Description));
     Assert.Equal(new[] { firstSchema, secondSchema }, restored.Tools.Select(tool => tool.JsonSchema.GetRawText()));
+    Assert.Equal(expected.InstructionPaths, restored.InstructionPaths);
   }
 
   [Fact]
@@ -58,6 +59,7 @@ public sealed class StartingContextStorageTests {
     Assert.False(properties.TryGetProperty("context", out _));
     Assert.True(properties.TryGetProperty("includeUserInput", out _));
     Assert.True(properties.TryGetProperty("background", out _));
+    Assert.Null(restored.InstructionPaths);
   }
 
   [Fact]

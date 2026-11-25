@@ -255,6 +255,51 @@ public sealed class StartingContextPreparationTests {
     }
   }
 
+  [Fact]
+  public async Task InheritedSelectionReplacesToolAndInstructionPruningWhileSkillsStillPrune() {
+    string root = Path.Combine(Path.GetTempPath(), $"urd-context-{Guid.NewGuid():N}");
+    string project = Path.Combine(root, "project");
+    string packaged = Path.Combine(root, "packaged");
+    try {
+      string rootDocument = Write(project, "AGENTS.md", "Root rule.\n");
+      string nestedDocument = Write(project, Path.Combine("nested", "AGENTS.md"), "Nested rule.\n");
+      string skill = Write(project, "skills/local/SKILL.md", "---\nname: local\ndescription: Local skill.\n---\n");
+      var auxiliary = new ScriptedChatClient(token => TextUpdates(["{\"keptIds\":[\"s1\"]}"], token));
+      await using RunningParent parent = await StartParentAsync();
+      var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
+      var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+        statuses.Enqueue(status);
+        return Task.CompletedTask;
+      }, "Use the resources.");
+      await using var catalog = Catalog(root, [rootDocument, nestedDocument, skill]);
+      var builder = new StartingContextBuilder(new ToolCatalog([TestTool("read"), TestTool("write"), TestTool("grep")]),
+          new InstructionResourceDiscovery(catalog, packaged));
+      var preferences = new UserPreferences(project, null) {
+        ProtectedResources = new() { Tools = ["write"], Skills = [], Instructions = [] }
+      };
+      var inherited = new StartingContext([], [AgentToolDeclaration.Create(TestTool("read")),
+          AgentToolDeclaration.Create(TestTool("parent_only"))]) { InstructionPaths = [rootDocument] };
+
+      StartingContext context = await builder.PrepareAsync(
+          new(SessionKind.Subagent, ModelFamily.Other, project), Guid.NewGuid(), "Use the resources.",
+          preferences, new HashSet<string>(StringComparer.Ordinal), pruner, CancellationToken.None, inherited)
+          .WaitAsync(TestTimeout);
+
+      string text = string.Join("\n", context.Instructions.Select(message => message.Text));
+      Assert.Contains("Root rule.", text, StringComparison.Ordinal);
+      Assert.DoesNotContain("Nested rule.", text, StringComparison.Ordinal);
+      Assert.Contains("Local skill.", text, StringComparison.Ordinal);
+      Assert.Equal(new[] { "read", "write" }, context.Tools.Select(tool => tool.Name));
+      Assert.Equal(new[] { rootDocument }, context.InstructionPaths);
+      Assert.Equal(1, auxiliary.Calls);
+      Assert.All(statuses, status => Assert.Equal("skills", status.Category));
+    } finally {
+      if (Directory.Exists(root))
+        Directory.Delete(root, recursive: true);
+    }
+  }
+
   private static TestAgentTool TestTool(string name) =>
       new TestAgentTool(name, (_, _, _) => Task.FromResult(new ToolOutput("unused", [])));
 

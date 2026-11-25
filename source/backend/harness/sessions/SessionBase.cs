@@ -167,6 +167,9 @@ public abstract partial class SessionBase {
   // Restores the delivered starting view; opening a session alone never composes it.
   internal StartingContext? ReadStartingContext() => store.StartingContexts.Read(Id);
   internal StartingContext? ReadStartingContext(Guid boundaryId) => store.StartingContexts.Read(Id, boundaryId);
+  // The selection a session reuses instead of pruning tools and instructions; primaries prune.
+  internal virtual StartingContext? ReadInheritedSelection() => null;
+  private protected StartingContext? ReadActiveStartingContext(Guid sessionId) => store.StartingContexts.Read(sessionId);
   internal UserPreferences ReadPreferences() => preferences.Read();
   public IReadOnlyList<Guid>? ReadSubagentProviders() => store.Sessions.ReadSubagentProviders(Id);
 

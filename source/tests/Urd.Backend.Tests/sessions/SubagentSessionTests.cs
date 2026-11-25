@@ -14,8 +14,8 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Sessions;
 
-// A bounded child's first request carries the inherited context and then its task, runs the
-// subagent prepass kinds, and titles itself from the task alone.
+// A bounded child's first request carries the inherited context and then its task, inherits its
+// parent's tool selection instead of pruning it, and titles itself from the task alone.
 public sealed class SubagentSessionTests {
   private const string AuxiliaryModel = "subagent-title-auxiliary";
   private const string ChildTitle = "bounded orbit";
@@ -42,11 +42,13 @@ public sealed class SubagentSessionTests {
         LlmApi.OpenAIResponses, new Uri("https://fixture.invalid/v1"), AuthenticationMethod.None)).WaitAsync(TestTimeout);
     await providers.RefreshModelCatalogAsync(auxiliaryConnection.Id).WaitAsync(TestTimeout);
     new PreferenceManager(store).SetBucketModels(ModelBucket.Small, [new(auxiliaryConnection.Id, AuxiliaryModel)]);
-    var tool = new TestAgentTool("unused", (_, _, _) => Task.FromResult(new ToolOutput("unused", [])));
+    TestAgentTool Tool(string name) => new(name, (_, _, _) => Task.FromResult(new ToolOutput("unused", [])));
     Guid parentId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    SaveActiveSelection(database, parentId, "inherited");
     var session = new SubagentSession(store.Sessions.CreateSubagent(Guid.NewGuid(),
         parentId, "owning-call", Path.GetDirectoryName(database.Path)),
-        store, _ => executionClient, new ToolCatalog([tool]), modelSelector: new ModelSelector(providers));
+        store, _ => executionClient, new ToolCatalog([Tool("inherited"), Tool("dropped")]),
+        modelSelector: new ModelSelector(providers));
     try {
       Guid execution = await session.StartAssignmentAsync(AssignmentTask, ParentContextBlock,
           TestLlmSelection.Default).WaitAsync(TestTimeout);
@@ -57,6 +59,7 @@ public sealed class SubagentSessionTests {
 
       ChatMessage[] userInputs = [.. main.Messages.Where(message => message.Role == ChatRole.User)];
       Assert.Equal([ParentContextBlock, AssignmentTask], userInputs.Select(message => message.Text));
+      Assert.Equal(["inherited"], main.Options!.Tools!.Select(tool => tool.Name));
       string instructions = string.Join('\n', main.Messages.Where(message => message.Role == ChatRole.System)
           .Select(message => message.Text));
       Assert.Contains("# Subagent guidance", instructions, StringComparison.Ordinal);
@@ -92,13 +95,33 @@ public sealed class SubagentSessionTests {
         case "title":
           titlePrompt.TrySetResult(request.LastUserText);
           return TextUpdates([ChildTitle], token);
-        case "pruning.tools":
-          return TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token);
         default:
           throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
       }
     }
   }
+
+  [Fact]
+  public void ChildKeepsItsOwnSelectionOnceItHasOneAndOtherwiseInheritsItsParents() {
+    using var database = new TemporaryDatabase();
+    using var store = UrdStore.Open(database.Path);
+    Guid parentId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    var child = new SubagentSession(store.Sessions.CreateSubagent(Guid.NewGuid(), parentId, "owning-call", null),
+        store, _ => throw new InvalidOperationException("No model calls."));
+    SaveActiveSelection(database, parentId, "parent_tool");
+    Assert.Equal("parent_tool", Assert.Single(child.ReadInheritedSelection()!.Tools).Name);
+
+    SaveActiveSelection(database, child.Id, "child_tool");
+    Assert.Equal("child_tool", Assert.Single(child.ReadInheritedSelection()!.Tools).Name);
+  }
+
+  // A snapshot without instruction paths, as saved before subagents inherited instruction selection.
+  private static void SaveActiveSelection(TemporaryDatabase database, Guid sessionId, string toolName) =>
+      database.Execute($$$"""
+        INSERT INTO session_starting_context (session_id, boundary_id, context_json) VALUES ('{{{sessionId:D}}}',
+            '{{{Guid.Empty:D}}}', '{"Instructions":[],"Tools":[{"Name":"{{{toolName}}}","JsonSchema":{"type":"object"}}]}');
+        INSERT INTO session_starting_context_active (session_id, boundary_id) VALUES ('{{{sessionId:D}}}', '{{{Guid.Empty:D}}}');
+        """); // raw-sql: an activated selection is the inheritance source under test.
 
   private static string Catalog(string modelId) => JsonSerializer.Serialize(new {
     @object = "list",

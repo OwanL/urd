@@ -7,6 +7,7 @@ namespace Urd.Core.Tools;
 // can report lifecycle events while the new navigation is still waiting for its response.
 internal sealed class BrowserNavigation {
   private static readonly TimeSpan StartGrace = TimeSpan.FromMilliseconds(40);
+  private static readonly TimeSpan AbortGrace = TimeSpan.FromMilliseconds(40);
   private static readonly TimeSpan LoadTimeout = TimeSpan.FromSeconds(10);
 
   private readonly Lock gate = new();
@@ -124,6 +125,15 @@ internal sealed class BrowserNavigation {
     // Downloads also abort their document request; an older abort cannot end a newer wait.
     lock (gate) {
       if (!committed && !finished && loader is not null && data.GetProperty("requestId").GetString() == loader)
+        _ = FinishAbortedAsync(version);
+    }
+  }
+
+  private async Task FinishAbortedAsync(int abortedVersion) {
+    // History traversal can abort the old request before Chromium reports the replacement start.
+    await Task.Delay(AbortGrace).ConfigureAwait(false);
+    lock (gate) {
+      if (version == abortedVersion && !committed && !finished)
         Finish();
     }
   }

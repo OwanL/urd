@@ -119,8 +119,9 @@ When an input action starts a main-frame document navigation, the tool waits for
 (not the old one) to reach `DOMContentLoaded` before taking the page view. The wait is capped at
 10 seconds after input returns; on timeout the result warns that the view may be incomplete.
 A dialog interrupts the wait. An aborted document request, including an attachment download,
-ends the wait only if it belongs to the tracked navigation. Cancellation stops waiting, but
-cannot undo input or stop a navigation already underway.
+ends the wait only if it still belongs to the tracked navigation after 40 ms. History traversal
+can report the abort before the replacement starts; the replacement shares the original timeout.
+Cancellation stops waiting, but cannot undo input or stop a navigation already underway.
 Chromium can report navigation just after input returns, so `click`, `click_at`, `press` and
 `type` give the browser up to 40 ms to report a start if none was seen during input. Other input
 actions have no grace period. There is no network-idle wait: fragment changes, subframes,

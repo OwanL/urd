@@ -12,7 +12,8 @@ namespace Urd.Backend.Tests.Tools;
 // Real BrowserTool on a real BrowserHost, served pages on 127.0.0.1 and a disposable browser
 // profile: ref clicks must act, every action must return the post-action state (a diff against
 // the last snapshot a result could show, full whenever the document changed or a result spilled),
-// screenshot coordinates must reject stale or outside viewports even under concurrent resizes,
+// evaluate must return its value and notices without a page view or baseline change, screenshot
+// coordinates must reject stale or outside viewports even under concurrent resizes,
 // stale refs must fail and point at the snapshot action, and dialogs must be reported instead of
 // hanging the tool call.
 public sealed class BrowserToolLoopbackTests {
@@ -310,6 +311,32 @@ public sealed class BrowserToolLoopbackTests {
     // The moved element is where the reordered snapshot says it is.
     await sandbox.CallAsync(owner, "click", ("ref", RefFor(moved.Text, "Mercury")));
     Assert.Equal("Mercury", await sandbox.OutTextAsync(owner));
+  }
+
+  [Fact]
+  public async Task EvaluateReturnsItsValueWithoutSnapshotOrBaselineChange() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/grow")));
+    Assert.Contains("parked", navigated.Text);
+
+    ToolOutput evaluated = await sandbox.CallAsync(owner, "evaluate",
+        ("expression", "console.error('boom'); document.getElementById('out').textContent = 'evaled'; 'done'"));
+    Assert.Contains("Evaluated: \"done\"", evaluated.Text);
+    // The value, and any notices, come back without a page view: no URL line, no diff fragment
+    // marker, and none of the content the last inline snapshot already showed.
+    Assert.Contains("Console error", evaluated.Text);
+    Assert.Contains("boom", evaluated.Text);
+    Assert.DoesNotContain(sandbox.Site.Url("/grow"), evaluated.Text);
+    Assert.DoesNotContain("Changed since the previous action:", evaluated.Text);
+    Assert.DoesNotContain("parked", evaluated.Text);
+
+    // No snapshot was taken, so the change evaluate made is still unseen, and the next
+    // action's diff against the untouched baseline must report it.
+    ToolOutput waited = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("Waited 10 ms.", waited.Text);
+    Assert.Contains("Changed since the previous action:", waited.Text);
+    Assert.Contains("evaled", waited.Text);
   }
 
   [Fact]

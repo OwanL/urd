@@ -112,7 +112,8 @@ A disposable probe already showed frame display and click mapping on headless Ch
 One `browser` tool. Navigation, a new document and explicit `snapshot` return the full page tree.
 Otherwise send only changed subtrees and removals since the last inline view of that page, with
 reordered siblings in their new order. Fall back to full when there is no baseline or the diff
-is at least half the full snapshot. Output truncation does not advance the baseline. If a ref is
+is at least half the full snapshot. Output truncation does not advance the baseline. `evaluate`
+returns its value and any notices without a page view; it does not advance the baseline. If a ref is
 stale, the action directs the caller to request `snapshot` explicitly; it does not auto-refresh or
 retry. Oversized results use the general tool output cap (prerequisite below).
 

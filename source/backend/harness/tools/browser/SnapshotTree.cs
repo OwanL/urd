@@ -51,8 +51,15 @@ internal static class SnapshotTree {
           || line.Contains('\r') || spaces / 2 >= chain.Count || spaces / 2 >= MaxDepth)
         return false;
       string content = line[(spaces + 2)..];
-      int roleEnd = content.IndexOfAny([' ', ':']);
-      string role = roleEnd < 0 ? content : content[..roleEnd];
+      // Playwright can quote the entire node key when an accessible name contains a colon.
+      // Read past the quote for role validation, but preserve the original text for emission.
+      ReadOnlySpan<char> key = content.AsSpan();
+      if (key[^1] == ':')
+        key = key[..^1];
+      if (key.Length > 2 && key[0] is '\'' or '"' && key[^1] == key[0])
+        key = key[1..^1];
+      int roleEnd = key.IndexOfAny(' ', ':');
+      string role = (roleEnd < 0 ? key : key[..roleEnd]).ToString();
       if (role.Length == 0 || role.Any(c => !char.IsAsciiLetter(c) && c != '/'))
         return false;
       Match reference = RefAttribute.Match(content);

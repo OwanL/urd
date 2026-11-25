@@ -4,8 +4,8 @@ using Microsoft.Playwright;
 
 namespace Urd.Core.Tools;
 
-// Per-session state, weakly keyed by live page. Only an inline result from a sequential
-// foreground action can serve as the baseline for a later model request.
+// Per-session state, weakly keyed by live page. A full-page capture from a sequential
+// foreground action can serve as the baseline, even if the shared output cap spills the result.
 internal sealed class BrowserSnapshots {
   private sealed record Baseline(string Url, int Document, string Text);
 
@@ -35,31 +35,46 @@ internal sealed class BrowserSnapshots {
   }
 
   internal async Task<string> DescribeAsync(IPage page, BrowserInteraction interaction, string header,
-      bool full, CancellationToken cancellation) {
+      bool full, string? @ref, CancellationToken cancellation) {
+    if (@ref is not null) {
+      string subtree = await page.GetByRef(@ref).AriaSnapshotAsync(new() { Mode = AriaSnapshotMode.Ai })
+          .WaitAsync(cancellation).ConfigureAwait(false);
+      return $"{header}\n{subtree}";
+    }
+
     string url = page.Url;
     int document = interaction.Document;
     string snapshot = await page.AriaSnapshotAsync(new() { Mode = AriaSnapshotMode.Ai })
         .WaitAsync(cancellation).ConfigureAwait(false);
     lock (gate) {
-      string view = snapshot;
       bool stable = !independent && document == interaction.Document && url == page.Url;
-      if (stable && !full && pages.TryGetValue(page, out Baseline? before) && before.Url == url
-          && before.Document == document) {
-        string? changes = SnapshotTree.Changes(before.Text, snapshot);
-        if (changes is null)
-          view = "Page unchanged.";
-        else if (Encoding.UTF8.GetByteCount(changes) < Encoding.UTF8.GetByteCount(snapshot) / 2)
-          view = changes;
-      }
-      string result = $"{header}\n{view}";
-      if (!ToolOutputLimit.Fits(result)) {
-        // A partial update is not a usable description, even if the page later reverts.
-        pages.Remove(page);
-        return $"Page view truncated; the next snapshot will be full.\n{result}";
-      }
-      if (stable)
-        pages.AddOrUpdate(page, new Baseline(url, document, snapshot));
+      if (!stable)
+        return $"{header}\n{snapshot}";
+
+      string result = !full && pages.TryGetValue(page, out Baseline? before) && before.Url == url
+          && before.Document == document
+          ? ChooseView(header, snapshot, SnapshotTree.Changes(before.Text, snapshot))
+          : $"{header}\n{snapshot}";
+      pages.AddOrUpdate(page, new Baseline(url, document, snapshot));
       return result;
     }
+  }
+
+  private static string ChooseView(string header, string snapshot, string? changes) {
+    if (changes is null)
+      return $"{header}\nPage unchanged.";
+    if (ReferenceEquals(changes, snapshot))
+      return $"{header}\n{snapshot}";
+
+    string diff = $"{header}\n{changes}";
+    bool compact = Encoding.UTF8.GetByteCount(changes) < Encoding.UTF8.GetByteCount(snapshot) / 2;
+    bool diffFits = ToolOutputLimit.Fits(diff);
+    if (compact && diffFits)
+      return diff;
+
+    // Prefer a complete inline view to spilling. Otherwise prefer the full tree unless the
+    // diff is substantially smaller, even when both views are too large to return inline.
+    string full = $"{header}\n{snapshot}";
+    return (compact || diffFits) && !ToolOutputLimit.Fits(full) ? diff : full;
   }
 }

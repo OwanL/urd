@@ -11,7 +11,7 @@ namespace Urd.Backend.Tests.Tools;
 
 // Real BrowserTool on a real BrowserHost, served pages on 127.0.0.1 and a disposable browser
 // profile: ref clicks must act, every action must return the post-action state (a diff against
-// the last snapshot a result could show, full whenever the document changed or a result spilled),
+// the last full-page capture, even if it spilled, or full when the document changed),
 // evaluate must return its value and notices without a page view or baseline change, screenshot
 // coordinates must reject stale or outside viewports even under concurrent resizes,
 // stale refs must fail and point at the snapshot action, and dialogs must be reported instead of
@@ -340,22 +340,66 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
-  public async Task SpilledResultsDoNotAdvanceTheDiffBaseline() {
+  public async Task OversizedSnapshotSpillsOnceAndStillBecomesTheDiffBaseline() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     Guid owner = Guid.NewGuid();
     ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/flood")));
-    string flood = RefFor(navigated.Text, "Flood");
+    ToolOutput flooded = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Flood")));
+    string spill = Assert.Single(SpillPaths(flooded.Text));
+    Assert.True(ToolOutputLimit.Fits(flooded.Text));
+    Assert.DoesNotContain("Page view truncated", flooded.Text);
+    Assert.DoesNotContain("item-0600", flooded.Text);
+    string full = await File.ReadAllTextAsync(spill);
+    Assert.Contains("item-0001", full);
+    Assert.Contains("item-0600", full);
 
-    ToolOutput flooded = await sandbox.CallAsync(owner, "click", ("ref", flood));
-    // The flooded page overflows the shared output cap, so the result spilled and the model
-    // never saw that snapshot inline; it cannot become the baseline later diffs refer to.
-    Assert.Contains("Output truncated", flooded.Text);
+    ToolOutput marked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(flooded.Text, "Mark")));
+    Assert.Empty(SpillPaths(marked.Text));
+    Assert.Contains("Changed since the previous action:", marked.Text);
+    Assert.Contains("mark applied", marked.Text);
+    Assert.DoesNotContain("item-0001", marked.Text);
+  }
 
-    // The button sits above the list, so its ref is still inside the spilled preview.
-    string append = RefFor(flooded.Text, "Append");
-    ToolOutput appended = await sandbox.CallAsync(owner, "click", ("ref", append));
-    // A diff against the spilled snapshot would hide the flood and report only the append.
-    Assert.Contains("item-0001", appended.Text);
+  [Fact]
+  public async Task ActionPrefersAFittingDiffOverAnOversizedFullSnapshot() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/flood")));
+    ToolOutput flooded = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Flood")));
+    string spill = Assert.Single(SpillPaths(flooded.Text));
+
+    ToolOutput disabled = await sandbox.CallAsync(owner, "click", ("ref", RefFor(flooded.Text, "Disable rows")));
+    Assert.Empty(SpillPaths(disabled.Text));
+    Assert.Contains("Changed since the previous action:", disabled.Text);
+    Assert.Contains("item-0310", disabled.Text);
+    Assert.DoesNotContain("item-0311", disabled.Text);
+    string full = await File.ReadAllTextAsync(spill);
+    Assert.True(Encoding.UTF8.GetByteCount(disabled.Text) > Encoding.UTF8.GetByteCount(full) / 2);
+  }
+
+  [Fact]
+  public async Task ScopedSnapshotRefsAreClickableAndDoNotReplaceThePageBaseline() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/scoped", """
+      <!doctype html><html><body>
+      <p>Outside context: this stays visible on the page, but should not be part of the scoped view.</p>
+      <p>More surrounding context to make a diff worthwhile after the button is clicked.</p>
+      <section aria-label="Controls">
+        <button onclick="document.getElementById('out').textContent = 'applied'">Apply</button>
+        <output id="out">pending</output>
+      </section>
+      </body></html>
+      """);
+    Guid owner = Guid.NewGuid();
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/scoped")));
+    ToolOutput scoped = await sandbox.CallAsync(owner, "snapshot", ("ref", RefFor(navigated.Text, "Controls")));
+    Assert.Contains("pending", scoped.Text);
+    Assert.DoesNotContain("Outside context", scoped.Text);
+
+    ToolOutput clicked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(scoped.Text, "Apply")));
+    Assert.Contains("Changed since the previous action:", clicked.Text);
+    Assert.Contains("applied", clicked.Text);
+    Assert.DoesNotContain("Outside context", clicked.Text);
   }
 
   [Fact]
@@ -403,9 +447,13 @@ public sealed class BrowserToolLoopbackTests {
           .Select(entry => entry.Match.Groups[1].Value)
           .FirstOrDefault() ?? throw new InvalidOperationException($"No [ref=] for \"{label}\" in:\n{snapshot}");
 
+  private static string[] SpillPaths(string result) => Regex.Matches(result, @"^\[Output truncated\. Full output: ([^\r\n]+)\]\n", RegexOptions.Multiline)
+      .Select(match => match.Groups[1].Value).ToArray();
+
   // One browser host with a disposable profile and one loopback page server per test.
   private sealed class Sandbox : IAsyncDisposable {
     private readonly string profileRoot;
+    private readonly List<string> spills = [];
     private BrowserHost host = null!;
 
     private Sandbox(string profileRoot) {
@@ -515,15 +563,22 @@ public sealed class BrowserToolLoopbackTests {
         """);
       sandbox.Site.Add("/flood", """
         <!doctype html><html><body>
-        <button onclick="document.getElementById('list').insertAdjacentHTML('beforeend', '<li>zed marker</li>')">Append</button>
+        <button onclick="document.getElementById('out').textContent = 'mark applied'">Mark</button>
         <button onclick="flood()">Flood</button>
-        <ul id="list"></ul>
+        <button onclick="disableRows()">Disable rows</button>
+        <output id="out">pending</output>
+        <section id="list" aria-label="Rows"></section>
         <script>
         function flood() {
           let html = '';
-          for (let i = 1; i <= 900; i++)
-            html += '<li>item-' + String(i).padStart(4, '0') + ' ridge lantern meadow kettle arch vault plume cedar</li>';
+          for (let i = 1; i <= 600; i++)
+            html += `<button>item-${String(i).padStart(4, '0')}: ${'ridge lantern '.repeat(6)}</button>`;
           document.getElementById('list').innerHTML = html;
+        }
+        function disableRows() {
+          const rows = document.getElementById('list').children;
+          for (let i = 0; i < 310; i++)
+            rows[i].disabled = true;
         }
         </script>
         </body></html>
@@ -540,6 +595,8 @@ public sealed class BrowserToolLoopbackTests {
     public async ValueTask DisposeAsync() {
       await host.DisposeAsync();
       Site.Dispose();
+      foreach (string spill in spills)
+        File.Delete(spill);
       for (int attempt = 0; attempt < 5; attempt++) {
         try {
           Directory.Delete(profileRoot, recursive: true);
@@ -567,7 +624,10 @@ public sealed class BrowserToolLoopbackTests {
       ToolOutput result = await Tool.RunAsync(arguments, context, CancellationToken.None).WaitAsync(StepTimeout);
       // Production applies the shared output cap to every tool result; mirror it here so spill
       // behavior is exercised the way the model actually receives it.
-      return await ToolOutputLimit.ApplyAsync("browser", result);
+      ToolOutput bounded = await ToolOutputLimit.ApplyAsync("browser", result);
+      if (!ReferenceEquals(result, bounded))
+        spills.AddRange(SpillPaths(bounded.Text));
+      return bounded;
     }
 
     public async Task<ToolOutput> WaitForSnapshotTextAsync(Guid owner, string expected) {

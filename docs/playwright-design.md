@@ -109,20 +109,26 @@ A disposable probe already showed frame display and click mapping on headless Ch
 
 ## Agent tool
 
-One `browser` tool. Navigation, a new document and explicit `snapshot` return the full page tree.
-Otherwise send only changed subtrees and removals since the last inline view of that page, with
-reordered siblings in their new order. Fall back to full when there is no baseline or the diff
-is at least half the full snapshot. Output truncation does not advance the baseline. `evaluate`
-returns its value and any notices without a page view; it does not advance the baseline. If a ref is
-stale, the action directs the caller to request `snapshot` explicitly; it does not auto-refresh or
-retry. Oversized results use the general tool output cap (prerequisite below).
+One `browser` tool. Navigation, a new document and `snapshot` without a ref return the full page
+view. Otherwise send changed subtrees and removals since the last full-page capture, with
+reordered siblings in their new order. With no baseline or no reliable diff, return the full
+view. Prefer whichever view fits inline if only one fits; otherwise use the full view when the
+structured diff is at least half its size.
+
+Oversized results use only the general tool output cap (prerequisite below), which includes one
+notice pointing to the complete result on disk. The baseline still advances to the complete page
+capture: later diffs describe what actually changed, rather than repeatedly spilling the same
+unchanged tree. Read the spill to see omitted content, or use `snapshot` with a ref to inspect
+just that subtree. A scoped snapshot leaves the page baseline intact, as does `evaluate`, which
+returns only its value and notices. If a ref is stale, request `snapshot` without a ref; the tool
+does not auto-refresh or retry.
 
 Measured with gpt-6.1-terra agents, 3 runs per task: on large app-like pages (grid, settings, 200-row inbox), diffs cut uncached input tokens ~45% and list-price cost ~35% vs full snapshots (grid −49%, settings −59%, inbox −10% because its first snapshot overflowed the output cap), with equal accuracy, step counts and no stale-ref errors. On small pages the difference was within run-to-run noise, so no size gate.
 
 | Action | Arguments |
 | --- | --- |
 | `navigate` | `url`, optional `new_tab` |
-| `snapshot` | |
+| `snapshot` | optional `ref` to capture just that element's subtree |
 | `click` | `ref` |
 | `type` | `ref`, `text`, optional `submit` |
 | `fill_form` | list of `ref` + `value` (text, checkbox, select); one snapshot for the whole form |
@@ -148,9 +154,9 @@ the agent moves files elsewhere if they should be kept. The action result gives 
 Chromium downloads PDFs rather than displaying them; reading PDFs belongs in the general `read`
 tool, not the browser.
 
-Snapshots use `page.AriaSnapshotAsync(new() { Mode = "ai" })`, which includes page text, iframes and
-`[ref=eN]` references; actions resolve refs with the `aria-ref=` locator. The agent hands a captcha
-or access challenge to the user in the viewer.
+Page and scoped snapshots use `AriaSnapshotAsync` in AI mode on the page or the element's locator.
+This includes page text, iframes and `[ref=eN]` references; either view's refs resolve with the
+`aria-ref=` locator. The agent hands a captcha or access challenge to the user in the viewer.
 
 The email-code flow needs no special support: the agent opens Gmail in a second tab, searches, reads
 the code from the snapshot and types it into the first tab.

@@ -369,6 +369,46 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
+  public async Task DedupingKeysOnTrimmedTextSoLongMessageTailsDoNotReReport() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/click")));
+    const string expression = """
+      () => {
+        const text = 'x'.repeat(600);
+        console.error(text + 'A');
+        console.error(text + 'B');
+        return 'done';
+      }
+      """;
+
+    ToolOutput reported = await sandbox.CallAsync(owner, "evaluate", ("expression", expression));
+
+    // The two messages differ only past the trimmed prefix, so one shared key suppresses both.
+    Assert.Single(Regex.Matches(reported.Text, "Console error: xxx"));
+    Assert.Contains("Console error: xxx", reported.Text);
+    Assert.Contains("...", reported.Text);
+  }
+
+  [Fact]
+  public async Task DedupeSetsForgetOldKeysOnceBounded() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/click")));
+    ToolOutput seeded = await sandbox.CallAsync(owner, "evaluate", ("expression", "console.error('old-marker')"));
+    Assert.Contains("Console error: old-marker", seeded.Text);
+
+    ToolOutput flooded = await sandbox.CallAsync(owner, "evaluate",
+        ("expression", "for (let i = 0; i < 600; i++) console.error('flood-' + i); 'flooded'"));
+    // The queue keeps only the newest burst.
+    Assert.Contains("Console error: flood-599", flooded.Text);
+
+    // The bounded set was cleared, so the marker is re-reported instead of being held forever.
+    ToolOutput again = await sandbox.CallAsync(owner, "evaluate", ("expression", "console.error('old-marker')"));
+    Assert.Contains("Console error: old-marker", again.Text);
+  }
+
+  [Fact]
   public async Task PendingNavigationDoesNotResetDiagnosticsUntilTheNewDocumentCommits() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     Guid owner = Guid.NewGuid();

@@ -15,6 +15,8 @@ namespace Urd.Core.Tools;
 internal sealed class BrowserInteraction : IAsyncDisposable {
   private const int EventLimit = 40;
   private const int MessageLimit = 500;
+  // Bounding for the dedupe sets; cleared when reached, accepting an occasional re-report.
+  private const int DedupeLimit = 500;
   private const int MaxViewportSide = 10000;
   private static readonly ConditionalWeakTable<IPage, BrowserInteraction> interactions = new();
 
@@ -231,19 +233,28 @@ internal sealed class BrowserInteraction : IAsyncDisposable {
   private void OnConsole(object? sender, IConsoleMessage message) {
     if (!string.Equals(message.Type, "error", StringComparison.OrdinalIgnoreCase))
       return;
+    string text = Trim(message.Text);
     lock (gate) {
-      if (seenErrors.Add(message.Text))
-        Record(pageErrors, message.Text, message.Location);
+      if (IsSeenOnce(seenErrors, text))
+        Record(pageErrors, text, message.Location);
     }
   }
 
   private void OnRequestFailed(object? sender, IRequest request) {
     string detail = string.IsNullOrWhiteSpace(request.Failure) ? "" : $" - {request.Failure}";
-    string text = $"{request.Method} {request.Url}{detail}";
+    string text = Trim($"{request.Method} {request.Url}{detail}");
     lock (gate) {
-      if (seenRequests.Add(text))
+      if (IsSeenOnce(seenRequests, text))
         Record(failedRequests, text, null);
     }
+  }
+
+  // Caller holds the gate. Dedupe keys on trimmed text and the sets are bounded, so a
+  // long-lived document cannot grow them unbounded.
+  private static bool IsSeenOnce(HashSet<string> seen, string text) {
+    if (seen.Count >= DedupeLimit)
+      seen.Clear();
+    return seen.Add(text);
   }
 
   // Caller holds the gate. Keeps one burst from flooding the action result.

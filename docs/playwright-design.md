@@ -148,7 +148,9 @@ An open dialog (alert, confirm, prompt, leave-page) is reported in the result an
 `dialog` rather than being dismissed silently. Results also list new console errors and failed
 requests, when there are any, for testing web apps. Each distinct error or failed request is
 reported once per page document. Only a main-frame document commit resets deduplication;
-fragment/history changes and downloads do not, even while a navigation is pending. Drag is
+fragment/history changes and downloads do not, even while a navigation is pending. Deduplication
+keys on trimmed text and forgets oldest entries once a few hundred pile up, so a long-lived
+document may re-report an old one. Drag is
 omitted as rare; the agent asks the user instead.
 
 Downloads save to a per-session folder in the OS temp directory, removed when the chat closes;

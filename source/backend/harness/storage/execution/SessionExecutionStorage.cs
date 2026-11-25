@@ -1,4 +1,5 @@
 using Microsoft.Data.Sqlite;
+using Urd.Core.Compaction;
 using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
@@ -78,8 +79,23 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       userMessages.InsertPresentedQuestion(transaction, execution, requestId, question);
     var context = new LlmContextReader(database, toolResults).ReadContext(transaction,
         execution.SessionId, execution.HistoryRevision, execution.ExecutionId, requestId);
-    return new LlmRequest(requestId, context.ReadMessages(), context);
+    return new LlmRequest(requestId, context.ReadMessages(), context, ReadClaimStamp(transaction, execution));
   }
+
+  // The context stamp claimed at request creation: the latest compaction boundary and every
+  // continuation omission applying to this run's tail. Requests send it to their tool calls so
+  // consumers can tell when a captured baseline has left what the model can still recall.
+  private ContextStamp ReadClaimStamp(SqliteTransaction transaction, ExecutionIdentity execution) =>
+      new(execution.HistoryRevision,
+          CompactionStorage.ReadLatest(database, transaction, execution.SessionId,
+              execution.HistoryRevision)?.Id,
+          database.Scalar<int>(transaction, """
+            SELECT COUNT(*) FROM execution_runs omitted
+            WHERE omitted.session_id = $session AND omitted.history_revision = $revision
+                AND omitted.kind = $continuation
+                AND omitted.continuation_omitted_request_id IS NOT NULL
+                AND omitted.ordinal <= (SELECT r.ordinal FROM execution_runs r WHERE r.run_id = $run);
+            """, ExecutionSql.Parameters(execution, ("$continuation", (int)ExecutionRunKind.Continuation))));
 
   internal bool RemovePendingInput(ExecutionIdentity execution, Guid submissionId) => database.Write(transaction =>
     database.Execute(transaction, $"""

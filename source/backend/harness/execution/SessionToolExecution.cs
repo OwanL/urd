@@ -44,7 +44,7 @@ internal sealed class SessionToolExecution {
   }
 
   internal async Task<ExecutionOutcome> RunBatchAsync(Guid requestId, IReadOnlyList<LlmToolCall> calls,
-      IReadOnlyList<AIFunctionDeclaration> offeredDefinitions) {
+      IReadOnlyList<AIFunctionDeclaration> offeredDefinitions, ContextStamp? contextStamp) {
     var foregroundTasks = new List<Task>(calls.Count);
     var failures = new List<Exception>();
     try {
@@ -61,9 +61,10 @@ internal sealed class SessionToolExecution {
         // Invoke immediately after the durable claim, before claiming the next call. File tools
         // admit to their shared path queue synchronously, preserving emitted order without Task.Run.
         if (runInBackground)
-          StartBackgroundTool(requestId, call, offeredDefinitions, runInBackground);
+          StartBackgroundTool(requestId, call, offeredDefinitions, runInBackground, contextStamp);
         else
-          foregroundTasks.Add(InvokeAndSaveToolAsync(requestId, call, offeredDefinitions, runInBackground, stopToken));
+          foregroundTasks.Add(InvokeAndSaveToolAsync(requestId, call, offeredDefinitions, runInBackground,
+              contextStamp, stopToken));
       }
     } catch (Exception failure) {
       failures.Add(failure);
@@ -84,7 +85,7 @@ internal sealed class SessionToolExecution {
   }
 
   private void StartBackgroundTool(Guid requestId, LlmToolCall call,
-      IReadOnlyList<AIFunctionDeclaration> offeredDefinitions, bool runInBackground) {
+      IReadOnlyList<AIFunctionDeclaration> offeredDefinitions, bool runInBackground, ContextStamp? contextStamp) {
     // The registry is the only cancellation owner; linked-source callbacks would bypass its join.
     var cancellation = new CancellationTokenSource();
     var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -102,15 +103,16 @@ internal sealed class SessionToolExecution {
     if (IsStopping)
       CancelBackgroundTools();
     // Registration precedes invocation, including tools that finish synchronously.
-    _ = RunBackgroundToolAsync(requestId, call, offeredDefinitions, completion, runInBackground, cancellation.Token);
+    _ = RunBackgroundToolAsync(requestId, call, offeredDefinitions, completion, runInBackground, contextStamp,
+        cancellation.Token);
   }
 
   private async Task RunBackgroundToolAsync(Guid requestId, LlmToolCall call,
       IReadOnlyList<AIFunctionDeclaration> offeredDefinitions, TaskCompletionSource completion,
-      bool runInBackground, CancellationToken cancellation) {
+      bool runInBackground, ContextStamp? contextStamp, CancellationToken cancellation) {
     Exception? failure = null;
     try {
-      await InvokeAndSaveToolAsync(requestId, call, offeredDefinitions, runInBackground, cancellation);
+      await InvokeAndSaveToolAsync(requestId, call, offeredDefinitions, runInBackground, contextStamp, cancellation);
     } catch (Exception error) {
       failure = error;
     }
@@ -129,10 +131,12 @@ internal sealed class SessionToolExecution {
   }
 
   private async Task InvokeAndSaveToolAsync(Guid requestId, LlmToolCall call,
-      IReadOnlyList<AIFunctionDeclaration> offeredDefinitions, bool runInBackground, CancellationToken cancellation) {
+      IReadOnlyList<AIFunctionDeclaration> offeredDefinitions, bool runInBackground, ContextStamp? contextStamp,
+      CancellationToken cancellation) {
     try {
       LlmToolResult result = await ToolInvoker.InvokeAsync(requestId, call, tools, offeredDefinitions,
-          session.WorkingDirectory, supportsImages, runInBackground, cancellation, recorder.CreateHarnessToolContext);
+          session.WorkingDirectory, supportsImages, runInBackground, cancellation, contextStamp,
+          recorder.CreateHarnessToolContext);
       // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
       if (!await recorder.CompleteToolAsync(requestId, result))
         throw new InvalidOperationException("The tool result could not be saved.");

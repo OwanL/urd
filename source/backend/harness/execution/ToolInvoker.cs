@@ -13,7 +13,7 @@ internal static class ToolInvoker {
   internal static async Task<LlmToolResult> InvokeAsync(Guid requestId, LlmToolCall call,
       IReadOnlyList<AgentTool> allowedTools, IReadOnlyList<AIFunctionDeclaration> offeredDefinitions,
       string? workingDirectory, bool supportsImages, bool background, CancellationToken cancellation,
-      Func<string, bool, HarnessToolContext>? createHarnessContext = null) {
+      ContextStamp? contextStamp = null, Func<string, bool, HarnessToolContext>? createHarnessContext = null) {
     ToolOutput output;
     ExecutionOutcome? failure = null;
     try {
@@ -31,7 +31,8 @@ internal static class ToolInvoker {
       if (tool is HarnessTool harnessTool) {
         HarnessToolContext context = createHarnessContext?.Invoke(call.CallId, background)
             ?? throw new InvalidOperationException("Harness tools require a session execution.");
-        output = await harnessTool.RunAsync(arguments, context with { RequestId = requestId }, cancellation);
+        output = await harnessTool.RunAsync(arguments,
+            context with { RequestId = requestId, BrowserContextStamp = contextStamp }, cancellation);
       } else {
         string directory = workingDirectory ?? (tool is WebSearchTool or WebReadTool or ListPendingCallsTool or CancelPendingCallsTool or RemoteMcpAgentTool
             ? string.Empty : throw new InvalidOperationException("The chat has no saved working folder."));

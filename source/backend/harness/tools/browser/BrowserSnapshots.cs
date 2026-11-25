@@ -4,34 +4,43 @@ using Microsoft.Playwright;
 
 namespace Urd.Core.Tools;
 
-// Per-session state, weakly keyed by live page. A full-page capture from a sequential
-// foreground action can serve as the baseline, even if the shared output cap spills the result.
+// A full-page capture from a sequential foreground action can serve as the baseline,
+// even if the shared output cap spills the result.
 internal sealed class BrowserSnapshots {
-  private sealed record Baseline(string Url, int Document, string Text);
+  private sealed record Baseline(string Url, int Document, string Text, string CallId);
+  private sealed record Capture(long Generation, string CallId, bool Independent);
 
   private readonly Lock gate = new();
   private readonly ConditionalWeakTable<IPage, Baseline> pages = new();
-  private Guid execution;
+  private readonly AsyncLocal<Capture?> capture = new();
+  private Guid session;
   private Guid request;
+  private object? stamp;
+  private long generation;
   private int active;
-  private bool independent;
 
   internal void Begin(HarnessToolContext context) {
     lock (gate) {
-      // Sibling results can be delivered out of capture order. Start fresh after that batch,
-      // after deferred results, or when a new execution may no longer include the old history.
-      independent = active > 0 || context.Background || request == context.RequestId;
-      if (independent || execution != context.ExecutionId)
+      object? nextStamp = context.BrowserContextStamp;
+      // Sibling and background results can arrive out of order. Fence every capture already
+      // underway as well as the new one, and start fresh after the batch.
+      bool independent = active > 0 || context.Background || request == context.RequestId || nextStamp is null;
+      if (independent || session != context.SessionId || !Equals(stamp, nextStamp)) {
         pages.Clear();
-      execution = context.ExecutionId;
+        generation++;
+      }
+      session = context.SessionId;
+      stamp = nextStamp;
       request = context.RequestId;
       active++;
+      capture.Value = new Capture(generation, context.CallId, independent);
     }
   }
 
   internal void End() {
     lock (gate)
       active--;
+    capture.Value = null;
   }
 
   internal async Task<string> DescribeAsync(IPage page, BrowserInteraction interaction, string header,
@@ -47,26 +56,31 @@ internal sealed class BrowserSnapshots {
     string snapshot = await page.AriaSnapshotAsync(new() { Mode = AriaSnapshotMode.Ai })
         .WaitAsync(cancellation).ConfigureAwait(false);
     lock (gate) {
-      bool stable = !independent && document == interaction.Document && url == page.Url;
+      Capture? current = capture.Value;
+      bool stable = current is not null && !current.Independent && current.Generation == generation
+          && document == interaction.Document && url == page.Url;
       if (!stable)
         return $"{header}\n{snapshot}";
 
       string result = !full && pages.TryGetValue(page, out Baseline? before) && before.Url == url
           && before.Document == document
-          ? ChooseView(header, snapshot, SnapshotTree.Changes(before.Text, snapshot))
+          ? ChooseView(header, snapshot, SnapshotTree.Changes(before.Text, snapshot), before.CallId)
           : $"{header}\n{snapshot}";
-      pages.AddOrUpdate(page, new Baseline(url, document, snapshot));
+      pages.AddOrUpdate(page, new Baseline(url, document, snapshot, current!.CallId));
       return result;
     }
   }
 
-  private static string ChooseView(string header, string snapshot, string? changes) {
+  private static string ChooseView(string header, string snapshot, string? changes, string callId) {
     if (changes is null)
-      return $"{header}\nPage unchanged.";
+      return $"{header}\nPage unchanged since browser call {callId}.";
     if (ReferenceEquals(changes, snapshot))
       return $"{header}\n{snapshot}";
 
-    string diff = $"{header}\n{changes}";
+    const string previousAction = "Changed since the previous action:\n";
+    string body = changes.StartsWith(previousAction, StringComparison.Ordinal)
+        ? changes[previousAction.Length..] : changes;
+    string diff = $"{header}\nChanged since browser call {callId}:\n{body}";
     bool compact = Encoding.UTF8.GetByteCount(changes) < Encoding.UTF8.GetByteCount(snapshot) / 2;
     bool diffFits = ToolOutputLimit.Fits(diff);
     if (compact && diffFits)

@@ -100,18 +100,20 @@ internal sealed class SessionExecution : IDisposable {
   // Called sequentially outside the session lock. Foreground calls join here;
   // registered background calls remain owned until the session drains them.
   internal async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request) {
-    (LlmRequestResult result, IReadOnlyList<AIFunctionDeclaration> offeredTools) = await SendLlmRequestAsync(request);
+    (LlmRequestResult result, IReadOnlyList<AIFunctionDeclaration> offeredTools, ContextStamp? stamp) =
+        await SendLlmRequestAsync(request);
     // Retry only the rejected model exchange, never a tool or any observed partial output.
     bool canCompactAndRetry = result.Failure == ProviderFailure.ContextWindowExceeded
         && !result.OutputObserved && !IsStopping;
     if (canCompactAndRetry && await recorder.CanRetryOverflowAsync(request.RequestId)) {
       RetireContextEstimate();
       try {
-        LlmRequest? reducedRequest = await CompactHistoryAsync(request.RequestId, CompactionReason.Overflow);
+        LlmRequest? reducedRequest = await CompactHistoryAsync(request.RequestId, CompactionReason.Overflow,
+            stamp: request.Stamp);
         if (reducedRequest is null)
           result = result with { Error = $"{NoCompactionCut} Shorten the input or use a larger-context model. ({result.Error})" };
         else
-          (result, offeredTools) = await SendLlmRequestAsync(reducedRequest, allowAutomaticCompaction: false);
+          (result, offeredTools, stamp) = await SendLlmRequestAsync(reducedRequest, allowAutomaticCompaction: false);
       } catch (Exception failure) {
         result = CreateRequestResult(request.RequestId, failure);
       }
@@ -123,7 +125,7 @@ internal sealed class SessionExecution : IDisposable {
     if (result.Outcome != ExecutionOutcome.Completed)
       return result.Outcome;
 
-    return await toolExecution.RunBatchAsync(request.RequestId, result.ToolCalls ?? [], offeredTools);
+    return await toolExecution.RunBatchAsync(request.RequestId, result.ToolCalls ?? [], offeredTools, stamp);
   }
 
   internal async Task<ExecutionOutcome> RunCompactionAsync() {
@@ -146,7 +148,7 @@ internal sealed class SessionExecution : IDisposable {
 
   // Summary work runs outside the session lock. The commit rechecks Stop, revision and prior boundary.
   private async Task<LlmRequest?> CompactHistoryAsync(Guid? requestId, CompactionReason reason, string? focus = null,
-      ModelHistory? currentHistory = null) {
+      ModelHistory? currentHistory = null, ContextStamp? stamp = null) {
     HistoryCompactionPlan? plan = await CreateCompactionPlanAsync(requestId, reason, focus, currentHistory);
     if (plan is null)
       return null;
@@ -166,7 +168,9 @@ internal sealed class SessionExecution : IDisposable {
       ModelHistory compactedHistory = await recorder.ReadModelHistoryAsync(requestId);
       if (reason != CompactionReason.Manual)
         automaticBoundary = compactedHistory.PreviousCompaction?.Id;
-      return new(requestId ?? Guid.Empty, compactedHistory.ReadMessages(), compactedHistory);
+      // The claim survives compaction; only the effective boundary moves.
+      return new(requestId ?? Guid.Empty, compactedHistory.ReadMessages(), compactedHistory,
+          stamp is null ? null : stamp with { CompactionId = compactedHistory.PreviousCompaction?.Id });
     } finally {
       await recorder.SetCompactingAsync(IsManualCompaction);
     }
@@ -379,7 +383,7 @@ internal sealed class SessionExecution : IDisposable {
       toolExecution.AddRemoteTools(tools);
   }
 
-  private async Task<(LlmRequestResult Result, IReadOnlyList<AIFunctionDeclaration> OfferedTools)> SendLlmRequestAsync(
+  private async Task<(LlmRequestResult Result, IReadOnlyList<AIFunctionDeclaration> OfferedTools, ContextStamp? Stamp)> SendLlmRequestAsync(
       LlmRequest request, bool allowAutomaticCompaction = true) {
     IChatClient client;
     IReadOnlyList<ChatMessage> messages;
@@ -388,7 +392,8 @@ internal sealed class SessionExecution : IDisposable {
     try {
       stop.Token.ThrowIfCancellationRequested();
       if (allowAutomaticCompaction)
-        request = await CompactHistoryAsync(request.RequestId, CompactionReason.Threshold, currentHistory: request.Context) ?? request;
+        request = await CompactHistoryAsync(request.RequestId, CompactionReason.Threshold,
+            currentHistory: request.Context, stamp: request.Stamp) ?? request;
       await PrepareStartingContextAsync(request);
       await PrepareRemoteMcpToolsAsync();
       client = chatClient ??= createChatClient(selection.Connection);
@@ -420,8 +425,11 @@ internal sealed class SessionExecution : IDisposable {
         input.Add(reminder);
       messages = LlmMessageProjection.AdaptForModel(input, selection.SupportsImages);
     } catch (Exception failure) {
-      return (CreateRequestResult(request.RequestId, failure), []);
+      return (CreateRequestResult(request.RequestId, failure), [], null);
     }
+
+    // The sent request's stamp: the storage claim, rebased when compaction re-read the context.
+    ContextStamp? stamp = request.Stamp;
 
     await using RequestContextEstimate? estimate = RequestContextEstimate.SupportsModel(selection.ModelId)
         ? new(recorder.PublishContextEstimateAsync) : null;
@@ -438,7 +446,7 @@ internal sealed class SessionExecution : IDisposable {
       ProviderResponse = result.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,
       Usage = response.Usage,
       OutputObserved = response.OutputObserved
-    }, offeredTools);
+    }, offeredTools, stamp);
   }
 
   private LlmRequestResult CreateRequestResult(Guid requestId, Exception? failure) {

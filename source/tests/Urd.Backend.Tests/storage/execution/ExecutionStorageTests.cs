@@ -36,6 +36,41 @@ public sealed class ExecutionStorageTests {
   }
 
   [Fact]
+  public void RequestClaimsItsContextStamp() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    Guid execution = Guid.NewGuid();
+    var identity = new ExecutionIdentity(session, execution, 0);
+    store.UserMessages.Submit(session, 0,
+        new(Guid.NewGuid(), 0, "input", TestLlmSelection.Default), true, execution);
+    LlmRequest first = store.Executions.CreateNextRequest(identity)!;
+    Assert.Equal(new ContextStamp(0, null, 0), first.Stamp);
+
+    Guid request = first.RequestId;
+    Assert.True(store.Executions.StartRequest(identity, request));
+    Assert.True(store.LlmResponses.Append(identity, new(request, Guid.NewGuid(), 0, "done", true)));
+    Assert.True(store.LlmResponses.CompleteRequest(identity, new(request, ExecutionOutcome.Completed)));
+    Assert.Equal(ExecutionOutcome.Completed,
+        store.Executions.TryFinish(session, execution, ExecutionOutcome.Completed)!.Outcome);
+
+    Guid compaction = Guid.NewGuid();
+    database.Execute($"""
+      INSERT INTO session_compactions (compaction_id, session_id, history_revision, run_id, first_kept_request_id,
+          first_kept_message_index, first_kept_run_ordinal, first_kept_request_index, reason, tokens_before,
+          tokens_after, created_at, summary)
+      VALUES ('{compaction:D}', '{session:D}', 0, '{execution:D}', '{request:D}', 0, 1, 0, 0, 50, 10, 'now', 'summary');
+      """); // raw-sql: seed a settled compaction boundary for the claim stamp to report.
+
+    Guid next = Guid.NewGuid();
+    var nextIdentity = new ExecutionIdentity(session, next, 0);
+    store.UserMessages.Submit(session, 0,
+        new(Guid.NewGuid(), 0, "later input", TestLlmSelection.Default), true, next);
+    LlmRequest claimed = store.Executions.CreateNextRequest(nextIdentity)!;
+    Assert.Equal(new ContextStamp(0, compaction, 0), claimed.Stamp);
+  }
+
+  [Fact]
   public void ToolObservationRetriesRemainScopedAndCannotChangeFactsAfterStop() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

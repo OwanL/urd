@@ -17,6 +17,11 @@ internal sealed record HarnessToolContext(Guid SessionId, Guid ExecutionId, stri
   // The effective background mode decided before the durable claim, including the tool's own
   // argument rules such as an ask with wake false.
   internal bool Background { get; init; }
+
+  // The invoking request's ContextStamp, so consumers can tell when a baseline they captured has
+  // left the model context. Null when the executing pipeline could not stamp the call; consumers
+  // must then fail closed.
+  internal object? BrowserContextStamp { get; init; }
 }
 
 // Resolves durable session identities and bounded child runs without exposing storage or

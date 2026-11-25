@@ -65,7 +65,7 @@ public sealed class BrowserToolLoopbackTests {
     Assert.Contains(sandbox.Site.Url("/slow-arrival"), result.Text);
     Assert.Contains("New document", result.Text);
     Assert.Contains("Arrival ready", result.Text);
-    Assert.DoesNotContain("Changed since the previous action:", result.Text);
+    Assert.DoesNotContain("Changed since browser call ", result.Text);
   }
 
   [Fact]
@@ -308,12 +308,12 @@ public sealed class BrowserToolLoopbackTests {
     await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/click")), ("new_tab", true));
 
     ToolOutput selected = await sandbox.CallAsync(owner, "tabs", ("select", firstId));
-    Assert.Contains("Changed since the previous action:", selected.Text);
+    Assert.Contains("Changed since browser call ", selected.Text);
     Assert.Contains("changed while unselected", selected.Text);
     Assert.DoesNotContain("parked:", selected.Text);
 
     ToolOutput unchanged = await sandbox.CallAsync(owner, "tabs", ("select", firstId));
-    Assert.Contains("Page unchanged.", unchanged.Text);
+    Assert.Contains("Page unchanged since browser call ", unchanged.Text);
   }
 
   [Fact]
@@ -330,8 +330,8 @@ public sealed class BrowserToolLoopbackTests {
 
     ToolOutput selected = await sandbox.CallAsync(owner, "tabs", ("select", page.Id.ToString()));
     Assert.Contains("first view without a baseline", selected.Text);
-    Assert.DoesNotContain("Changed since the previous action:", selected.Text);
-    Assert.DoesNotContain("Page unchanged.", selected.Text);
+    Assert.DoesNotContain("Changed since browser call ", selected.Text);
+    Assert.DoesNotContain("Page unchanged since browser call ", selected.Text);
   }
 
   [Fact]
@@ -545,6 +545,68 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
+  public async Task BaselineSurvivesTurnsOnlyWhileContextStampMatches() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    sandbox.CallId = "first";
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/grow")));
+    sandbox.ExecutionId = Guid.NewGuid();
+    sandbox.CallId = "second";
+    ToolOutput unchanged = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("Page unchanged since browser call first.", unchanged.Text);
+
+    sandbox.CallId = "third";
+    await sandbox.PageOf(owner).EvaluateAsync("() => document.getElementById('out').textContent = 'changed'");
+    ToolOutput changed = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("Changed since browser call second:", changed.Text);
+
+    sandbox.ContextStamp = "compacted";
+    ToolOutput reset = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("parked", reset.Text);
+    Assert.DoesNotContain("since browser call", reset.Text);
+    sandbox.ContextStamp = null;
+    await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    ToolOutput missing = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("parked", missing.Text);
+    Assert.DoesNotContain("since browser call", missing.Text);
+  }
+
+  [Fact]
+  public async Task SiblingAndBackgroundCallsDoNotEstablishBaselines() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    sandbox.RequestId = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/grow")));
+    ToolOutput sibling = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("parked", sibling.Text);
+    sandbox.RequestId = Guid.NewGuid();
+    sandbox.Background = true;
+    ToolOutput background = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("parked", background.Text);
+    sandbox.Background = false;
+    sandbox.RequestId = Guid.NewGuid();
+    ToolOutput next = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("parked", next.Text);
+  }
+
+  [Fact]
+  public async Task OverlappingCallsFenceBothCaptures() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/grow")));
+    Task<ToolOutput> slow = sandbox.CallAsync(owner, "wait", ("ms", 500));
+    await Task.Delay(100);
+    ToolOutput overlap = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    ToolOutput finished = await slow;
+    Assert.Contains("parked", overlap.Text);
+    Assert.Contains("parked", finished.Text);
+    ToolOutput after = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("parked", after.Text);
+    ToolOutput next = await sandbox.CallAsync(owner, "wait", ("ms", 10));
+    Assert.Contains("Page unchanged since browser call ", next.Text);
+  }
+
+  [Fact]
   public async Task ActionReturnsFullSnapshotWhenChangesAffectMostOfThePage() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     Guid owner = Guid.NewGuid();
@@ -554,7 +616,7 @@ public sealed class BrowserToolLoopbackTests {
     ToolOutput changed = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Change most")));
     Assert.Contains("Updated row 6", changed.Text);
     Assert.Contains("Stable row 7", changed.Text);
-    Assert.DoesNotContain("Changed since the previous action:", changed.Text);
+    Assert.DoesNotContain("Changed since browser call ", changed.Text);
   }
 
   [Fact]
@@ -606,14 +668,14 @@ public sealed class BrowserToolLoopbackTests {
     Assert.Contains("Console error", evaluated.Text);
     Assert.Contains("boom", evaluated.Text);
     Assert.DoesNotContain(sandbox.Site.Url("/grow"), evaluated.Text);
-    Assert.DoesNotContain("Changed since the previous action:", evaluated.Text);
+    Assert.DoesNotContain("Changed since browser call ", evaluated.Text);
     Assert.DoesNotContain("parked", evaluated.Text);
 
     // No snapshot was taken, so the change evaluate made is still unseen, and the next
     // action's diff against the untouched baseline must report it.
     ToolOutput waited = await sandbox.CallAsync(owner, "wait", ("ms", 10));
     Assert.Contains("Waited 10 ms.", waited.Text);
-    Assert.Contains("Changed since the previous action:", waited.Text);
+    Assert.Contains("Changed since browser call ", waited.Text);
     Assert.Contains("evaled", waited.Text);
   }
 
@@ -762,7 +824,7 @@ public sealed class BrowserToolLoopbackTests {
 
     ToolOutput marked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(flooded.Text, "Mark")));
     Assert.Empty(SpillPaths(marked.Text));
-    Assert.Contains("Changed since the previous action:", marked.Text);
+    Assert.Contains("Changed since browser call ", marked.Text);
     Assert.Contains("mark applied", marked.Text);
     Assert.DoesNotContain("item-0001", marked.Text);
   }
@@ -777,7 +839,7 @@ public sealed class BrowserToolLoopbackTests {
 
     ToolOutput disabled = await sandbox.CallAsync(owner, "click", ("ref", RefFor(flooded.Text, "Disable rows")));
     Assert.Empty(SpillPaths(disabled.Text));
-    Assert.Contains("Changed since the previous action:", disabled.Text);
+    Assert.Contains("Changed since browser call ", disabled.Text);
     Assert.Contains("item-0310", disabled.Text);
     Assert.DoesNotContain("item-0311", disabled.Text);
     string full = await File.ReadAllTextAsync(spill);
@@ -804,7 +866,7 @@ public sealed class BrowserToolLoopbackTests {
     Assert.DoesNotContain("Outside context", scoped.Text);
 
     ToolOutput clicked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(scoped.Text, "Apply")));
-    Assert.Contains("Changed since the previous action:", clicked.Text);
+    Assert.Contains("Changed since browser call ", clicked.Text);
     Assert.Contains("applied", clicked.Text);
     Assert.DoesNotContain("Outside context", clicked.Text);
   }
@@ -1091,6 +1153,12 @@ public sealed class BrowserToolLoopbackTests {
     public IPage PageOf(Guid owner) =>
         (host.Pages.Selected(owner) ?? throw new InvalidOperationException("No page is open for this session.")).Page;
 
+    public string? ContextStamp { get; set; } = "history";
+    public Guid? ExecutionId { get; set; }
+    public Guid? RequestId { get; set; }
+    public string? CallId { get; set; }
+    public bool Background { get; set; }
+
     public Task<ToolOutput> CallAsync(Guid owner, string action, params (string Name, JsonNode? Value)[] options) =>
         CallAsync(owner, action, CancellationToken.None, options);
 
@@ -1103,7 +1171,9 @@ public sealed class BrowserToolLoopbackTests {
       using (var writer = new Utf8JsonWriter(stream))
         values.WriteTo(writer);
       JsonElement arguments = JsonDocument.Parse(stream.ToArray()).RootElement.Clone();
-      var context = new HarnessToolContext(owner, owner, "call", null!) { RequestId = Guid.NewGuid() };
+      var context = new HarnessToolContext(owner, ExecutionId ?? owner, CallId ?? Guid.NewGuid().ToString(), null!) {
+        RequestId = RequestId ?? Guid.NewGuid(), BrowserContextStamp = ContextStamp, Background = Background
+      };
       ToolOutput result = await Tool.RunAsync(arguments, context, cancellation).WaitAsync(StepTimeout, CancellationToken.None);
       // Production applies the shared output cap to every tool result; mirror it here so spill
       // behavior is exercised the way the model actually receives it.

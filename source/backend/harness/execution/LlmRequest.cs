@@ -5,11 +5,12 @@ using Urd.Core.Compaction;
 namespace Urd.Core.Execution;
 
 // Input for one LLM request. Storage prepares it, and SessionBase hands it over
-// only after the request claim is committed.
+// only after the request claim is committed. Stamp claims the request's context state.
 internal sealed record LlmRequest(
     Guid RequestId,
     IReadOnlyList<ChatMessage> Messages,
-    ModelHistory? Context = null);
+    ModelHistory? Context = null,
+    ContextStamp? Stamp = null);
 
 // Buffered response text sent through SessionBase for persistence.
 // IsFinal closes the text, not the execution; the final chunk may be empty.

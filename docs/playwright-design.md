@@ -111,8 +111,10 @@ A disposable probe already showed frame display and click mapping on headless Ch
 
 One `browser` tool. Navigation, a new document and `snapshot` without a ref return the full page
 view. Otherwise send changed subtrees and removals since the last full-page capture, with
-reordered siblings in their new order. With no baseline or no reliable diff, return the full
-view. Prefer whichever view fits inline if only one fits; otherwise use the full view when the
+reordered siblings in their new order. Diffs and unchanged notices identify that capture's tool
+call. Baselines survive turns only while the model context stamp remains equal; a missing or changed
+stamp, overlapping calls, background calls and sibling calls fence the baseline. With no baseline
+or no reliable diff, return the full view. Prefer whichever view fits inline if only one fits; otherwise use the full view when the
 structured diff is at least half its size. A `tabs` listing returns page IDs and URLs without a
 page view; selecting a page returns its normal diff, unchanged notice or full view.
 

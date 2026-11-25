@@ -165,26 +165,38 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
-  public async Task ActionNavigationReportsATimeoutWithoutLosingTheCurrentView() {
+  public async Task ActionNavigationReportsATimeoutWhenAHeadScriptBlocksTheNewBody() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
-    sandbox.Site.Add("/depart", "<a href='/stalled'>Depart</a>");
+    sandbox.Site.Add("/depart", "<a href='/stalled'>Depart</a><h1>Old document</h1>");
     sandbox.Site.Add("/stalled", """
-      <!doctype html><html><head><script defer src="/held"></script></head><body>Waiting for script</body></html>
+      <!doctype html><html><head><script src="/held"></script></head><body>New document</body></html>
       """);
+    TaskCompletionSource requested = new(TaskCreationOptions.RunContinuationsAsynchronously);
     TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    sandbox.Site.Add("/held", "", () => release.Task.WaitAsync(StepTimeout), contentType: "text/javascript");
+    sandbox.Site.Add("/held", "", () => {
+      requested.SetResult();
+      return release.Task.WaitAsync(StepTimeout);
+    }, contentType: "text/javascript");
     Guid owner = Guid.NewGuid();
     ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/depart")));
-
+    string @ref = RefFor(before.Text, "Depart");
+    Task<ToolOutput> click = sandbox.CallAsync(owner, "click", ("ref", @ref));
     try {
-      ToolOutput result = await sandbox.CallAsync(owner, "click", ("ref", RefFor(before.Text, "Depart")))
-          .WaitAsync(TimeSpan.FromSeconds(15));
+      await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      await sandbox.PageOf(owner).WaitForURLAsync(sandbox.Site.Url("/stalled"), new() {
+        WaitUntil = WaitUntilState.Commit, Timeout = 5000
+      });
+      ToolOutput result = await click.WaitAsync(TimeSpan.FromSeconds(15));
+      Assert.Contains($"Clicked {@ref}.", result.Text);
       Assert.Contains("Navigation did not reach DOMContentLoaded within 10 seconds", result.Text);
-      Assert.Contains(sandbox.Site.Url("/stalled"), result.Text);
-      Assert.Contains("Waiting for script", result.Text);
+      Assert.Contains("Page view omitted", result.Text);
+      Assert.DoesNotContain("Old document", result.Text);
+      Assert.DoesNotContain("New document", result.Text);
     } finally {
       release.SetResult();
     }
+
+    await sandbox.WaitForSnapshotTextAsync(owner, "New document");
   }
 
   [Fact]

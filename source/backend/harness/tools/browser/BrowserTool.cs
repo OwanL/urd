@@ -400,12 +400,12 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
         .ConfigureAwait(false);
     if (result == PageCommandResult.Dialog)
       notes.Clear();
-    // Playwright's accessibility snapshot can itself wait for commit, defeating the action's timeout.
-    return await ResultAsync(owner, notes, [], withSnapshot: result != PageCommandResult.NavigationPending,
+    // A snapshot can wait for the new document's body even after commit.
+    return await ResultAsync(owner, notes, [], withSnapshot: result != PageCommandResult.NavigationTimedOut,
         cancellation).ConfigureAwait(false);
   }
 
-  private enum PageCommandResult { Ready, Dialog, NavigationPending }
+  private enum PageCommandResult { Ready, Dialog, NavigationTimedOut }
 
   // The dialog signal covers both the command and any navigation it started. Stop waiting on
   // cancellation or a dialog without retrying input that may already have taken effect.
@@ -441,12 +441,11 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
       cancellation.ThrowIfCancellationRequested();
       if (dialogPending.IsCompleted)
         return PageCommandResult.Dialog;
-      if (navigation == NavigationWait.TimedOutBeforeCommit) {
-        actionNotes!.Add("Navigation did not commit within 10 seconds. Page view omitted; use snapshot after the page loads.");
-        return PageCommandResult.NavigationPending;
+      if (navigation != NavigationWait.Ready) {
+        string milestone = navigation == NavigationWait.TimedOutBeforeCommit ? "commit" : "reach DOMContentLoaded";
+        actionNotes!.Add($"Navigation did not {milestone} within 10 seconds. Page view omitted; use snapshot after the page loads.");
+        return PageCommandResult.NavigationTimedOut;
       }
-      if (navigation == NavigationWait.TimedOutAfterCommit)
-        actionNotes!.Add("Navigation did not reach DOMContentLoaded within 10 seconds; the page view may be incomplete.");
       return PageCommandResult.Ready;
     } finally {
       await waiting.CancelAsync().ConfigureAwait(false);

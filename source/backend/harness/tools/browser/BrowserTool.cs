@@ -83,8 +83,10 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     try {
       return await ActAsync(action, arguments, context, cancellation).ConfigureAwait(false);
     } catch (Exception error) when ((error is PlaywrightException or TimeoutException)
-        && (action is "click" or "type" or "hover" or "fill_form" or "select" or "upload"
-          || action == "snapshot" && Optional(arguments, "ref") is not null)) {
+        && action == "snapshot" && Optional(arguments, "ref") is not null) {
+      throw new InvalidOperationException($"Scoped snapshot failed; the ref may not be found or may be stale. Take a snapshot without a ref to refresh refs. {error.Message}", error);
+    } catch (Exception error) when ((error is PlaywrightException or TimeoutException)
+        && action is "click" or "type" or "hover" or "fill_form" or "select" or "upload") {
       throw new InvalidOperationException($"Ref action failed; effects may have occurred. Use snapshot to refresh refs. {error.Message}", error);
     } finally {
       snapshots.End();

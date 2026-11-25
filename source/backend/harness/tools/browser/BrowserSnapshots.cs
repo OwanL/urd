@@ -37,7 +37,7 @@ internal sealed class BrowserSnapshots {
   internal async Task<string> DescribeAsync(IPage page, BrowserInteraction interaction, string header,
       bool full, string? @ref, CancellationToken cancellation) {
     if (@ref is not null) {
-      string subtree = await page.GetByRef(@ref).AriaSnapshotAsync(new() { Mode = AriaSnapshotMode.Ai })
+      string subtree = await page.GetByRef(@ref).AriaSnapshotAsync(new() { Mode = AriaSnapshotMode.Ai, Timeout = 2000 })
           .WaitAsync(cancellation).ConfigureAwait(false);
       return $"{header}\n{subtree}";
     }

@@ -503,8 +503,11 @@ public sealed class BrowserToolLoopbackTests {
     await sandbox.PageOf(owner)
         .EvaluateAsync("() => { console.error('sticky'); fetch('http://127.0.0.1:1/sticky').catch(() => {}); }");
 
-    await Assert.ThrowsAsync<InvalidOperationException>(() =>
+    InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
         sandbox.CallAsync(owner, "snapshot", ("ref", "e999")));
+    Assert.Contains("ref may not be found or may be stale", error.Message);
+    Assert.Contains("snapshot without a ref", error.Message);
+    Assert.DoesNotContain("effects may have occurred", error.Message);
 
     ToolOutput later = await sandbox.CallAsync(owner, "evaluate", ("expression", "'kept'"));
     Assert.Contains("Evaluated: \"kept\"", later.Text);

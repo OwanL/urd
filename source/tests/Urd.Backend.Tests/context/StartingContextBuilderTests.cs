@@ -49,7 +49,7 @@ public sealed class StartingContextBuilderTests {
 
     Assert.Contains("Working directory: C:\\workspace\\urd\n", environment, StringComparison.Ordinal);
     Assert.Contains("Operating system: ", environment, StringComparison.Ordinal);
-    Assert.Contains("Time: 2026-11-23 10:58 +13:00 (Test/Zone) as of session creation", environment, StringComparison.Ordinal);
+    Assert.EndsWith("Time: 2026-11-23 10:58 +13:00 (Test/Zone) as of session creation", environment, StringComparison.Ordinal);
   }
 
   [Fact]

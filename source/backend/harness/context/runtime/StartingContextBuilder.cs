@@ -150,13 +150,14 @@ internal sealed class StartingContextBuilder {
       new(ChatRole.System, SharedAgentGuidance.Text),
       new(ChatRole.System, sessionGuidance)
     };
-    instructions.Add(new(ChatRole.System, SystemEnvironment.Describe(input.WorkingDirectory, timeProvider.GetUtcNow(), timeProvider.LocalTimeZone)));
-    if (skills is not null && SelectedSkillsContext.Compose(skills) is { } selectedSkills)
-      instructions.Add(new(ChatRole.System, selectedSkills));
     foreach (DiscoveredInstructionDocument document in documents ?? []) {
       cancellation.ThrowIfCancellationRequested();
       instructions.Add(new(ChatRole.System, document.GetText()));
     }
+    if (skills is not null && SelectedSkillsContext.Compose(skills) is { } selectedSkills)
+      instructions.Add(new(ChatRole.System, selectedSkills));
+    // Keep session-specific environment and time after reusable guidance and skills.
+    instructions.Add(new(ChatRole.System, SystemEnvironment.Describe(input.WorkingDirectory, timeProvider.GetUtcNow(), timeProvider.LocalTimeZone)));
 
     cancellation.ThrowIfCancellationRequested();
     return new(Array.AsReadOnly(instructions.ToArray()), Array.AsReadOnly(tools.ToArray()));

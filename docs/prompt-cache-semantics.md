@@ -29,6 +29,12 @@ rebuilding an earlier prefix. This is an eligibility-preserving design direction
 not a guarantee that the wire representation remains identical or that the
 provider retains the cache.
 
+New starting contexts place shared and role guidance first, then scoped instruction
+documents, selected skill references, and finally the runtime environment with its
+timestamp last. Document precedence is preserved. Existing boundary snapshots are
+not reordered; fresh sessions and contexts rebuilt after compaction use the new order.
+Tool declarations remain separate API inputs whose effective placement is provider-owned.
+
 Changes to instructions, messages, attachments, tool definitions/order or request
 configuration can change the effective prefix. Explicit history edits and
 compaction are supported context boundaries; they can change or shorten what is

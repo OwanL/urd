@@ -21,6 +21,7 @@ public sealed class StartingContextPreparationTests {
     string packaged = Path.Combine(root, "packaged");
     Directory.CreateDirectory(project);
     try {
+      string skill = Write(project, "skills/context/SKILL.md", "---\nname: context\ndescription: Context skill.\n---\n");
       string rootDocument = Write(project, "AGENTS.md", "Root rule.\n");
       string nestedDocument = Write(project, Path.Combine("nested", "AGENTS.md"), "Nested rule.\nFull nested content.\n");
 
@@ -33,12 +34,12 @@ public sealed class StartingContextPreparationTests {
         statuses.Enqueue(status);
         return Task.CompletedTask;
       }, "Apply the project guidance.");
-      await using var catalog = Catalog(root, [rootDocument, nestedDocument]);
+      await using var catalog = Catalog(root, [rootDocument, nestedDocument, skill]);
       var builder = new StartingContextBuilder(new ToolCatalog([
         TestTool("read"), TestTool("write")
       ]), instructionDiscovery: new InstructionResourceDiscovery(catalog, packaged));
       var preferences = new UserPreferences(project, null) {
-        ProtectedResources = new() { Tools = ["write"], Skills = [], Instructions = [] }
+        ProtectedResources = new() { Tools = ["write"], Skills = [skill], Instructions = [] }
       };
       Guid boundary = Guid.NewGuid();
 
@@ -50,7 +51,12 @@ public sealed class StartingContextPreparationTests {
       string[] instructions = context.Instructions.Select(message => message.Text).ToArray();
       int rootIndex = Array.FindIndex(instructions, text => text.Contains("Root rule.", StringComparison.Ordinal));
       int nestedIndex = Array.FindIndex(instructions, text => text.Contains("Nested rule.", StringComparison.Ordinal));
-      Assert.True(rootIndex >= 0 && nestedIndex > rootIndex);
+      Assert.Equal(2, rootIndex);
+      Assert.Equal(rootIndex + 1, nestedIndex);
+      Assert.Equal(6, instructions.Length);
+      Assert.Contains(skill, instructions[^2], StringComparison.Ordinal);
+      Assert.StartsWith($"Working directory: {project}\n", instructions[^1], StringComparison.Ordinal);
+      Assert.Contains("\nTime: ", instructions[^1], StringComparison.Ordinal);
       Assert.Contains(rootDocument, instructions[rootIndex], StringComparison.Ordinal);
       Assert.Contains(nestedDocument, instructions[nestedIndex], StringComparison.Ordinal);
       Assert.Contains(Path.GetDirectoryName(nestedDocument)!, instructions[nestedIndex], StringComparison.Ordinal);

@@ -75,8 +75,10 @@ test scope.
 
 Built-in guidance has exactly three fixed C# types under `context/guidance/`:
 `SharedAgentGuidance`, `PrimarySessionGuidance` and `SubagentSessionGuidance`.
-`StartingContextBuilder` emits shared guidance, the applicable role guidance, runtime
-directory context, selected skills, then scoped discovered documents, in that order.
+`StartingContextBuilder` emits shared guidance, the applicable role guidance, scoped
+discovered documents, selected skills, then runtime environment context, in that order.
+The environment ends with the snapshot timestamp so session-specific content follows
+reusable guidance and skills. Existing saved snapshots retain their original order.
 `SelectedSkillsContext` under `context/runtime/` renders selected skills. Composition is
 explicit: there is no `StartingContextContribution` abstraction, reflection-based
 discovery or configurable guidance registration. Built-in guidance bypasses pruning.

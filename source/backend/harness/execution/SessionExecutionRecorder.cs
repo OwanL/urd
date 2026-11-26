@@ -125,10 +125,6 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
     return true;
   }
 
-  internal Task<bool> RecordPruningStatusAsync(Guid boundaryId, StartingResourcePruningStatus status) =>
-      RecordChangeAsync(() => store.Prepass.WritePruningStatus(Identity, boundaryId, status),
-          allowStopping: status.State != "running");
-
   internal Task<bool> RecordPruningProgressAsync(Guid boundaryId, StartingResourcePruningStatus status,
       IReadOnlyList<PrepassResource> candidates, IReadOnlyList<string>? resultIds) =>
       RecordChangeAsync(() => store.Prepass.WritePruningProgress(Identity, boundaryId, status, candidates, resultIds),

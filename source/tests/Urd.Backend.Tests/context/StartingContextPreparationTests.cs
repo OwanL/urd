@@ -29,7 +29,7 @@ public sealed class StartingContextPreparationTests {
       await using RunningParent parent = await StartParentAsync();
       var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
       var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
-      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), (status, _, _) => {
         statuses.Enqueue(status);
         return Task.CompletedTask;
       }, "Apply the project guidance.");
@@ -98,7 +98,7 @@ public sealed class StartingContextPreparationTests {
       await using RunningParent parent = await StartParentAsync();
       var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
       var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
-      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), (status, _, _) => {
         statuses.Enqueue(status);
         return Task.CompletedTask;
       }, "Use the skill.");
@@ -148,7 +148,7 @@ public sealed class StartingContextPreparationTests {
       await using RunningParent parent = await StartParentAsync();
       var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
       var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution),
-          _ => Task.CompletedTask, "Use the resources.");
+          (_, _, _) => Task.CompletedTask, "Use the resources.");
       await using var catalog = Catalog(root, [ignoredInstruction, protectedInstruction, localSkill]);
       var builder = new StartingContextBuilder(new ToolCatalog([]), new InstructionResourceDiscovery(catalog, packaged));
       var preferences = new UserPreferences(project, null) {
@@ -200,7 +200,7 @@ public sealed class StartingContextPreparationTests {
       await using RunningParent parent = await StartParentAsync();
       var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
       var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
-      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), (status, _, _) => {
         statuses.Enqueue(status);
         return Task.CompletedTask;
       }, "Use the resources.");
@@ -268,7 +268,7 @@ public sealed class StartingContextPreparationTests {
       await using RunningParent parent = await StartParentAsync();
       var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => auxiliary, [], project);
       var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
-      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+      var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), (status, _, _) => {
         statuses.Enqueue(status);
         return Task.CompletedTask;
       }, "Use the resources.");

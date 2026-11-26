@@ -34,7 +34,7 @@ public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
       Assert.Equal(AuxiliaryModelPurpose.Skills, purpose);
       Interlocked.Increment(ref resolutions);
       return Task.FromResult(TestLlmSelection.DefaultResolution);
-    }, status => {
+    }, (status, _, _) => {
       statuses.Enqueue(status);
       return Task.CompletedTask;
     }, taskInput);
@@ -150,7 +150,7 @@ public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
     await using RunningParent parent = await StartParentAsync();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
     var pruner = new StartingResourcePruner(runner, (_, _) => throw new InvalidOperationException("Must not resolve."),
-        status => {
+        (status, _, _) => {
           statuses.Enqueue(status);
           return Task.CompletedTask;
         }, "task");
@@ -173,7 +173,7 @@ public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
     await using RunningParent parent = await StartParentAsync();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
     var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution),
-        _ => Task.FromException(expected), "task");
+        (_, _, _) => Task.FromException(expected), "task");
 
     InvalidOperationException actual = await Assert.ThrowsAsync<InvalidOperationException>(() =>
         pruner.PruneAsync([Skill("candidate", "Candidate.")], 0, CancellationToken.None).WaitAsync(TestTimeout));
@@ -192,7 +192,7 @@ public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
       """);
     var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
-    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), (status, _, _) => {
       statuses.Enqueue(status);
       return Task.CompletedTask;
     }, "task");
@@ -209,7 +209,7 @@ public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
     await using RunningParent parent = await StartParentAsync();
     var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [], parent.Fixture.Session.WorkingDirectory);
     var statuses = new ConcurrentQueue<StartingResourcePruningStatus>();
-    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), status => {
+    var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), (status, _, _) => {
       statuses.Enqueue(status);
       return Task.CompletedTask;
     }, "task");
@@ -481,7 +481,7 @@ public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
       await using RunningParent parent = await StartParentAsync();
       var runner = new ConversationRunner(parent.Fixture.Session.Recorder, _ => client, [new ReadTool(new FileMutationQueue())], directory);
       var pruner = new StartingResourcePruner(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution),
-          _ => Task.CompletedTask, "Audit the project.");
+          (_, _, _) => Task.CompletedTask, "Audit the project.");
       object[] previousManifest;
       if (skills) {
         DiscoveredSkill[] candidates = paths.Select((path, index) => new DiscoveredSkill($"skill-{index}",
@@ -547,7 +547,7 @@ public sealed class StartingResourcePrunerTests(ITestOutputHelper output) {
   private static StartingResourcePruner CreatePruner(
       ConversationRunner runner,
       Func<StartingResourcePruningStatus, Task> saveStatus) =>
-      new(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), saveStatus, "Choose relevant resources.");
+      new(runner, (_, _) => Task.FromResult(TestLlmSelection.DefaultResolution), (status, _, _) => saveStatus(status), "Choose relevant resources.");
 
   private static DiscoveredSkill Skill(string name, string description) =>
       new(name, description, Path.GetFullPath(Path.Combine(Path.GetTempPath(), $"{name}.SKILL.md")));

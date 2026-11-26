@@ -249,8 +249,7 @@ internal sealed class SessionExecution : IDisposable {
 
     var pruner = new StartingResourcePruner(auxiliary,
         (purpose, cancellation) => ResolvePrepassModelAsync(purpose, captured, cancellation),
-        status => SavePruningStatusAsync(boundary, status), task,
-        (status, candidates, resultIds) => SavePruningProgressAsync(boundary, status, candidates, resultIds));
+        (status, candidates, resultIds) => SavePruningProgressAsync(boundary, status, candidates, resultIds), task);
     HashSet<string> protectedTools = boundary == Guid.Empty ? []
         : pending.List().Select(call => call.Name).ToHashSet(StringComparer.Ordinal);
     startingContext = await startingContextBuilder.PrepareAsync(ContextInput(), boundary, task,
@@ -260,20 +259,6 @@ internal sealed class SessionExecution : IDisposable {
 
   private static string PrepassPrompt(ChatMessage message) => string.IsNullOrWhiteSpace(message.Text)
       && message.Contents.Any(content => content is DataContent) ? "Image attachment" : message.Text;
-
-  private async Task SavePruningStatusAsync(Guid boundary, StartingResourcePruningStatus status) {
-    try {
-      if (await recorder.RecordPruningStatusAsync(boundary, status))
-        return;
-      stop.Token.ThrowIfCancellationRequested();
-      throw new AuxiliaryExecutionException("The pruning status no longer accepts this execution.");
-    } catch (OperationCanceledException) when (IsStopping) {
-      throw;
-    } catch (Exception failure) {
-      await recorder.ReportAuxiliaryFailureAsync(failure);
-      throw new AuxiliaryExecutionException("Saving pruning progress failed.", failure);
-    }
-  }
 
   private async Task SavePruningProgressAsync(Guid boundary, StartingResourcePruningStatus status,
       IReadOnlyList<PrepassResource> candidates, IReadOnlyList<string>? resultIds) {

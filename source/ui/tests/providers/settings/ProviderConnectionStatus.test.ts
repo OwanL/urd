@@ -4,9 +4,24 @@ import {
   credentialState,
   matchesConnection,
   providerHostname,
+  providerReady,
   providerSetupState,
 } from "../../../providers/settings/ProviderConnectionStatus.ts";
 import { connection, credential, emptyCatalog, flush, setup } from "./ProviderSettingsFixtures.ts";
+
+void test("readiness handles authentication, credential health and disconnects", () => {
+  const anonymous = { ...connection, authentication: "none" } as const;
+  const connected = { ...credential, hasCredentials: true, requiresSignIn: false };
+  assert.equal(providerReady(connection, undefined), false);
+  assert.equal(providerReady(connection, credential), false);
+  assert.equal(providerReady(connection, { ...connected, requiresSignIn: true }), false);
+  assert.equal(providerReady(connection, { ...connected, planAccessGranted: false }), false);
+  assert.equal(providerReady(connection, { ...connected, isDisconnecting: true }), false);
+  assert.equal(providerReady(connection, connected), true);
+  assert.equal(providerReady(anonymous, undefined), true);
+  assert.equal(providerReady(anonymous, credential), true);
+  assert.equal(providerReady(anonymous, { ...credential, isDisconnecting: true }), false);
+});
 
 void test("setup membership uses saved credentials, not current provider health", () => {
   const apiKeyConnection = { ...connection, authentication: "apiKey" } as const;

@@ -1,5 +1,10 @@
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import { credentialState, providerHostname, signInPending } from "./ProviderConnectionStatus.ts";
+import {
+  credentialState,
+  providerHostname,
+  providerReady,
+  signInPending,
+} from "./ProviderConnectionStatus.ts";
 import type {
   ProviderCredentialState,
   ProviderSettingsNotice,
@@ -46,16 +51,13 @@ export function connectionAttention(
   state: ConnectionStatusState,
   connection: ProviderConnection,
 ): string | null {
-  const credential = credentialState(connection, state.credentials[connection.id]);
   const signIn = state.signIns[connection.id];
   const pendingSignIn = !!signIn && signInPending(signIn);
   const statusReadError = !!state.errors[`credentials:${connection.id}`];
   if (
     !pendingSignIn &&
     !statusReadError &&
-    (credential === "connected" ||
-      credential === "noAuthentication" ||
-      (credential === "unknown" && connection.authentication === "none"))
+    providerReady(connection, state.credentials[connection.id])
   )
     return null;
   return connectionStatus(state, connection);

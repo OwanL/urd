@@ -1,7 +1,7 @@
 import "./provider-connection-detail.css";
 import { useState } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import { signInPending } from "./ProviderConnectionStatus.ts";
+import { providerReady, signInPending } from "./ProviderConnectionStatus.ts";
 import { authorizationLink } from "./ProviderSignInTab.ts";
 import { ProviderApiKeyForm } from "./ProviderApiKeyForm.tsx";
 import { ProviderModelCatalog } from "./ProviderModelCatalog.tsx";
@@ -33,9 +33,8 @@ export function ProviderConnectionDetail({
   const needsModels =
     catalog &&
     !catalog.models.length &&
-    !credential?.isDisconnecting &&
     credential?.planAccessGranted !== false &&
-    (connected || connection.authentication === "none");
+    providerReady(connection, credential);
   const disconnect = (
     <button
       type="button"

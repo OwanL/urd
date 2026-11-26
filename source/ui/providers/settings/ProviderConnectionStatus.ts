@@ -28,6 +28,16 @@ export function credentialState(
   return "connected";
 }
 
+export function providerReady(
+  connection: ProviderConnection,
+  status: ProviderCredentialStatus | undefined,
+): boolean {
+  if (status?.isDisconnecting) return false;
+  return (
+    connection.authentication === "none" || credentialState(connection, status) === "connected"
+  );
+}
+
 // Setup is credential presence, not current validity, plan access or catalog discovery.
 export function providerSetupState(
   connection: ProviderConnection,

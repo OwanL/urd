@@ -3,6 +3,7 @@ import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { LlmSelection } from "../LlmSelection.ts";
 import type { ProviderModelCatalog } from "../ProviderModels.ts";
 import type { ModelSettings } from "../ModelSettings.ts";
+import { providerReady } from "../settings/ProviderConnectionStatus.ts";
 
 export interface ModelOption {
   key: string;
@@ -143,15 +144,7 @@ export class ModelOptions {
         try {
           if (automatic) {
             const status = await this.client.getCredentials(provider.id, signal);
-            if (
-              !this.isCurrent(revision) ||
-              signal?.aborted ||
-              status.isDisconnecting ||
-              (provider.authentication !== "none" &&
-                (!status.hasCredentials ||
-                  status.requiresSignIn ||
-                  status.planAccessGranted === false))
-            )
+            if (!this.isCurrent(revision) || signal?.aborted || !providerReady(provider, status))
               return { provider, options: [], succeeded: false };
           }
           const [catalog, settings] = await Promise.all([

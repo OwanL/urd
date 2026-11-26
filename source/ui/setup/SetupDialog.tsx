@@ -14,7 +14,11 @@ import { usePreferences } from "../preferences/usePreferences.ts";
 import { ProviderClient } from "../providers/ProviderClient.ts";
 import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
-import { credentialState, signInPending } from "../providers/settings/ProviderConnectionStatus.ts";
+import {
+  credentialState,
+  providerReady,
+  signInPending,
+} from "../providers/settings/ProviderConnectionStatus.ts";
 import { useProviderSettings } from "../providers/settings/useProviderSettings.ts";
 import { SetupModels } from "./SetupModels.tsx";
 import {
@@ -163,10 +167,8 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
   const readyProvider = providers.connections.some((connection) => {
     const signIn = providers.signIns[connection.id];
     if (signIn && signInPending(signIn)) return false;
-    const credential = credentialState(connection, providers.credentials[connection.id]);
-    if (credential === "disconnecting" || providers.errors[`credentials:${connection.id}`])
-      return false;
-    if (connection.authentication !== "none" && credential !== "connected") return false;
+    if (providers.errors[`credentials:${connection.id}`]) return false;
+    if (!providerReady(connection, providers.credentials[connection.id])) return false;
     return (
       !!providers.catalogs[connection.id]?.models.length ||
       models.options.some(({ selection }) => selection.connection.id === connection.id)

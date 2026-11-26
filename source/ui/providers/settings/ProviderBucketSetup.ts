@@ -2,7 +2,7 @@ import { RequestError } from "../../http/RequestError.ts";
 import type { BucketSuggestions } from "../ProviderClient.ts";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { ProviderCredentialStatus } from "../ProviderCredentials.ts";
-import { credentialState } from "./ProviderConnectionStatus.ts";
+import { providerReady } from "./ProviderConnectionStatus.ts";
 import type { BucketSetup } from "./ProviderSettingsTypes.ts";
 
 function sameConnection(first: ProviderConnection, second: ProviderConnection): boolean {
@@ -21,10 +21,7 @@ export function canOfferBuckets(
   saved: ProviderConnection | undefined,
   status: ProviderCredentialStatus | undefined,
 ): boolean {
-  if (!saved || !sameConnection(saved, connection) || status?.isDisconnecting) return false;
-  return (
-    connection.authentication === "none" || credentialState(connection, status) === "connected"
-  );
+  return !!saved && sameConnection(saved, connection) && providerReady(connection, status);
 }
 
 export async function offerBucketsAfterRefresh(

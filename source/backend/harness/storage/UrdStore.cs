@@ -118,19 +118,29 @@ public sealed class UrdStore : IDisposable {
   public bool IsSetupComplete() => database.Read(transaction =>
       database.Scalar<long>(transaction, "SELECT EXISTS(SELECT 1 FROM setup_completion WHERE singleton = 1);") != 0);
 
-  public SetupStatus ReadSetupStatus() => Preferences.WithCurrent(preferences =>
-      database.Read(transaction => ReadSetupStatus(transaction, preferences)));
+  public SetupStatus ReadSetupStatus() => CheckSetup(complete: false, Directory.Exists);
 
   // An incomplete result leaves setup untouched; completion remains valid once recorded.
-  public SetupStatus CompleteSetup() => Preferences.WithCurrent(preferences => database.Write(transaction => {
-    SetupStatus status = ReadSetupStatus(transaction, preferences);
-    if (status.Completed || !status.HasProvider || !status.HasModelBuckets || !status.HasWorkingDirectory)
-      return status;
-    database.Execute(transaction, "INSERT INTO setup_completion (singleton) VALUES (1) ON CONFLICT DO NOTHING;");
-    return status with { Completed = true };
-  }));
+  public SetupStatus CompleteSetup() => CheckSetup(complete: true, Directory.Exists);
 
-  private SetupStatus ReadSetupStatus(SqliteTransaction transaction, UserPreferences preferences) {
+  internal SetupStatus CheckSetup(bool complete, Func<string, bool> directoryExists) {
+    SetupStatus? status;
+    do {
+      string? directory = Preferences.WithCurrent(preferences => preferences.WorkingDirectory);
+      bool hasDirectory = !string.IsNullOrWhiteSpace(directory) && Path.IsPathFullyQualified(directory)
+          && directoryExists(directory);
+      status = Preferences.WithCurrent<SetupStatus?>(preferences => {
+        // Use the current model choices, but only with a probe of their snapshot's directory.
+        if (!string.Equals(preferences.WorkingDirectory, directory, StringComparison.Ordinal))
+          return null;
+        Func<SqliteTransaction, SetupStatus> check = transaction => CheckSetup(transaction, preferences, hasDirectory, complete);
+        return complete ? database.Write(check) : database.Read(check);
+      });
+    } while (status is null);
+    return status;
+  }
+
+  private SetupStatus CheckSetup(SqliteTransaction transaction, UserPreferences preferences, bool hasDirectory, bool complete) {
     bool completed = database.Scalar<long>(transaction,
         "SELECT EXISTS(SELECT 1 FROM setup_completion WHERE singleton = 1);") != 0;
     AuxiliaryModelPreferences models = preferences.ModelChoices;
@@ -144,9 +154,10 @@ public sealed class UrdStore : IDisposable {
     bool HasAssignment(IReadOnlyList<ConfiguredModel> assignments) => assignments.Any(model =>
         available.TryGetValue(model.ConnectionId, out var ids) && ids.Contains(model.ModelId));
     bool hasBuckets = HasAssignment(models.Small) && HasAssignment(models.Medium) && HasAssignment(models.Large);
-    string? directory = preferences.WorkingDirectory;
-    bool hasDirectory = !string.IsNullOrWhiteSpace(directory) && Path.IsPathFullyQualified(directory)
-        && Directory.Exists(directory);
+    if (complete && !completed && hasProvider && hasBuckets && hasDirectory) {
+      database.Execute(transaction, "INSERT INTO setup_completion (singleton) VALUES (1) ON CONFLICT DO NOTHING;");
+      completed = true;
+    }
     return new(completed, hasProvider, hasBuckets, hasDirectory);
   }
 

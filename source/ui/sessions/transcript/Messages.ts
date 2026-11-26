@@ -175,16 +175,6 @@ export interface NotSentPage {
 // Who wrote a displayed message.
 export type MessageRole = "user" | "assistant";
 
-// A short message prefix; availableThrough advertises committed content, not completion.
-export interface MessagePreview {
-  readonly message: MessageRef;
-  readonly preview: string;
-  readonly truncated: boolean;
-  readonly availableThrough: MessageContentCursor;
-  readonly finalOutputCommitted: boolean;
-  readonly settlement: ExecutionOutcome | null;
-}
-
 // A segment-local UTF-8 byte position, not a JavaScript string index.
 export interface MessageContentCursor {
   readonly message: MessageRef;

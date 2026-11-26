@@ -85,7 +85,7 @@ public sealed class StartingPrepassTests {
     Assert.Equal(PublishedTitle, fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Title);
     Assert.Equal(new[] {
       new StartingResourcePruningStatus("tools", "completed", 5, 4, null),
-      new StartingResourcePruningStatus("skills", "fallback", 2, 0,
+      new StartingResourcePruningStatus("skills", "fallback", 1, 0,
           $"{FailingPruningMessage}. Retained only protected resources."),
       new StartingResourcePruningStatus("instructions", "completed", 0, 0, null)
     }, fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Pruning);
@@ -96,12 +96,8 @@ public sealed class StartingPrepassTests {
     Assert.DoesNotContain("vault", toolCandidates);
     Assert.Equal(["lookup"], ReadResultIds("tools"));
     Assert.Equal("completed", ReadDetailState("tools"));
-    string[] skillIdentities = ReadCandidateIds("skills");
-    Assert.Equal(2, skillIdentities.Length);
-    Assert.Contains(skillIdentities, identity => identity.EndsWith(
-        Path.Combine("diagnose", "SKILL.md"), StringComparison.Ordinal));
-    Assert.Contains(skillIdentities, identity => identity.EndsWith(
-        Path.Combine("add-mcp", "SKILL.md"), StringComparison.Ordinal));
+    string skillIdentity = Assert.Single(ReadCandidateIds("skills"));
+    Assert.EndsWith(Path.Combine("diagnose", "SKILL.md"), skillIdentity, StringComparison.Ordinal);
     Assert.Equal([], ReadResultIds("skills"));
     Assert.Equal("fallback", ReadDetailState("skills"));
     Assert.Equal([], ReadCandidateIds("instructions"));
@@ -543,7 +539,7 @@ public sealed class StartingPrepassTests {
     Assert.Contains(nextTurn, prunedTask, StringComparison.Ordinal);
     Assert.Contains("[HISTORY SUMMARY:", string.Join('\n', main!.Messages.Select(message => message.Text)), StringComparison.Ordinal);
     Assert.Contains(fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Pruning!,
-        status => status.Category == "skills" && status.State == "completed" && status.Total == 2 && status.Retained == 0);
+        status => status.Category == "skills" && status.State == "completed" && status.Total == 1 && status.Retained == 0);
     Assert.Equal(1L, fixture.Database.Scalar("SELECT COUNT(*) FROM auxiliary_conversations WHERE purpose = 'title';")); // raw-sql: post-compaction preparation prunes without repeating the title attempt.
 
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
@@ -623,7 +619,7 @@ public sealed class StartingPrepassTests {
     Assert.DoesNotContain(currentTurn, prunedTask, StringComparison.Ordinal);
     Assert.DoesNotContain(oldestMark, prunedTask, StringComparison.Ordinal);
     Assert.Contains(fixture.Store.Snapshots.ReadPersisted(fixture.Session.Id).Pruning!,
-        status => status.Category == "skills" && status.State == "completed" && status.Total == 2 && status.Retained == 0);
+        status => status.Category == "skills" && status.State == "completed" && status.Total == 1 && status.Retained == 0);
 
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
       switch (request.Purpose) {

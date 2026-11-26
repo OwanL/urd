@@ -21,22 +21,20 @@ const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : "Request failed.";
 
 // Owned by Settings so drafts and accepted operations survive closing the popover.
-export function useMcpSettings(active: boolean, draft?: { url: string }) {
+export function useMcpSettings(active: boolean) {
   const [servers, setServers] = useState<McpServer[] | null>(null);
-  const [screen, setScreen] = useState<"list" | "add" | "detail">(draft ? "add" : "list");
+  const [screen, setScreen] = useState<"list" | "add" | "detail">("list");
   const [selected, setSelected] = useState<string | null>(null);
-  const [url, setUrl] = useState(draft?.url ?? "");
+  const [url, setUrl] = useState("");
   const [authentication, setAuthentication] = useState<Authentication>("automatic");
   const [headerName, setHeaderName] = useState("");
   const [credential, setCredential] = useState("");
   const [error, setError] = useState("");
   const [loadError, setLoadError] = useState("");
-  const [incomingDraft, setIncomingDraft] = useState<{ url: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [operationId, setOperationId] = useState<string | null>(null);
   const [operation, setOperation] = useState<Operation | null>(null);
   const command = useRef(false);
-  const previousDraft = useRef(draft);
   const generation = useRef(0);
   const pollGeneration = useRef(0);
 
@@ -46,25 +44,6 @@ export function useMcpSettings(active: boolean, draft?: { url: string }) {
     setHeaderName("");
     setCredential("");
   }
-  function acceptDraft(next: { url: string }) {
-    clearForm();
-    setUrl(next.url);
-    setScreen("add");
-    setError("");
-    setIncomingDraft(null);
-  }
-  useEffect(() => {
-    if (draft && draft !== previousDraft.current) {
-      if (
-        command.current ||
-        operationId ||
-        (screen === "add" && (url || authentication !== "automatic" || headerName || credential))
-      )
-        setIncomingDraft(draft);
-      else acceptDraft(draft);
-    }
-    previousDraft.current = draft;
-  }, [draft, operationId, screen, url, authentication, headerName, credential]);
   async function reload() {
     const version = ++generation.current;
     try {
@@ -211,9 +190,6 @@ export function useMcpSettings(active: boolean, draft?: { url: string }) {
     error,
     setError,
     loadError,
-    incomingDraft,
-    acceptDraft,
-    dismissDraft: () => setIncomingDraft(null),
     clearForm,
     stopTracking: () => {
       ++pollGeneration.current;
@@ -284,21 +260,6 @@ export function McpSettings({ state }: { state: State }) {
   }
   return (
     <div class="mcp-settings">
-      {state.incomingDraft && (
-        <div role="status">
-          <p>A chat MCP draft is waiting.</p>
-          <button
-            type="button"
-            disabled={pending}
-            onClick={() => state.acceptDraft(state.incomingDraft!)}
-          >
-            Replace with chat draft
-          </button>
-          <button type="button" onClick={state.dismissDraft}>
-            Dismiss
-          </button>
-        </div>
-      )}
       {state.screen !== "list" && (
         <button type="button" class="mcp-back" onClick={() => go("list")}>
           ‹ Back to servers

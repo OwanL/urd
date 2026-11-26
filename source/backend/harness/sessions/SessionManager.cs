@@ -206,7 +206,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     ChatProcesses? processes = null;
     (UserPreferences defaults, ToolCatalog catalog) = await registry.RunOpenAsync(() => {
       UserPreferences defaults = preferences.Read(fallbackWorkingDirectory);
-      ToolCatalog catalog = CreateToolCatalog(new PendingToolCalls(), true, true, out processes);
+      ToolCatalog catalog = CreateToolCatalog(new PendingToolCalls(), true, out processes);
       return (defaults, catalog);
     }, cancellation);
     // Catalog construction starts no processes; still dispose its empty shell owner.
@@ -220,22 +220,22 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 
   private PrimarySession CreateSession(SessionRecord record) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, true, out ChatProcesses? processes);
+    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
     return new PrimarySession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
   }
 
   private SubagentSession CreateChild(SessionRecord record, int depth) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, false, out ChatProcesses? processes);
+    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
     return new SubagentSession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this, depth);
   }
 
-  private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools, bool primary,
+  private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools,
       out ChatProcesses? processes) {
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
       new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
-      new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this), .. (primary ? new AgentTool[] { new ProposeMcpConnectionTool() } : [])];
+      new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this)];
     if (BrowserHost is { } browserHost)
       shared = [.. shared, new BrowserTool(browserHost)];
     if (toolSettings is null || !processTools)

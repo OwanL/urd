@@ -127,20 +127,6 @@ export function Workspace({
   const transcriptPositions = useRef(new Map<string, TranscriptNavigationState>());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("providers");
-  const [mcpDraft, setMcpDraft] = useState<{ url: string }>();
-  const workspaceElement = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const element = workspaceElement.current;
-    const review = (event: Event) => {
-      const detail = (event as CustomEvent<{ url: string }>).detail;
-      if (typeof detail?.url !== "string") return;
-      setMcpDraft({ url: detail.url });
-      setSettingsTab("mcp");
-      setSettingsOpen(true);
-    };
-    element?.addEventListener("urd:review-mcp-connection", review);
-    return () => element?.removeEventListener("urd:review-mcp-connection", review);
-  }, []);
   const openSettings = (tab?: SettingsTab) => {
     if (tab) setSettingsTab(tab);
     void preferences.refresh();
@@ -229,7 +215,7 @@ export function Workspace({
     transcriptError;
 
   return (
-    <main ref={workspaceElement} class="workspace">
+    <main class="workspace">
       <header class="top-strip">
         <ChatTabs
           tabs={tabs.map((id) => ({
@@ -313,7 +299,6 @@ export function Workspace({
         onClose={() => setSettingsOpen(false)}
         onChanged={models.providersChanged}
         onProviderReady={models.providerReady}
-        mcpDraft={mcpDraft}
       />
       <div
         class={`connection-feedback ${disconnected ? "is-disconnected" : ""}`}

@@ -20,6 +20,7 @@ internal sealed class SessionExecution : IDisposable {
   private readonly Func<ProviderConnection, IChatClient> createChatClient; // Returns borrowed clients.
   private readonly LlmSelection selection;
   private readonly StartingContextBuilder startingContextBuilder;
+  private readonly HashSet<string> runtimeToolNames;
   private StartingContext? startingContext;
   private readonly IRemoteMcpTools? remoteMcpTools;
   private readonly int maxRemoteToolCount;
@@ -52,6 +53,7 @@ internal sealed class SessionExecution : IDisposable {
     this.selection = selection;
     socketRun = selection.Connection.Route == ProviderRoute.ChatGpt ? new ChatGptSocketRun() : null;
     this.startingContextBuilder = startingContextBuilder;
+    runtimeToolNames = (tools ?? []).Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
     this.remoteMcpTools = remoteMcpTools;
     maxRemoteToolCount = Math.Max(0, 128 - (tools?.Count ?? 0));
     pending = pendingToolCalls ?? new PendingToolCalls();
@@ -220,8 +222,12 @@ internal sealed class SessionExecution : IDisposable {
     if (startingContext?.BoundaryId == boundary)
       return;
     startingContext = session.ReadStartingContext(boundary);
-    if (startingContext is not null)
+    if (startingContext is { } saved) {
+      // Keep the saved selection, but do not offer tools the runtime no longer has.
+      if (saved.Tools.Any(tool => !runtimeToolNames.Contains(tool.Name)))
+        startingContext = saved with { Tools = saved.Tools.Where(tool => runtimeToolNames.Contains(tool.Name)).ToArray() };
       return;
+    }
 
     UserPreferences captured = session.ReadPreferences();
     string[] newMessages = request.Context is { } history

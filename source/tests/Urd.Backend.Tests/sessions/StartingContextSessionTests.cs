@@ -47,7 +47,7 @@ public sealed class StartingContextSessionTests {
       await SubmitAndWaitAsync(session, "second input");
 
       StartingContext saved = Assert.IsType<StartingContext>(reopened.StartingContexts.Read(sessionId));
-      Assert.Equal(new[] { "work", "web_search", "web_read", "list_pending_calls", "cancel_pending_calls", "subagent", "list_agents", "ask_agent", "answer_agent", "ask_user", "propose_mcp_connection" }, saved.Tools.Select(item => item.Name));
+      Assert.Equal(new[] { "work", "web_search", "web_read", "list_pending_calls", "cancel_pending_calls", "subagent", "list_agents", "ask_agent", "answer_agent", "ask_user" }, saved.Tools.Select(item => item.Name));
       IReadOnlyList<IReadOnlyList<ChatMessage>> requests = client.Requests;
       Assert.Equal(3, requests.Count);
       for (int index = 0; index < requests.Count; index++) {
@@ -64,22 +64,24 @@ public sealed class StartingContextSessionTests {
   }
 
   [Fact]
-  public async Task ReopenUsesSavedContextInsteadOfChangedDirectoryOrToolCatalog() {
+  public async Task ReopenKeepsSavedContextButOmitsRemovedTools() {
     using var database = new TemporaryDatabase();
     string originalDirectory = Path.Combine(Path.GetTempPath(), "urd-starting-context-original");
     string changedDirectory = Path.Combine(Path.GetTempPath(), "urd-starting-context-changed");
     var originalTool = CreateTool("original");
+    var legacyTool = CreateTool("propose_mcp_connection");
     Guid sessionId = Guid.Empty;
     StartingContext saved = null!;
     using var firstClient = new ScriptedChatClient(Complete);
 
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      var manager = new SessionManager(store, _ => firstClient, [originalTool], originalDirectory);
+      var manager = new SessionManager(store, _ => firstClient, [originalTool, legacyTool], originalDirectory);
       try {
         PrimarySession session = await manager.CreatePrimaryAsync();
         sessionId = session.Id;
         await SubmitAndWaitAsync(session, "before reopen");
         saved = Assert.IsType<StartingContext>(store.StartingContexts.Read(sessionId));
+        Assert.Contains(saved.Tools, tool => tool.Name == "propose_mcp_connection");
         AssertSameTools(saved.Tools, firstClient.Options[0]);
       } finally {
         await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
@@ -104,8 +106,8 @@ public sealed class StartingContextSessionTests {
       Assert.Equal(2, reopenedClient.Requests.Count);
       IReadOnlyList<ChatMessage> request = reopenedClient.Requests[0];
       AssertInstructionPrefix(saved.Instructions, request);
-      AssertSameTools(saved.Tools, reopenedClient.Options[0]);
-      Assert.DoesNotContain(reopenedClient.Options[0]!.Tools!, item => item.Name == "added");
+      AssertSameTools(saved.Tools.Where(tool => tool.Name != "propose_mcp_connection").ToArray(), reopenedClient.Options[0]);
+      Assert.Contains(reopened.StartingContexts.Read(sessionId)!.Tools, tool => tool.Name == "propose_mcp_connection");
       Assert.Equal(1, request.Count(message => message.Role == ChatRole.User && message.Text == "before reopen"));
       Assert.Equal(1, request.Count(message => message.Role == ChatRole.User && message.Text == "after reopen"));
       Assert.Equal(0, effects);

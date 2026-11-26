@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import type { TranscriptToolFacts, ToolCallLabel } from "../../../sessions/transcript/Messages.ts";
 import { Icon, type IconName } from "../../../controls/Icon.tsx";
 import { useToolRowInteractions } from "./ToolRowInteractions.tsx";
-import { canReviewMcpConnection } from "./McpConnectionReview.ts";
 import {
   formatElapsedTime,
   toolElapsedMilliseconds,
@@ -257,9 +256,6 @@ export function ToolRow({
           </span>
         )}
       </div>
-      {canReviewMcpConnection(tool, completion) && (
-        <McpReviewAction requestId={tool.requestId} callId={tool.callId} />
-      )}
       {(status !== "completed" || showBackground || timeText !== null) && (
         <span class="tool-row-trailing">
           {status !== "completed" && (
@@ -285,39 +281,5 @@ export function ToolRow({
         </span>
       )}
     </div>
-  );
-}
-
-function McpReviewAction({ requestId, callId }: { requestId: string; callId: string }) {
-  const { reviewMcpConnection } = useToolRowInteractions();
-  const controller = useRef<AbortController | null>(null);
-  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
-  useEffect(() => () => controller.current?.abort(), [requestId, callId]);
-
-  async function review(anchor: HTMLButtonElement) {
-    if (controller.current) return;
-    const current = new AbortController();
-    controller.current = current;
-    setState("loading");
-    try {
-      await reviewMcpConnection(anchor, requestId, callId, current.signal);
-      if (!current.signal.aborted) setState("idle");
-    } catch {
-      if (!current.signal.aborted) setState("error");
-    } finally {
-      if (controller.current === current) controller.current = null;
-    }
-  }
-
-  return (
-    <button
-      type="button"
-      class="tool-row-review"
-      disabled={state === "loading"}
-      title={state === "error" ? "Could not load connection proposal" : "Review MCP connection"}
-      onClick={(event) => void review(event.currentTarget)}
-    >
-      {state === "loading" ? "Loading…" : state === "error" ? "Retry review" : "Review connection"}
-    </button>
   );
 }

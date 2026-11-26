@@ -35,7 +35,6 @@ interface SettingsProps {
   onClose: (returnFocus: boolean) => void;
   onChanged: () => void;
   onProviderReady?: (connectionId: string) => Promise<boolean>;
-  mcpDraft?: { url: string } | undefined;
 }
 
 // Keep this owner mounted; closing the surface stops reads, not accepted commands.
@@ -49,9 +48,8 @@ export function Settings({
   onClose,
   onChanged,
   onProviderReady,
-  mcpDraft,
 }: SettingsProps) {
-  const mcp = useMcpSettings(open && tab === "mcp", mcpDraft);
+  const mcp = useMcpSettings(open && tab === "mcp");
   const state = useProviderSettings(
     client,
     open,

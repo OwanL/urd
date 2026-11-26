@@ -3,7 +3,7 @@ import type { UsageRange } from "./Usage.ts";
 import { UsageClient } from "./UsageClient.ts";
 import { UsageDetails } from "./UsageDetails.tsx";
 import { HoverPopover } from "../controls/HoverPopover.tsx";
-import { formatUsageCost } from "./UsagePresentation.ts";
+import { formatSummaryCost } from "./UsagePresentation.ts";
 import { useUsageSummary } from "./useUsageSummary.ts";
 import "./usage.css";
 
@@ -34,7 +34,7 @@ export function UsageControl({
     detail: false,
   });
   const value = state.summary
-    ? formatUsageCost(state.summary.totals)
+    ? formatSummaryCost(state.summary)
     : state.stale
       ? "Unavailable"
       : "…";

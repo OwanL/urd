@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { UsageTotals } from "../../usage/Usage.ts";
-import { formatCostUsd, formatUsageCost, usageColors } from "../../usage/UsagePresentation.ts";
+import type { UsageSummary, UsageTotals } from "../../usage/Usage.ts";
+import {
+  formatCostUsd,
+  formatSummaryCost,
+  formatUsageCost,
+  usageColors,
+} from "../../usage/UsagePresentation.ts";
 
 const totals = (overrides: Partial<UsageTotals> = {}): UsageTotals => ({
   costUsd: 0,
@@ -9,6 +14,14 @@ const totals = (overrides: Partial<UsageTotals> = {}): UsageTotals => ({
   estimatedRequests: 0,
   unknownRequests: 0,
   activeRequests: 0,
+  ...overrides,
+});
+
+const summary = (overrides: Partial<UsageSummary> = {}): UsageSummary => ({
+  totals: totals(),
+  breakdown: [],
+  history: [],
+  recent: [],
   ...overrides,
 });
 
@@ -36,6 +49,18 @@ void test("usage costs show a plain amount, or a dash when no amount is availabl
     ),
     "<$0.01",
   );
+});
+
+void test("a partly covered closed-session range reads as a dash, not a false zero", () => {
+  assert.equal(
+    formatSummaryCost(summary({ totals: totals({ costUsd: 1.5, requests: 3 }) })),
+    "$1.50",
+  );
+  assert.equal(
+    formatSummaryCost(summary({ totalsComplete: false, totals: totals({ costUsd: 1.5 }) })),
+    "—",
+  );
+  assert.equal(formatSummaryCost(summary({ totalsComplete: true, totals: totals() })), "$0.00");
 });
 
 void test("usage colors are deterministic, order-independent and distinct for small sets", () => {

@@ -6,7 +6,12 @@ import { UsageHistory } from "./UsageHistory.tsx";
 import { UsageProviderBreakdown, UsageProviders } from "./UsageProviders.tsx";
 import { useUsageSummary } from "./useUsageSummary.ts";
 import { cumulativeUsageHistory, usageProviders, usageSources } from "./UsageAggregation.ts";
-import { formatUsageCost, formatUsageCount, usageColors } from "./UsagePresentation.ts";
+import {
+  formatSummaryCost,
+  formatUsageCost,
+  formatUsageCount,
+  usageColors,
+} from "./UsagePresentation.ts";
 
 const costScopes = [
   { value: "session", label: "Session" },
@@ -93,7 +98,7 @@ function UsageSnapshot({ client, sessionId, range }: UsageDetailsProps) {
         <h2>
           {sessionId ? "Session cost" : range === "sevenDays" ? "7d API cost" : "24h API cost"}
         </h2>
-        <strong>{summary ? formatUsageCost(summary.totals) : "…"}</strong>
+        <strong>{summary ? formatSummaryCost(summary) : "…"}</strong>
       </header>
       {state.stale && (
         <p class="usage-warning" role="status">
@@ -127,6 +132,10 @@ function SummaryContent({
   const sources = usageSources(summary.breakdown);
   const sourceColors = usageColors(sources.map((source) => source.key));
   const totals = summary.totals;
+  // A partly overlapping closed-session range has no retained totals; a zero would be false.
+  if (summary.totalsComplete === false) {
+    return <p class="usage-note">Totals unavailable: closed sessions keep only lifetime totals.</p>;
+  }
   return (
     <>
       {session && (

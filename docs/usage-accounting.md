@@ -137,7 +137,10 @@ responses bound breakdown/history to 64 entries and recent requests to 20. Overf
 provider/model/purpose groups become an explicit `isOther` aggregate, conserving all
 amounts and counts. Each history interval includes the same bounded breakdown identities;
 its timestamp is the last observed request in that occupied bucket. The chart trims
-empty time before and after activity. Totals cover the complete selected range. The route uses ordinary browser admission
+empty time before and after activity. Totals cover the complete selected range. The one exception: a
+session read that only partly overlaps a closed session reports `totalsComplete: false` instead of
+credible totals, because closure retained lifetime totals only; do not read the returned zeros as usage
+in that range. The route uses ordinary browser admission
 and private/no-store response rules.
 
 ## Prompt-cache measurement

@@ -1,4 +1,4 @@
-import type { UsageTotals } from "./Usage.ts";
+import type { UsageSummary, UsageTotals } from "./Usage.ts";
 
 const usagePalette = [
   "#0891b2",
@@ -43,6 +43,11 @@ export function formatUsageCost(totals: UsageTotals): string {
   if (totals.costUsd === 0 && totals.requests > 0 && totals.unknownRequests === totals.requests)
     return "—";
   return formatCostUsd(totals.costUsd);
+}
+
+// A closed session keeps only lifetime totals, so a partly overlapping range has no cost to show.
+export function formatSummaryCost(summary: UsageSummary): string {
+  return summary.totalsComplete === false ? "—" : formatUsageCost(summary.totals);
 }
 
 export function formatUsageCount(count: number): string {

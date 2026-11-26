@@ -82,6 +82,29 @@ public sealed class SessionClosureStorageTests {
   }
 
   [Fact]
+  public void ClosedSessionRangeTotalsReadUnavailableWhenOnlyPartOfTheLifetimeIsSelected() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid primary = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    var first = new DateTimeOffset(2026, 11, 20, 9, 0, 0, TimeSpan.Zero);
+    DateTimeOffset last = first.AddDays(2);
+    RecordUsage(store, primary, first, 1m);
+    RecordUsage(store, primary, last, 2m);
+    Assert.True(store.DeletePrimarySession(primary));
+
+    Assert.Equal(3m, store.ReadUsage(primary).Totals.CostUsd);
+    Assert.True(store.ReadUsage(primary).TotalsComplete);
+    Assert.Equal(3m, store.ReadUsage(primary, first, last).Totals.CostUsd); // range fully covers the lifetime
+    Assert.True(store.ReadUsage(primary, first, last).TotalsComplete);
+    Assert.Equal(0m, store.ReadUsage(primary, last.AddDays(1), last.AddDays(2)).Totals.CostUsd);
+    Assert.True(store.ReadUsage(primary, last.AddDays(1), last.AddDays(2)).TotalsComplete); // disjoint is a true zero
+    Assert.Equal(new UsageTotals(0m, 0, 0, 0, 0), store.ReadUsage(primary, first.AddHours(1), last.AddHours(-1),
+        detail: false).Totals);
+    UsageSummary partial = store.ReadUsage(primary, first.AddHours(1), last.AddHours(-1));
+    Assert.False(partial.TotalsComplete);
+  }
+
+  [Fact]
   public void PrimarySessionCostIncludesItsTreeWithoutDoubleCountingRollingTotals() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

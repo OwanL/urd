@@ -66,6 +66,8 @@ export interface UsageSummary {
   breakdown: UsageBreakdown[];
   history: UsagePoint[];
   recent: UsageRequest[];
+  /** False when retained totals cannot cover the selected range, such as a partly overlapping closed session. */
+  totalsComplete?: boolean;
 }
 
 export interface PromptCacheTotals {

@@ -99,8 +99,8 @@ internal sealed class UsageStorage(Database database) {
     ValidateRange(sessionId, from, to);
     (string where, (string Name, object? Value)[] parameters) = BuildFilter(sessionId, from, to);
     return database.Read(transaction => {
-      if (sessionId is Guid id && ReadClosedTotals(transaction, id, from, to) is { } closed)
-        return new UsageSummary(closed, [], [], []);
+      if (sessionId is Guid id && ReadClosedTotals(transaction, id) is { } closed)
+        return SummarizeClosed(closed, from, to);
 
       string source = sessionId is null ? "global_usage_totals" : "open_usage_totals";
       UsageTotals totals = ReadTotals(transaction, source, where, parameters);
@@ -254,13 +254,27 @@ internal sealed class UsageStorage(Database database) {
   }
 
   // Closed sessions retain lifetime totals, not data from which partial ranges could be reconstructed.
-  private UsageTotals? ReadClosedTotals(SqliteTransaction transaction, Guid sessionId, DateTimeOffset? from,
-      DateTimeOffset? to) => database.QuerySingleOrDefault(transaction, """
-      SELECT cost_nano_usd, requests, estimated_requests, unknown_requests, 0 AS active_requests
-      FROM closed_session_usage WHERE session_id = $session
-          AND ($from IS NULL OR (first_started_at >= $from AND last_started_at <= $to));
-      """, ReadTotals, ("$session", sessionId), ("$from", from is { } start ? Timestamp(start) : null),
-      ("$to", to is { } end ? Timestamp(end) : null));
+  private ClosedTotals? ReadClosedTotals(SqliteTransaction transaction, Guid sessionId) => database.QuerySingleOrDefault(transaction, """
+      SELECT first_started_at, last_started_at, cost_nano_usd, requests, estimated_requests, unknown_requests,
+          0 AS active_requests
+      FROM closed_session_usage WHERE session_id = $session;
+      """, row => new ClosedTotals(row.Timestamp("first_started_at"), row.Timestamp("last_started_at"), ReadTotals(row)),
+      ("$session", sessionId));
+
+  // Any retained request started within the lifetime, so ranges that fully contain it read its totals and
+  // ranges that miss it entirely truthfully read zero; a partly overlapping range has no answer at all.
+  private static UsageSummary SummarizeClosed(ClosedTotals closed, DateTimeOffset? from, DateTimeOffset? to) {
+    bool covered = (from is DateTimeOffset start && start <= closed.FirstStartedAt || from is null)
+        && (to is DateTimeOffset end && end >= closed.LastStartedAt || to is null);
+    if (covered)
+      return new UsageSummary(closed.Totals, [], [], []);
+
+    bool disjoint = from is DateTimeOffset started && started > closed.LastStartedAt
+        || to is DateTimeOffset ended && ended < closed.FirstStartedAt;
+    return new UsageSummary(new UsageTotals(0m, 0, 0, 0, 0), [], [], [], TotalsComplete: disjoint);
+  }
+
+  private sealed record ClosedTotals(DateTimeOffset FirstStartedAt, DateTimeOffset LastStartedAt, UsageTotals Totals);
 
   private UsageTotals ReadTotals(SqliteTransaction transaction, string source, string where,
       (string Name, object? Value)[] parameters) => database.QuerySingleOrDefault(transaction, $"""

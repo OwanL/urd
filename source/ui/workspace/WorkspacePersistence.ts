@@ -1,6 +1,7 @@
 import { isUserImage } from "../chat/ChatState.ts";
 import type { UserImage } from "../sessions/transcript/Messages.ts";
 import { decodeWorkspace, emptyWorkspace, encodeWorkspace } from "./WorkspaceState.ts";
+import { errorMessage } from "../http/ErrorMessages.ts";
 import type { ChatState } from "../chat/ChatState.ts";
 import type { WorkspaceState } from "./WorkspaceState.ts";
 
@@ -73,7 +74,7 @@ export class WorkspacePersistence {
       return {
         state: emptyWorkspace(),
         first: false,
-        error: `Saved workspace could not be read: ${description(cause)}`,
+        error: `Saved workspace could not be read: ${errorMessage(cause)}`,
       };
     }
   }
@@ -96,7 +97,7 @@ export class WorkspacePersistence {
         )
           storage.removeItem(this.draftKey(id));
       } catch (cause) {
-        cleanupError = description(cause);
+        cleanupError = errorMessage(cause);
       }
     }
     for (const id of removedSessions) {
@@ -104,12 +105,12 @@ export class WorkspacePersistence {
       try {
         storage.removeItem(this.draftKey(id));
       } catch (cause) {
-        cleanupError = description(cause);
+        cleanupError = errorMessage(cause);
       }
       try {
         this.clearTranscriptNavigation(id);
       } catch (cause) {
-        cleanupError = description(cause);
+        cleanupError = errorMessage(cause);
       }
     }
     return { cleanupError };
@@ -169,8 +170,4 @@ function decodeDraft(raw: string): SavedDraft {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function description(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }

@@ -6,6 +6,7 @@ import {
 export { pendingInputRemovalKey } from "./PendingInputRemovalCommands.ts";
 import { SubmissionCommands } from "./SubmissionCommands.ts";
 import { RequestError } from "../http/RequestError.ts";
+import { errorMessage, requestErrorDescription } from "../http/ErrorMessages.ts";
 import type {
   ChatCompactionState,
   ChatStopState,
@@ -206,7 +207,9 @@ export class WorkspaceCommands {
       this.publish({
         subagentProviderError: {
           sessionId: id,
-          message: `Subagent provider change could not be confirmed. ${cause instanceof RequestError ? requestErrorDescription(cause) : description(cause)}`,
+          message: `Subagent provider change could not be confirmed. ${
+            cause instanceof RequestError ? requestErrorDescription(cause) : errorMessage(cause)
+          }`,
         },
       });
       return null;
@@ -240,7 +243,7 @@ export class WorkspaceCommands {
         chats: { ...state.chats, [id]: state.chats[id] ?? newChat(null) },
       });
     } catch (cause) {
-      this.reportError(`Chat creation is uncertain: ${description(cause)}`);
+      this.reportError(`Chat creation is uncertain: ${errorMessage(cause)}`);
     } finally {
       this.createPending = false;
       this.publish({ creating: false });
@@ -441,7 +444,7 @@ export class WorkspaceCommands {
         this.setStopping(id, {
           executionId,
           pending: false,
-          error: `Stop acknowledgement uncertain: ${description(cause)}`,
+          error: `Stop acknowledgement uncertain: ${errorMessage(cause)}`,
         });
     } finally {
       this.stoppingRequests.delete(requestKey);
@@ -549,17 +552,4 @@ export class WorkspaceCommands {
     this.state = { ...this.state, ...update };
     this.changed(this.state);
   }
-}
-
-function requestErrorDescription(error: RequestError): string {
-  const body = error.responseBody;
-  if (typeof body === "object" && body !== null && "error" in body) {
-    const message = body.error;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return error.message;
-}
-
-function description(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }

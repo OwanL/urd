@@ -1,4 +1,5 @@
 import { RequestError } from "../http/RequestError.ts";
+import { errorMessage, requestErrorDescription } from "../http/ErrorMessages.ts";
 import { newUuid } from "../Uuid.ts";
 import { maxUserImages } from "../chat/user-images/ImagePaste.ts";
 import {
@@ -272,7 +273,7 @@ export class SubmissionCommands {
       if (controller?.signal.aborted) return null;
       if (retry && cause instanceof RequestError && cause.status === 409)
         return await this.resolveContinuationConflict(id, original, cause);
-      this.markContinuationUncertain(id, original, description(cause));
+      this.markContinuationUncertain(id, original, errorMessage(cause));
       return null;
     } finally {
       this.coordinator.endContinuationReceiptRead(id);
@@ -304,7 +305,7 @@ export class SubmissionCommands {
       this.markContinuationUncertain(
         id,
         original,
-        `Continue outcome is uncertain: ${description(cause)}`,
+        `Continue outcome is uncertain: ${errorMessage(cause)}`,
       );
     }
     return null;
@@ -400,7 +401,7 @@ export class SubmissionCommands {
           ? {
               ...previous,
               pending: { ...previous.pending, status: "uncertain" },
-              error: description(cause),
+              error: errorMessage(cause),
             }
           : previous,
       );
@@ -410,17 +411,4 @@ export class SubmissionCommands {
       this.coordinator.refreshSnapshot();
     }
   }
-}
-
-function requestErrorDescription(error: RequestError): string {
-  const body = error.responseBody;
-  if (typeof body === "object" && body !== null && "error" in body) {
-    const message = body.error;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return error.message;
-}
-
-function description(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }

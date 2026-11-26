@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "./SessionClient.ts";
+import { errorMessage } from "../http/ErrorMessages.ts";
 import type { TranscriptHistoryPage } from "./transcript/Messages.ts";
 import type { SessionSnapshot } from "./SessionSnapshot.ts";
 
@@ -97,7 +98,7 @@ export function useSessionSnapshot(
         current.current.onSnapshot(next, knownWhenRead);
       } catch (cause) {
         if (!request.signal.aborted && !disposed && versionWhenRead === snapshotVersion.current)
-          setError(cause instanceof Error ? cause.message : "Session read failed.");
+          setError(errorMessage(cause, "Session read failed."));
       } finally {
         if (controller === request) controller = null;
         reading = false;

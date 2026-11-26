@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 import type { ProviderClient } from "../ProviderClient.ts";
 import type { ProviderConnection } from "../ProviderConnection.ts";
+import { errorMessage } from "../../http/ErrorMessages.ts";
 import { ModelOptions } from "./ModelOptions.ts";
 import type { ModelOption } from "./ModelOptions.ts";
 
@@ -13,10 +14,6 @@ export interface ModelOptionsState {
   providersChanged(): void;
   providerReady(connectionId: string): Promise<boolean>;
   retry(): Promise<void>;
-}
-
-function description(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }
 
 export function useModelOptions(client: ProviderClient): ModelOptionsState {
@@ -43,7 +40,7 @@ export function useModelOptions(client: ProviderClient): ModelOptionsState {
         ),
       );
     }
-    setError(result.error === null ? null : description(result.error));
+    setError(result.error === null ? null : errorMessage(result.error));
     setLoading(false);
     setRefreshing(false);
     return result.successfulProviderIds;
@@ -80,7 +77,7 @@ export function useModelOptions(client: ProviderClient): ModelOptionsState {
         );
       }
       setLoading(false);
-      setError(cached.error === null ? null : description(cached.error));
+      setError(cached.error === null ? null : errorMessage(cached.error));
 
       if (cached.providersToRefresh.length === 0) {
         setRefreshing(false);
@@ -104,7 +101,7 @@ export function useModelOptions(client: ProviderClient): ModelOptionsState {
           ),
         );
       }
-      setError(discovered.error === null ? null : description(discovered.error));
+      setError(discovered.error === null ? null : errorMessage(discovered.error));
       setRefreshing(false);
     }
 

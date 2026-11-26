@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "preact/hooks";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { RequestError } from "../http/RequestError.ts";
+import { errorMessage } from "../http/ErrorMessages.ts";
 import { moveTab } from "./tabs/TabOrder.ts";
 import { newChat } from "../chat/ChatState.ts";
 import type { SessionIdPage } from "../sessions/SessionIdPage.ts";
@@ -110,8 +111,7 @@ export function useWorkspaceNavigation(
         }
         if (!controller.signal.aborted) setReady(true);
       } catch (cause) {
-        if (!controller.signal.aborted)
-          setError(cause instanceof Error ? cause.message : String(cause));
+        if (!controller.signal.aborted) setError(errorMessage(cause));
       }
     }
     void discover();

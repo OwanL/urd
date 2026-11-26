@@ -1,4 +1,5 @@
 import { RequestError } from "../http/RequestError.ts";
+import { errorMessage } from "../http/ErrorMessages.ts";
 import {
   connectRejection,
   connectRequest,
@@ -78,7 +79,9 @@ export class McpSettingsController {
       this.patch({ servers, loadError: "" });
     } catch (error) {
       if (this.disposed || token !== this.readToken) return;
-      this.patch({ loadError: `Could not load servers: ${failureMessage(error)}` });
+      this.patch({
+        loadError: `Could not load servers: ${errorMessage(error, "Request failed.")}`,
+      });
     }
   }
 
@@ -131,7 +134,10 @@ export class McpSettingsController {
     } catch (error) {
       // A vanished operation has the same outcome as an acknowledged cancel.
       if (!(error instanceof RequestError && error.status === 404)) {
-        this.patch({ busy: false, error: `Could not cancel connection: ${failureMessage(error)}` });
+        this.patch({
+          busy: false,
+          error: `Could not cancel connection: ${errorMessage(error, "Request failed.")}`,
+        });
         return;
       }
     }
@@ -149,7 +155,7 @@ export class McpSettingsController {
       this.patch({ screen: "list" });
       await this.read();
     } catch (error) {
-      this.patch({ error: `Could not remove server: ${failureMessage(error)}` });
+      this.patch({ error: `Could not remove server: ${errorMessage(error, "Request failed.")}` });
     } finally {
       this.patch({ busy: false });
     }
@@ -174,7 +180,9 @@ export class McpSettingsController {
       const token = ++this.pollToken;
       void this.poll(operationId, token);
     } catch (error) {
-      this.patch({ error: `Could not start connection: ${failureMessage(error)}` });
+      this.patch({
+        error: `Could not start connection: ${errorMessage(error, "Request failed.")}`,
+      });
     } finally {
       this.patch({ busy: false });
     }
@@ -207,7 +215,9 @@ export class McpSettingsController {
         });
         void this.read();
       } else {
-        this.patch({ error: `Could not check connection: ${failureMessage(error)}` });
+        this.patch({
+          error: `Could not check connection: ${errorMessage(error, "Request failed.")}`,
+        });
         this.schedule(operationId, token, 3000);
       }
     }
@@ -247,8 +257,4 @@ export class McpSettingsController {
 
 function emptyForm(): McpConnectForm {
   return { url: "", authentication: "automatic", headerName: "", credential: "" };
-}
-
-function failureMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Request failed.";
 }

@@ -2,6 +2,7 @@ import { render } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { Workspace } from "./Workspace.tsx";
 import { RichMessageBody } from "../chat/transcript/RichMessageBody.tsx";
+import { errorMessage } from "../http/ErrorMessages.ts";
 import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts";
 import { MarkdownClient } from "../markdown-rendering/MarkdownClient.ts";
 import { SetupDialog } from "../setup/SetupDialog.tsx";
@@ -25,7 +26,7 @@ export function mountWorkspace(
         (error: unknown) => {
           releases.delete(work);
           if (errors.length === 0) errors.push(error);
-          reportError?.(error instanceof Error ? error.message : "Transcript release failed.");
+          reportError?.(errorMessage(error, "Transcript release failed."));
         },
       );
     },

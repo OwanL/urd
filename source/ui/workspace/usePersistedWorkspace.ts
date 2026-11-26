@@ -9,6 +9,7 @@ import type { UserImage } from "../sessions/transcript/Messages.ts";
 
 import type { ChatState } from "../chat/ChatState.ts";
 import { removeWorkspaceSessions, type WorkspaceState } from "./WorkspaceState.ts";
+import { errorMessage } from "../http/ErrorMessages.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import type { WorkspacePersistence } from "./WorkspacePersistence.ts";
 
@@ -31,10 +32,6 @@ export interface PersistedWorkspace {
   removeDraftImage(id: string, imageId: string): boolean;
   selectModel(id: string, selection: LlmSelection): boolean;
   retryStorage(): void;
-}
-
-function description(cause: unknown): string {
-  return cause instanceof Error ? cause.message : String(cause);
 }
 
 // Owns the workspace snapshot and its browser-session persistence lifecycle.
@@ -92,7 +89,7 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
         storageProblem.current = "write";
         setStorageIssue({
           kind: "write",
-          message: `Workspace could not be saved: ${description(cause)}`,
+          message: `Workspace could not be saved: ${errorMessage(cause)}`,
         });
         return false;
       }
@@ -185,7 +182,7 @@ export function usePersistedWorkspace(persistence: WorkspacePersistence): Persis
       storageProblem.current = "write";
       setStorageIssue({
         kind: "write",
-        message: `Workspace could not be saved: ${description(cause)}`,
+        message: `Workspace could not be saved: ${errorMessage(cause)}`,
       });
     }
   }, [persistence, saveWorkspace]);

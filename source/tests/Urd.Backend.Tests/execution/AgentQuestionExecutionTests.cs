@@ -137,7 +137,7 @@ public sealed class AgentQuestionExecutionTests {
   }
 
   [Fact]
-  public async Task StopFailsThePresentedAskBeforeJoiningOwnedWork() {
+  public async Task StopFailsThePresentedAskAndRejectsNewWakingAsksWhileJoiningOwnedWork() {
     await using var fixture = await QuestionFixture.OpenAsync();
     var waiting = Signal();
     var entered = Signal();
@@ -160,6 +160,10 @@ public sealed class AgentQuestionExecutionTests {
       Assert.Equal(StopStatus.Requested, (await fixture.Recipient.RequestStopAsync(execution)).Status);
       await cleanupEntered.Task.WaitAsync(TestTimeout);
       Assert.Equal(AgentQuestions.RecipientFinished, (await ask.WaitAsync(TestTimeout)).Error);
+      AgentQuestionResult rejected = await fixture.Ask("late question", wake: true).WaitAsync(TestTimeout);
+      Assert.Null(rejected.Answer);
+      Assert.Equal("The recipient agent is stopping; try again after it stops.", rejected.Error);
+      Assert.Empty(fixture.Manager.Questions.Queued(fixture.Recipient.Id));
       Assert.False(settlement.IsCompleted);
       cleanupRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Cancelled, (await settlement).Outcome);

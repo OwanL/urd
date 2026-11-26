@@ -18,13 +18,17 @@ internal sealed class QuestionDelivery(SessionBase session, UrdStore store, Asyn
       if (!session.CanStartWork)
         return new(null, "The recipient agent is not accepting work.");
 
+      SessionExecutionDriver? active = session.CurrentExecution;
+      if (wake && active is { IsStopping: true })
+        return new(null, "The recipient agent is stopping; try again after it stops.");
+
       AgentQuestions broker = agentQuestions!;
       var source = new AgentWaitSource(caller.SessionId, caller.ExecutionId, caller.Background || !wake);
       waiting = broker.Enqueue(session.Id, source, caller.RequestId, caller.CallId, prompt, wake, cancellation, out Guid questionId);
       if (wake && !waiting.IsCompleted) {
-        if (session.CurrentExecution is { IsStopping: false } active)
+        if (active is not null)
           active.Wake();
-        else if (session.CurrentExecution is null) {
+        else {
           try {
             executionStart = StartQuestionRun(broker);
           } catch (Exception failure) {

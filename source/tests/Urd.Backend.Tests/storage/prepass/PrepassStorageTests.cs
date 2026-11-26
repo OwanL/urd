@@ -23,16 +23,16 @@ public sealed class PrepassStorageTests {
     Assert.False(store.Prepass.TryClaimTitle(identity));
     Assert.Equal("First request", store.Prepass.PublishTitle(identity, "First request"));
     Assert.Null(store.Prepass.PublishTitle(identity, "Replacement title"));
-    Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
-        new StartingResourcePruningStatus("tools", "running", 4, 3)));
-    Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
-        new StartingResourcePruningStatus("skills", "running", 2, 1)));
+    Assert.True(store.Prepass.WritePruningProgress(identity, Guid.Empty,
+        new StartingResourcePruningStatus("tools", "running", 4, 3), null, null));
+    Assert.True(store.Prepass.WritePruningProgress(identity, Guid.Empty,
+        new StartingResourcePruningStatus("skills", "running", 2, 1), null, null));
 
     store.Executions.RequestStop(session, execution, ownsExecution: true);
-    Assert.False(store.Prepass.WritePruningStatus(identity, Guid.Empty,
-        new StartingResourcePruningStatus("tools", "running", 4, 3)));
-    Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
-        new StartingResourcePruningStatus("tools", "completed", 4, 3)));
+    Assert.False(store.Prepass.WritePruningProgress(identity, Guid.Empty,
+        new StartingResourcePruningStatus("tools", "running", 4, 3), null, null));
+    Assert.True(store.Prepass.WritePruningProgress(identity, Guid.Empty,
+        new StartingResourcePruningStatus("tools", "completed", 4, 3), null, null));
     Assert.Equal(ExecutionOutcome.Cancelled,
         store.Executions.TryFinish(session, execution, ExecutionOutcome.Completed)!.Outcome);
 
@@ -49,8 +49,8 @@ public sealed class PrepassStorageTests {
     var retryIdentity = new ExecutionIdentity(session, retry, 0);
     Assert.False(store.Prepass.TryClaimTitle(retryIdentity));
     Assert.Null(store.Prepass.PublishTitle(identity, "Late old title"));
-    Assert.True(store.Prepass.WritePruningStatus(retryIdentity, Guid.Empty,
-        new StartingResourcePruningStatus("skills", "running", 2, 2)));
+    Assert.True(store.Prepass.WritePruningProgress(retryIdentity, Guid.Empty,
+        new StartingResourcePruningStatus("skills", "running", 2, 2), null, null));
     Assert.Equal(ExecutionOutcome.Cancelled,
         store.Executions.TryFinish(session, execution, ExecutionOutcome.Completed)!.Outcome);
     Assert.Contains(store.Snapshots.ReadPersisted(session).Pruning!,
@@ -115,13 +115,13 @@ public sealed class PrepassStorageTests {
       var identity = new ExecutionIdentity(session, execution, 0);
       store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, "request", TestLlmSelection.Default),
           true, execution, null);
-      Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
-          new StartingResourcePruningStatus("tools", "running", 2, 2)));
+      Assert.True(store.Prepass.WritePruningProgress(identity, Guid.Empty,
+          new StartingResourcePruningStatus("tools", "running", 2, 2), null, null));
       Assert.True(store.Prepass.RecordModel(identity, "pruning.tools", TestLlmSelection.UsedSessionResolution));
 
       // Same-run updates keep whichever recording happened on the running detail.
-      Assert.True(store.Prepass.WritePruningStatus(identity, Guid.Empty,
-          new StartingResourcePruningStatus("tools", "completed", 2, 1)));
+      Assert.True(store.Prepass.WritePruningProgress(identity, Guid.Empty,
+          new StartingResourcePruningStatus("tools", "completed", 2, 1), null, null));
       Assert.Equal(1L, database.Scalar("SELECT used_session_model FROM session_prepass_details WHERE category = 'tools';")); // raw-sql: the last recorded model fact survives same-run updates
 
       // A new run's detail starts without the previous run's recorded model fact.
@@ -131,8 +131,8 @@ public sealed class PrepassStorageTests {
       Guid retry = Guid.NewGuid();
       var retryIdentity = new ExecutionIdentity(session, retry, 0);
       store.UserMessages.Submit(session, 0, new(Guid.NewGuid(), 0, "retry", TestLlmSelection.Default), true, retry, null);
-      Assert.True(store.Prepass.WritePruningStatus(retryIdentity, Guid.Empty,
-          new StartingResourcePruningStatus("tools", "running", 2, 2)));
+      Assert.True(store.Prepass.WritePruningProgress(retryIdentity, Guid.Empty,
+          new StartingResourcePruningStatus("tools", "running", 2, 2), null, null));
       Assert.Equal(0L, database.Scalar("SELECT used_session_model FROM session_prepass_details WHERE category = 'tools';")); // raw-sql: the recorded model fact resets for a new run
     }
 

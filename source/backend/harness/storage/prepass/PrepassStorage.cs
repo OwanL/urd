@@ -120,10 +120,6 @@ internal sealed class PrepassStorage(Database database) {
         ("$finished", StorageText.UtcTimestamp()), ("$error", boundedError))) == 1);
   }
 
-  // Running updates are fenced by Stop; terminal results may commit while Stop drains the parent.
-  internal bool WritePruningStatus(ExecutionIdentity parent, Guid boundaryId,
-      StartingResourcePruningStatus status) => WritePruningProgress(parent, boundaryId, status, null, null);
-
   // Status and its detailed resource facts are published in the same transaction.
   internal bool WritePruningProgress(ExecutionIdentity parent, Guid boundaryId,
       StartingResourcePruningStatus status, IReadOnlyList<PrepassResource>? candidates,

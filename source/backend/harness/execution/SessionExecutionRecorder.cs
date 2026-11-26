@@ -125,6 +125,7 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
     return true;
   }
 
+  // Running updates are fenced by Stop; terminal results may commit while Stop drains the parent.
   internal Task<bool> RecordPruningProgressAsync(Guid boundaryId, StartingResourcePruningStatus status,
       IReadOnlyList<PrepassResource> candidates, IReadOnlyList<string>? resultIds) =>
       RecordChangeAsync(() => store.Prepass.WritePruningProgress(Identity, boundaryId, status, candidates, resultIds),

@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 
 namespace Urd.Core.Tools;
 
@@ -9,7 +8,7 @@ internal static class ToolOutputLimit {
     if (Fits(output.Text))
       return output;
 
-    string? path = ExistingSpill(name, output.Details);
+    string? path = output.Spill?.Path;
     bool existing = path is not null;
     if (path is null) {
       path = Path.Combine(Path.GetTempPath(), $"urd-tool-output-{Guid.NewGuid():N}.txt");
@@ -26,43 +25,27 @@ internal static class ToolOutputLimit {
         throw;
       }
     }
-    return Truncate(name, output, path, existing);
+    return Truncate(output, path, existing);
   }
 
   // Applies the shared cap to a result whose complete text is already saved at path, so tools
   // that spill locally share one saved file and the same truncate shape as the shared path.
   internal static ToolOutput ReuseSpill(string name, string path, ToolOutput output) =>
-    Fits(output.Text) ? output : Truncate(name, output, path, existing: true);
+    Fits(output.Text) ? output : Truncate(output, path, existing: true);
 
-  private static ToolOutput Truncate(string name, ToolOutput output, string path, bool existing) {
+  private static ToolOutput Truncate(ToolOutput output, string path, bool existing) {
     string notice = $"[Output truncated. Full output: {path}]\n";
-    string preview = output.Text;
-    string suffix = "";
-    if (existing && name == "bash") {
-      int marker = preview.LastIndexOf("\n\n[Showing", StringComparison.Ordinal);
-      if (marker >= 0) {
-        int status = preview.IndexOf("\n\nCommand ", marker, StringComparison.Ordinal);
-        if (status >= 0)
-          suffix = preview[status..];
-        preview = preview[..marker];
-      }
-    } else if (existing && name == "web_read") {
-      int extraction = preview.LastIndexOf("\n[Extraction stopped at ", StringComparison.Ordinal);
-      int unsettled = preview.LastIndexOf("\n[Page content kept changing;", StringComparison.Ordinal);
-      int marker = extraction < 0 || unsettled < 0 ? Math.Max(extraction, unsettled) : Math.Min(extraction, unsettled);
-      if (marker >= 0) {
-        suffix = preview[marker..];
-        preview = preview[..marker];
-      }
-    }
+    ToolOutputSpill? spill = existing ? output.Spill : null;
+    string preview = spill?.PreviewEnd is int end ? output.Text[..end] : output.Text;
+    string suffix = spill?.Suffix ?? "";
     int remainingBytes = ToolOutputLimits.MaxBytes - Encoding.UTF8.GetByteCount(notice);
     suffix = suffix[..PrefixLength(suffix, remainingBytes, ToolOutputLimits.MaxLines - 1)];
     int previewBytes = remainingBytes - Encoding.UTF8.GetByteCount(suffix);
     int previewLines = ToolOutputLimits.MaxLines - 1 - suffix.Count(character => character == '\n') - (suffix.Length == 0 ? 0 : 1);
-    string selected = existing && name == "bash"
+    string selected = spill?.Tail == true
       ? preview[TailStart(preview, previewBytes, previewLines)..]
       : preview[..PrefixLength(preview, previewBytes, previewLines)];
-    return output with { Text = notice + selected + suffix };
+    return output with { Text = notice + selected + suffix, Spill = new ToolOutputSpill(path) };
   }
 
   internal static bool Fits(string text) =>
@@ -106,12 +89,4 @@ internal static class ToolOutputLimit {
     return index;
   }
 
-  private static string? ExistingSpill(string name, JsonElement? details) {
-    if (details is not { ValueKind: JsonValueKind.Object } value)
-      return null;
-    string? key = name switch { "bash" => "fullOutputPath", "web_read" => "spillPath", _ => null };
-    if (key is null || !value.TryGetProperty(key, out JsonElement path) || path.ValueKind != JsonValueKind.String)
-      return null;
-    return string.IsNullOrEmpty(path.GetString()) ? null : path.GetString();
-  }
 }

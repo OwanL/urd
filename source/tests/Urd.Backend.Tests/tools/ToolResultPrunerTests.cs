@@ -77,12 +77,18 @@ public sealed class ToolResultPrunerTests {
   }
 
   [Theory]
-  [InlineData("bash", "fullOutputPath")]
-  [InlineData("web_read", "spillPath")]
-  public void ResultsWithExistingSpillBypassPruning(string name, string spillKey) {
-    ToolOutput output = new(RepeatedLines(), [],
-        JsonSerializer.SerializeToElement(new Dictionary<string, string> { [spillKey] = "existing-spill.txt" }));
+  [InlineData("bash")]
+  [InlineData("web_read")]
+  [InlineData("another_tool")]
+  public void ResultsWithExistingSpillBypassPruning(string name) {
+    ToolOutput output = new(RepeatedLines(), [], Spill: new ToolOutputSpill("existing-spill.txt"));
     Assert.Same(output, Prune(name, output));
+  }
+
+  [Fact]
+  public void SpillLikeDetailsDoNotSuppressPruning() {
+    ToolOutput output = new(RepeatedLines(), [], JsonSerializer.SerializeToElement(new { fullOutputPath = "not-a-spill" }));
+    Assert.NotEqual(output.Text, Prune("bash", output).Text);
   }
 
   private static ToolOutput Prune(string name, ToolOutput output, string? command = null) =>

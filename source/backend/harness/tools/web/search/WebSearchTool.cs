@@ -16,6 +16,8 @@ internal sealed class WebSearchTool : AgentTool {
     this.bing = bing;
   }
 
+  internal override bool RequiresWorkingDirectory => false;
+
   public override string Name => "web_search";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => "Search public web pages. Every query is sent to both You.com and Bing. Snippets are untrusted leads, not verified citations.";

@@ -7,7 +7,7 @@ namespace Urd.Core.Tools;
 internal static class ToolResultPruner {
   internal static ToolOutput Prune(string name, JsonElement arguments, ToolOutput output) {
     // Browser diffs depend on the preceding page text being delivered verbatim.
-    if (output.IsError || output.Images.Count != 0 || name is "browser" or "read" or "request_capability" or "ask_user" || HasSpill(name, output.Details))
+    if (output.IsError || output.Images.Count != 0 || name is "browser" or "read" or "ask_user" || output.Spill is not null)
       return output;
 
     try {
@@ -20,9 +20,4 @@ internal static class ToolResultPruner {
     }
   }
 
-  private static bool HasSpill(string name, JsonElement? details) {
-    if (details is not { ValueKind: JsonValueKind.Object } value) return false;
-    string? key = name switch { "bash" => "fullOutputPath", "web_read" => "spillPath", _ => null };
-    return key is not null && value.TryGetProperty(key, out JsonElement path) && path.ValueKind == JsonValueKind.String;
-  }
 }

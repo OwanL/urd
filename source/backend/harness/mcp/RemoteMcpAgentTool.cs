@@ -10,6 +10,7 @@ internal sealed class RemoteMcpAgentTool(IRemoteMcpTools remote, SavedMcpTool sa
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description { get; } = $"MCP server {Limit(saved.ServerName, 120)}: {Limit(saved.Tool.Description ?? saved.Tool.Title ?? saved.Tool.Name, 880)}";
   public override JsonElement ParametersSchema => saved.Tool.InputSchema;
+  internal override bool RequiresWorkingDirectory => false;
   internal override bool SupportsBackgroundOption => false;
 
   internal static bool HasSupportedSchema(JsonElement schema) => schema.ValueKind == JsonValueKind.Object &&

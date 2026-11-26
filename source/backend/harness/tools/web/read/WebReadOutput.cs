@@ -86,11 +86,14 @@ internal static class WebReadOutput {
       throw;
     }
     string preview = Slice(text, WebReadLimits.PreviewTextBytes);
-    string spilled = $"{header}\n\n" +
+    string body = $"{header}\n\n" +
       $"[Full text: {path} ({Bytes(payload.Length)} bytes). Source: {requestedUrl}] Preview below; search or read the file for more.\n" +
-      $"{preview}\n{Notices(visit, extractionTruncated)}";
-    return new ToolOutput(spilled.TrimEnd(), [], Details(visit, requestedUrl, WebKindName(kind), WebReadStatus.Completed,
-      payload.Length, extractionTruncated, true, path, payload.Length));
+      preview;
+    string spilled = $"{body}\n{Notices(visit, extractionTruncated)}".TrimEnd();
+    int previewEnd = Math.Min(body.Length, spilled.Length);
+    return new ToolOutput(spilled, [], Details(visit, requestedUrl, WebKindName(kind), WebReadStatus.Completed,
+      payload.Length, extractionTruncated, true, path, payload.Length),
+      Spill: new ToolOutputSpill(path, PreviewEnd: previewEnd, Suffix: spilled[previewEnd..]));
   }
 
   private static ToolOutput Settled(WebPageVisit visit, string requestedUrl, WebReadStatus status, string reason) {

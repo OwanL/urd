@@ -55,6 +55,7 @@ internal sealed class BashOutput : IDisposable {
   public ToolOutput Result(long durationMs, int? exitCode, bool timedOut, double? timeoutSeconds, string executable) {
     SnapshotData snapshot = Snapshot();
     string text = snapshot.Text.Length == 0 ? "(no output)" : snapshot.Text;
+    int previewEnd = text.Length;
     if (Truncated) {
       long lineBytes = openLine ? lastLineBytes : lastCompletedLineBytes;
       string limitNote = snapshot.Limit == "bytes" ? " (50KB limit)" : "";
@@ -63,6 +64,7 @@ internal sealed class BashOutput : IDisposable {
           : $"Showing lines {TotalLines - snapshot.Lines + 1}-{TotalLines} of {TotalLines}{limitNote}.";
       text += $"\n\n[{shown} Full output: {spillPath}]";
     }
+    int suffixStart = text.Length;
     if (timedOut)
       text += string.Create(CultureInfo.InvariantCulture, $"\n\nCommand timed out after {timeoutSeconds} seconds (elapsed {durationMs / 1000.0:F2}s).");
     else if (exitCode is not (0 or null))
@@ -75,7 +77,9 @@ internal sealed class BashOutput : IDisposable {
         outputLines = snapshot.Lines, outputBytes = snapshot.Bytes, lastLinePartial = snapshot.PartialLine,
         maxLines = ToolOutputLimits.MaxLines, maxBytes = ToolOutputLimits.MaxBytes
       }
-    }), IsError: timedOut || exitCode is not (0 or null));
+    }), IsError: timedOut || exitCode is not (0 or null),
+      Spill: spillPath is null ? null : new ToolOutputSpill(spillPath, Tail: true,
+        PreviewEnd: Truncated ? previewEnd : null, Suffix: Truncated ? text[suffixStart..] : ""));
   }
 
   public ToolOutput Failure(Exception failure, long durationMs, string executable) {

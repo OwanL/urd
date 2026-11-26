@@ -3,6 +3,8 @@ using System.Text.Json;
 namespace Urd.Core.Tools;
 
 internal sealed class CancelPendingCallsTool(PendingToolCalls pending) : AgentTool {
+  internal override bool RequiresWorkingDirectory => false;
+
   public override string Name => "cancel_pending_calls";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """

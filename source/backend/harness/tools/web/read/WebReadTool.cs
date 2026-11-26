@@ -4,6 +4,8 @@ namespace Urd.Core.Tools;
 
 // Reads one public web page through the restricted browser transport; large text spills to temp.
 internal sealed class WebReadTool(WebBrowser browser) : AgentTool {
+  internal override bool RequiresWorkingDirectory => false;
+
   public override string Name => "web_read";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """

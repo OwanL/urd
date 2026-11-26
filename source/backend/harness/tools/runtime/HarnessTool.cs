@@ -5,6 +5,8 @@ namespace Urd.Core.Tools;
 
 // A session-owned tool receives harness capabilities only through its dedicated context.
 internal abstract class HarnessTool : AgentTool {
+  internal sealed override bool RequiresWorkingDirectory => false;
+
   public sealed override Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) =>
       throw new InvalidOperationException("Harness tools require a harness context.");
 

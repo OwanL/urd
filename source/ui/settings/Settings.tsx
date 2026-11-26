@@ -2,7 +2,8 @@ import type { TargetedKeyboardEvent } from "preact";
 import type { RefObject } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { Icon } from "../controls/Icon.tsx";
-import { McpSettings, useMcpSettings } from "../mcp/McpSettings.tsx";
+import { McpSettings } from "../mcp/McpSettings.tsx";
+import { useMcpSettings } from "../mcp/useMcpSettings.ts";
 import { IconButton } from "../controls/IconButton.tsx";
 import { Popover } from "../controls/Popover.tsx";
 import {

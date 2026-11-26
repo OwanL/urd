@@ -6,9 +6,12 @@ using Urd.Core.Storage;
 namespace Urd.Core.MarkdownRendering;
 
 // Observes only live, saved assistant text. The render and read paths never import a file.
-internal sealed class MarkdownImageImports(MarkdownImageStorage storage) : IDisposable {
+internal sealed class MarkdownImageImports(MarkdownImageStorage storage,
+    Func<string, IEnumerable<MarkdownImageTarget>>? readTargets = null) : IDisposable {
+  private readonly Func<string, IEnumerable<MarkdownImageTarget>> readTargets = readTargets ?? MarkdownParser.ReadImageTargets;
   private const int MaximumSourceChars = 512 * 1024;
   private const int MaximumTargetsPerResponse = 64;
+  private const int MaximumBatchesWithoutNewTarget = 4;
   private const int MaximumPendingResponses = 64;
   private static readonly TimeSpan CoalesceInterval = TimeSpan.FromMilliseconds(100);
   private static readonly SearchValues<char> PossibleImageEnds = SearchValues.Create(")]:\r\n");
@@ -43,10 +46,7 @@ internal sealed class MarkdownImageImports(MarkdownImageStorage storage) : IDisp
         return;
       if (text.Length > MaximumSourceChars - response.Source.Length) {
         // Keep the exact committed prefix, never a cropped Markdown fragment.
-        response.SourceClosed = true;
-        RequestParse(response);
-        if (!pending.ContainsKey(response.Key))
-          response.Source = new();
+        CloseSource(response);
         return;
       }
       response.ImageMarkers += CountImageMarkers(text, response.LastCharacter);
@@ -69,10 +69,18 @@ internal sealed class MarkdownImageImports(MarkdownImageStorage storage) : IDisp
     return count;
   }
 
-  // Once all image openers resolve, ordinary suffixes need no more parsing. Reference
-  // definitions can acquire a new destination as their unfinished line grows.
+  // Literal openers and reference-like text may never yield a target. Bound speculative
+  // rechecks, but give late images and reference definitions one last pass at close.
   private static bool NeedsParse(Response response) => response.Source.Length > response.ParsedThroughChars
-      && response.ImageMarkers > 0 && (response.ImageMarkers > response.ResolvedMarkers || response.HasReferenceDefinitions);
+      && response.ImageMarkers > 0 && (response.ImageMarkers > response.ResolvedMarkers || response.HasReferenceDefinitions)
+      && (response.SourceClosed || response.BatchesWithoutNewTarget < MaximumBatchesWithoutNewTarget);
+
+  private void CloseSource(Response response) {
+    response.SourceClosed = true;
+    RequestParse(response);
+    if (!pending.ContainsKey(response.Key))
+      response.Source = new();
+  }
 
   // Called under the import gate, which is never held while parsing or saving files.
   private void RequestParse(Response response) {
@@ -90,10 +98,12 @@ internal sealed class MarkdownImageImports(MarkdownImageStorage storage) : IDisp
   }
 
   private async Task RunAsync(Response response) {
-    while (true) {
+    bool anotherBatch;
+    do {
       await Task.Delay(CoalesceInterval);
       await workerSlots.WaitAsync();
       int resolvedMarkers;
+      int previousTargets = response.Attempted.Count;
       try {
         string source;
         lock (gate) {
@@ -108,10 +118,13 @@ internal sealed class MarkdownImageImports(MarkdownImageStorage storage) : IDisp
       }
       lock (gate) {
         response.ResolvedMarkers = resolvedMarkers;
+        response.BatchesWithoutNewTarget = response.Attempted.Count > previousTargets
+            ? 0 : response.BatchesWithoutNewTarget + 1;
         response.RunningBatch!.SetResult();
         response.RunningBatch = null;
         bool reachedTargetLimit = response.Attempted.Count >= MaximumTargetsPerResponse;
-        if (response.QueuedBatch is not null && !reachedTargetLimit && NeedsParse(response))
+        anotherBatch = response.QueuedBatch is not null && !reachedTargetLimit && NeedsParse(response);
+        if (anotherBatch)
           continue;
         response.QueuedBatch?.SetResult();
         response.QueuedBatch = null;
@@ -119,15 +132,14 @@ internal sealed class MarkdownImageImports(MarkdownImageStorage storage) : IDisp
         if (response.SourceClosed)
           response.Source = new();
         pending.Remove(response.Key);
-        return;
       }
-    }
+    } while (anotherBatch);
   }
 
   private int ImportSnapshot(Response response, string source) {
     int resolvedMarkers = 0;
     try {
-      foreach (MarkdownImageTarget target in MarkdownParser.ReadImageTargets(source)) {
+      foreach (MarkdownImageTarget target in readTargets(source)) {
         resolvedMarkers++;
         if (!response.Attempted.Add(target.Key))
           continue;
@@ -160,7 +172,7 @@ internal sealed class MarkdownImageImports(MarkdownImageStorage storage) : IDisp
         return;
       current = null;
       lock (imports.gate)
-        imports.RequestParse(response);
+        imports.CloseSource(response);
     }
 
     internal Task JoinAsync() {
@@ -179,6 +191,7 @@ internal sealed class MarkdownImageImports(MarkdownImageStorage storage) : IDisp
     internal char LastCharacter { get; set; }
     internal int ImageMarkers { get; set; }
     internal int ResolvedMarkers { get; set; }
+    internal int BatchesWithoutNewTarget { get; set; }
     internal bool HasReferenceDefinitions { get; set; }
     internal bool SourceClosed { get; set; }
     internal Task Work { get; set; } = Task.CompletedTask;

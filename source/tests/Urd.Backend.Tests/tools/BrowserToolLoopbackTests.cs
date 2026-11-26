@@ -1246,7 +1246,7 @@ public sealed class BrowserToolLoopbackTests {
       ToolOutput result = await Tool.RunAsync(arguments, context, cancellation).WaitAsync(StepTimeout, CancellationToken.None);
       // Production applies the shared output cap to every tool result; mirror it here so spill
       // behavior is exercised the way the model actually receives it.
-      ToolOutput bounded = await ToolOutputLimit.ApplyAsync("browser", result);
+      ToolOutput bounded = await ToolOutputLimit.ApplyAsync(result);
       if (!ReferenceEquals(result, bounded))
         spills.AddRange(SpillPaths(bounded.Text));
       return bounded;

@@ -70,6 +70,10 @@ internal sealed class BashOutput : IDisposable {
     else if (exitCode is not (0 or null))
       text += $"\n\nCommand exited with code {exitCode}.";
     published = true;
+    int? spillPreviewEnd = Truncated ? previewEnd : null;
+    string spillSuffix = Truncated ? text[suffixStart..] : "";
+    ToolOutputSpill? savedOutput = spillPath is null ? null
+      : new ToolOutputSpill(spillPath, Tail: true, PreviewEnd: spillPreviewEnd, Suffix: spillSuffix);
     return new ToolOutput(text, [], JsonSerializer.SerializeToElement(new {
       durationMs, exitCode, timedOut, fullOutputPath = spillPath, executable,
       truncation = new {
@@ -77,9 +81,7 @@ internal sealed class BashOutput : IDisposable {
         outputLines = snapshot.Lines, outputBytes = snapshot.Bytes, lastLinePartial = snapshot.PartialLine,
         maxLines = ToolOutputLimits.MaxLines, maxBytes = ToolOutputLimits.MaxBytes
       }
-    }), IsError: timedOut || exitCode is not (0 or null),
-      Spill: spillPath is null ? null : new ToolOutputSpill(spillPath, Tail: true,
-        PreviewEnd: Truncated ? previewEnd : null, Suffix: Truncated ? text[suffixStart..] : ""));
+    }), IsError: timedOut || exitCode is not (0 or null), Spill: savedOutput);
   }
 
   public ToolOutput Failure(Exception failure, long durationMs, string executable) {

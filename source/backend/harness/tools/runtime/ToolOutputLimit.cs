@@ -4,7 +4,7 @@ namespace Urd.Core.Tools;
 
 // Limits model-facing text before pruning, retaining the original in a readable temp file.
 internal static class ToolOutputLimit {
-  internal static async Task<ToolOutput> ApplyAsync(string name, ToolOutput output) {
+  internal static async Task<ToolOutput> ApplyAsync(ToolOutput output) {
     if (Fits(output.Text))
       return output;
 
@@ -30,7 +30,7 @@ internal static class ToolOutputLimit {
 
   // Applies the shared cap to a result whose complete text is already saved at path, so tools
   // that spill locally share one saved file and the same truncate shape as the shared path.
-  internal static ToolOutput ReuseSpill(string name, string path, ToolOutput output) =>
+  internal static ToolOutput ReuseSpill(string path, ToolOutput output) =>
     Fits(output.Text) ? output : Truncate(output, path, existing: true);
 
   private static ToolOutput Truncate(ToolOutput output, string path, bool existing) {

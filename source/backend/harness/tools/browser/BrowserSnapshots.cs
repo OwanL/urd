@@ -126,7 +126,7 @@ internal sealed class BrowserSnapshots {
         ToolOutputLimits.MaxBytes - noticeBytes - preludeBytes,
         ToolOutputLimits.MaxLines - noticeLines - preludeLines);
     if (depthView is null)
-      return ToolOutputLimit.ReuseSpill("browser", path, new ToolOutput(view, [])).Text;
+      return ToolOutputLimit.ReuseSpill(path, new ToolOutput(view, [])).Text;
     return $"{notice}{cut}{header}{(header.Length == 0 ? "" : "\n")}{depthView}";
   }
 }

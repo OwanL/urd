@@ -49,7 +49,7 @@ internal static class ToolInvoker {
 
     // Spill before pruning so the saved text is complete, including errors and mixed image results.
     // A spill failure is a recording fault, not a second tool error that hides the original result.
-    ToolOutput limited = await ToolOutputLimit.ApplyAsync(call.Name, output);
+    ToolOutput limited = await ToolOutputLimit.ApplyAsync(output);
     if (ReferenceEquals(limited, output) && !cancellation.IsCancellationRequested)
       limited = ToolResultPruner.Prune(call.Name, call.Arguments, limited);
     ExecutionOutcome outcome = failure ?? (limited.IsError ? ExecutionOutcome.Failed : ExecutionOutcome.Completed);

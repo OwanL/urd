@@ -223,7 +223,7 @@ public sealed class MessageMarkdownSchedulerTests {
     using var cancellation = new CancellationTokenSource();
     var abandoned = scheduler.RequestAsync(abandonedKey, async _ => {
       capturing.SetResult();
-      return await captured.Task.WaitAsync(Timeout);
+      return await captured.Task.WaitAsync(Timeout, CancellationToken.None);
     }, cancellation.Token);
     await capturing.Task.WaitAsync(Timeout);
     await cancellation.CancelAsync();

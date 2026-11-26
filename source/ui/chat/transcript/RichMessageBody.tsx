@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { MarkdownMessageView } from "../../markdown-rendering/MarkdownMessageView.tsx";
 import type { MarkdownSavedSourcePosition } from "../../markdown-rendering/MarkdownMessageView.tsx";
 import type { RichMessageBodyProps } from "./TranscriptDisplay.ts";
+import { MarkdownRequestCadence } from "./MarkdownRequestCadence.ts";
 import "../../markdown-rendering/markdown-renderer.css";
 
 export function RichMessageBody(props: RichMessageBodyProps) {
@@ -28,6 +29,12 @@ export function RichMessageBody(props: RichMessageBodyProps) {
     let queued = false;
     let applied = "";
     let frame = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cadence = new MarkdownRequestCadence();
+    function cancelTimer() {
+      if (timer !== undefined) clearTimeout(timer);
+      timer = undefined;
+    }
     const report = (cause: unknown) => {
       if (!stopped && !(cause instanceof DOMException && cause.name === "AbortError"))
         setError(cause instanceof Error ? cause.message : "Markdown read failed.");
@@ -57,6 +64,8 @@ export function RichMessageBody(props: RichMessageBodyProps) {
     function release() {
       if (!view || releasing) return;
       const current = view;
+      cancelTimer();
+      cadence.reset();
       releasing = true;
       // The flow-root host includes Markdown margins in the frozen height.
       element!.style.minHeight = `${element!.getBoundingClientRect().height}px`;
@@ -90,7 +99,10 @@ export function RichMessageBody(props: RichMessageBodyProps) {
         error: report,
       });
       await view.setPaused(paused);
-      if (paused || stopped || releasing) return;
+      if (paused || stopped || releasing) {
+        cancelTimer();
+        return;
+      }
       // A retained panel may reappear at a new width while its view was paused.
       // Restore the parent's explicit source before testing gaps at the old scroll offset.
       if (current.saved) {
@@ -105,11 +117,23 @@ export function RichMessageBody(props: RichMessageBodyProps) {
         return;
       }
       const tail = current.text.availableThrough;
-      const key = `${current.streamId}/${tail.segmentIndex}/${tail.utf8Offset}/${current.text.isClosed}`;
+      const key = `${current.streamId}/${tail.segmentIndex}/${tail.utf8Offset}/${current.text.isClosed}/${current.text.finalOutputCommitted}`;
+      const delay = cadence.delay(
+        performance.now(),
+        current.text.isClosed || current.text.finalOutputCommitted,
+      );
+      const request = key !== applied && delay === 0;
+      if (key !== applied && !request && timer === undefined)
+        timer = setTimeout(() => {
+          timer = undefined;
+          schedule();
+        }, delay);
+      if (request) cancelTimer();
       reading = true;
       try {
-        if (key !== applied) {
+        if (request) {
           applied = key;
+          cadence.started(performance.now());
           const publication = await view.setRequest(
             display.client.request(current.streamId!, sessionId, current.entry),
             restore,
@@ -134,6 +158,7 @@ export function RichMessageBody(props: RichMessageBodyProps) {
           queued = true;
         } else {
           applied = "";
+          cadence.reset();
           report(cause);
         }
       } finally {
@@ -179,6 +204,7 @@ export function RichMessageBody(props: RichMessageBodyProps) {
       element.ownerDocument.removeEventListener("selectionchange", selectionChanged);
       element.removeEventListener("focusout", selectionChanged);
       cancelAnimationFrame(frame);
+      cancelTimer();
       release();
     };
   }, [

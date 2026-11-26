@@ -20,6 +20,9 @@ indexed full-history navigation, source anchors, selected-span retention and per
 reading intent. The batch reader, exact-entry Core facade and page-owned HTTP adapter
 retain scoped leases: disconnect/shutdown reclaim generations, including late opens.
 Reconnect and shared-scrollport reflow preserve source-based reading positions.
+A visible streaming message requests intermediate formatted generations at most once
+per 100 ms in its mounted view. The first and closed extents bypass this delay;
+the last published formatted view stays readable while a newer one is pending.
 
 At the frozen schema-16 checkpoint, the composed startup passed hosting/lifetime
 checks, real HTTP client integration, UI checks/unit tests/build and normal-app browser
@@ -649,7 +652,8 @@ pipeline. No agent-specific link syntax or explicit sharing tool is needed.
 
 Capture while assistant text is streaming, outside the text-save gate. The same
 image should remain in place across Markdown generations. Pending capture must
-not hold up the text. Preserve Markdown source; serve only committed managed bytes
+not hold up the text. After four streaming scans find no new local image target,
+image capture waits until the response closes before checking the saved prefix again. Preserve Markdown source; serve only committed managed bytes
 through the private browser API, scoped to the transcript message. A failed import
 leaves an alt-text fallback and reopening history never reads the original path.
 References follow the owning entry's history lifetime; the next exclusive host

@@ -13,7 +13,7 @@ namespace Urd.Core.Sessions;
 // Creates, discovers and opens sessions, keeping one live instance per opened session ID.
 // Bounded subagent children are created here too: they are registered under the shutdown fence
 // and unregistered again once their owning run settles and their disposable resources are gone.
-public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQuestions {
+public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQuestions, IUserQuestions {
   public ValueTask DisposeAsync() => new(ShutdownSessionsAsync());
   private readonly UrdStore store;
   private readonly Func<ProviderConnection, IChatClient> createChatClient;
@@ -25,20 +25,31 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
   private readonly FileMutationQueue files = new();
   private readonly WebBrowser browser;
   private readonly AgentQuestions agentQuestions = new();
-  private readonly ReadOnlyCollection<AgentTool> injectedTools = new([]);
+  private readonly ReadOnlyCollection<AgentTool> injectedTools;
   private readonly SessionRegistry registry = new();
+  private readonly SessionToolCatalog toolCatalog;
+  private readonly BrowserViewerAncestry browserViewers;
   private readonly SubagentRuns subagentRuns;
   private readonly AgentRecipients recipients;
   internal BrowserSetupProgress BrowserProgress { get; }
   internal BrowserHost? BrowserHost { get; private set; }
 
-  // Configure before publishing session routes or creating tool catalogs.
+  // Configure before publishing session routes or creating sessions.
   public void ConfigureBrowser(string dataRoot) {
     if (BrowserHost is not null)
       throw new InvalidOperationException("Browser is already configured.");
     BrowserHost = new BrowserHost(dataRoot, sessionId => HasPendingUserQuestionAsync(sessionId));
     BrowserHost.Changed += OnBrowserChanged;
   }
+
+  private void OnBrowserChanged(Guid owner) {
+    if (browserViewers.OwningPrimary(owner) is { } primary)
+      Notify(BrowserChanged, primary);
+  }
+
+  // Registry ancestry identifies live candidates; only persisted ancestry grants viewer access.
+  internal Task<IReadOnlyList<Guid>?> BrowserViewerOwnersAsync(Guid primaryId, CancellationToken cancellation = default) =>
+      browserViewers.OwnersAsync(primaryId, cancellation);
 
   public Guid BootId { get; } = Guid.NewGuid();
 
@@ -53,7 +64,18 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 
   public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null, ModelSelector? modelSelector = null,
-      IRemoteMcpTools? remoteMcpTools = null) {
+      IRemoteMcpTools? remoteMcpTools = null)
+      : this(store, createChatClient, toolSettings, preferences, modelSelector, remoteMcpTools, [],
+          Path.GetPathRoot(Environment.CurrentDirectory)) { }
+
+  // Focused execution tests supply Urd-owned tools without composing Windows processes.
+  internal SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
+      IReadOnlyList<AgentTool> tools, string workingDirectory, ModelSelector? modelSelector = null)
+      : this(store, createChatClient, null, null, modelSelector, null, tools, Path.GetFullPath(workingDirectory)) { }
+
+  private SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
+      AgentToolSettings? toolSettings, PreferenceManager? preferences, ModelSelector? modelSelector,
+      IRemoteMcpTools? remoteMcpTools, IReadOnlyList<AgentTool> injectedTools, string? fallbackWorkingDirectory) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(createChatClient);
     this.store = store;
@@ -63,33 +85,29 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
     RemoteMcpTools = remoteMcpTools;
+    this.injectedTools = Array.AsReadOnly(injectedTools.ToArray());
+    this.fallbackWorkingDirectory = fallbackWorkingDirectory;
+    browserViewers = new BrowserViewerAncestry(store, registry);
     subagentRuns = new SubagentRuns(store, this.preferences, modelSelector, agentQuestions, registry, CreateChild, CloseBrowserOwnerAsync);
     recipients = new AgentRecipients(store, agentQuestions, registry);
-    fallbackWorkingDirectory = Path.GetPathRoot(Environment.CurrentDirectory);
-    if (toolSettings is null)
-      return;
-    if (!OperatingSystem.IsWindows())
-      throw new PlatformNotSupportedException("Agent tools currently require Windows and Git for Windows.");
-    this.toolSettings = toolSettings with {
-      Environment = new ReadOnlyDictionary<string, string>(toolSettings.Environment
-          .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase))
-    };
-    bash = new GitBash(toolSettings.GitBashPath);
-  }
-
-  // Focused execution tests supply Urd-owned tools without composing Windows processes.
-  internal SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
-      IReadOnlyList<AgentTool> tools, string workingDirectory, ModelSelector? modelSelector = null)
-      : this(store, createChatClient, (AgentToolSettings?)null, null, modelSelector) {
-    injectedTools = Array.AsReadOnly(tools.ToArray());
-    fallbackWorkingDirectory = Path.GetFullPath(workingDirectory);
+    if (toolSettings is not null) {
+      if (!OperatingSystem.IsWindows())
+        throw new PlatformNotSupportedException("Agent tools currently require Windows and Git for Windows.");
+      this.toolSettings = toolSettings with {
+        Environment = new ReadOnlyDictionary<string, string>(toolSettings.Environment
+            .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase))
+      };
+      bash = new GitBash(toolSettings.GitBashPath);
+    }
+    toolCatalog = new SessionToolCatalog(this.toolSettings, bash, files, browser, () => BrowserHost,
+        this.injectedTools, this);
   }
 
   public async Task<PrimarySession> CreatePrimaryAsync() {
     PrimarySession session = await registry.RunOpenAsync(() => {
       // Session defaults are captured once; later preference changes apply to new sessions.
       UserPreferences defaults = preferences.Read(fallbackWorkingDirectory);
-      string? workingDirectory = toolSettings is null && injectedTools.Count == 0 ? null : defaults.WorkingDirectory;
+      string? workingDirectory = toolCatalog.ProvidesWorkingDirectory ? defaults.WorkingDirectory : null;
       SessionRecord record = store.Sessions.CreatePrimary(Guid.NewGuid(), workingDirectory, defaults.SubagentProviderConnectionIds);
       return registry.TrackPrimary(CreateSession(record));
     });
@@ -206,7 +224,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     ChatProcesses? processes = null;
     (UserPreferences defaults, ToolCatalog catalog) = await registry.RunOpenAsync(() => {
       UserPreferences defaults = preferences.Read(fallbackWorkingDirectory);
-      ToolCatalog catalog = CreateToolCatalog(new PendingToolCalls(), true, out processes);
+      ToolCatalog catalog = toolCatalog.Create(new PendingToolCalls(), true, out processes);
       return (defaults, catalog);
     }, cancellation);
     // Catalog construction starts no processes; still dispose its empty shell owner.
@@ -220,33 +238,14 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 
   private PrimarySession CreateSession(SessionRecord record) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
+    ToolCatalog catalog = toolCatalog.Create(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
     return new PrimarySession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
   }
 
   private SubagentSession CreateChild(SessionRecord record, int depth) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = CreateToolCatalog(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
+    ToolCatalog catalog = toolCatalog.Create(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
     return new SubagentSession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this, depth);
-  }
-
-  private ToolCatalog CreateToolCatalog(PendingToolCalls pending, bool processTools,
-      out ChatProcesses? processes) {
-    processes = null;
-    AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
-      new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
-      new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(this)];
-    if (BrowserHost is { } browserHost)
-      shared = [.. shared, new BrowserTool(browserHost)];
-    if (toolSettings is null || !processTools)
-      return new([.. injectedTools, .. shared]);
-    if (!OperatingSystem.IsWindows())
-      throw new PlatformNotSupportedException("Agent tools currently require Windows and Git for Windows.");
-    processes = new ChatProcesses(bash!);
-    return new([
-      new ReadTool(files), new WriteTool(files), new EditTool(files),
-      new BashTool(processes, bash!, toolSettings.Environment), .. shared
-    ]);
   }
 
   Task<SubagentRunResult> ISubagentRunner.RunSubagentAsync(HarnessToolContext caller, SubagentRunRequest request,
@@ -257,8 +256,15 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 
   bool IAgentQuestions.AnswerAgent(HarnessToolContext caller, string answer) => recipients.AnswerAgent(caller, answer);
 
+  Task<string> IUserQuestions.AskUserAsync(HarnessToolContext caller, string question, string? context,
+      IReadOnlyList<string> answers, CancellationToken cancellation) =>
+      AskUserAsync(caller, question, context, answers, cancellation);
+
   internal Task<bool> IsSubagentLiveAsync(Guid sessionId) => registry.IsChildAsync(sessionId);
   private Task CloseBrowserOwnerAsync(Guid ownerId) => BrowserHost?.CloseOwnerAsync(ownerId) ?? Task.CompletedTask;
+
+  // Live-handle seam for hosting-free tests: injects children without starting execution.
+  internal SessionRegistry Registry => registry;
 
   internal AgentQuestions Questions => agentQuestions;
   internal IRemoteMcpTools? RemoteMcpTools { get; }

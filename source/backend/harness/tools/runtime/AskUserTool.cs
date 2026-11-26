@@ -3,7 +3,7 @@ using Urd.Core.Sessions;
 
 namespace Urd.Core.Tools;
 
-internal sealed class AskUserTool(SessionManager sessions) : HarnessTool {
+internal sealed class AskUserTool(IUserQuestions userQuestions) : HarnessTool {
   public override string Name => "ask_user";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => "Ask the user one focused question and return their answer verbatim.";
@@ -36,7 +36,7 @@ internal sealed class AskUserTool(SessionManager sessions) : HarnessTool {
     if (answers.Distinct(StringComparer.Ordinal).Count() != answers.Length)
       throw new ArgumentException("Suggested answers must be distinct.");
 
-    string answer = await sessions.AskUserAsync(context, question, explanation, answers, cancellation);
+    string answer = await userQuestions.AskUserAsync(context, question, explanation, answers, cancellation);
     return new ToolOutput(answer, []);
   }
 

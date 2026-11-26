@@ -847,6 +847,92 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
+  public async Task OversizedSnapshotViewReportsTheCutWithinTheOutputBudget() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    Guid owner = Guid.NewGuid();
+    // A fitting view is not cut, so it must not carry the notice.
+    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/flood")));
+    Assert.DoesNotContain("[Snapshot cut", navigated.Text);
+
+    ToolOutput flooded = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Flood")));
+    Assert.Single(SpillPaths(flooded.Text));
+    Assert.True(ToolOutputLimit.Fits(flooded.Text));
+    Assert.Contains("[Snapshot cut. Use snapshot ref= with a kept node's ref to inspect omitted content.]", flooded.Text);
+    ToolOutput scoped = await sandbox.CallAsync(owner, "snapshot", ("ref", RefFor(flooded.Text, "Mark")));
+    Assert.DoesNotContain("[Snapshot cut", scoped.Text);
+    Assert.Contains(RefFor(flooded.Text, "Mark"), scoped.Text);
+  }
+
+  [Fact]
+  public async Task WideSnapshotSpillsCompleteViewWithAnActionableLateRef() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/wide", """
+      <!doctype html><html><body><main id="rows"></main><output id="out">waiting</output>
+      <script>
+        for (let i = 0; i < 1800; i++) {
+          const button = document.createElement('button');
+          button.textContent = `wide-${String(i).padStart(4, '0')}: ${'lantern ridge '.repeat(4)}`;
+          button.onclick = () => document.getElementById('out').textContent = `selected-${i}`;
+          document.getElementById('rows').append(button);
+        }
+      </script></body></html>
+      """);
+    Guid owner = Guid.NewGuid();
+
+    ToolOutput view = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/wide")));
+    string full = await File.ReadAllTextAsync(Assert.Single(SpillPaths(view.Text)));
+    Assert.True(ToolOutputLimit.Fits(view.Text));
+    Assert.Contains("wide-0000", full);
+    Assert.Contains("wide-1799", full);
+
+    ToolOutput clicked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(full, "wide-1799")));
+    Assert.Contains("selected-1799", clicked.Text);
+  }
+
+  // Thirty nested groups each carry over a thousand bytes of text, so the capture overflows
+  // the shared cap through nesting depth alone. The spilled complete view must stay readable,
+  // and a ref that only appears in that saved file must still act without taking a new
+  // snapshot. Chromium's aria snapshot collection degrades: past about forty nested levels
+  // with content-rich names and text it collapses to a root-only stub, and past about
+  // fifty-eight it never returns, so the fixture keeps to thirty levels, which render fast
+  // and complete.
+  [Fact]
+  public async Task DeepSnapshotSpillsCompleteViewWithAnActionableLeafRef() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/deep", """
+      <!doctype html><html><body><main id="root"></main><output id="out">waiting</output>
+      <script>
+        let parent = document.getElementById('root');
+        for (let i = 0; i < 30; i++) {
+          const level = `level-${String(i).padStart(3, '0')}`;
+          const group = document.createElement('div');
+          group.setAttribute('role', 'group');
+          group.setAttribute('aria-label', `${level} group`);
+          group.textContent = `${level}: ${'pale lantern '.repeat(150)}`;
+          parent.append(group);
+          parent = group;
+        }
+        const button = document.createElement('button');
+        button.textContent = 'deep leaf';
+        button.onclick = () => document.getElementById('out').textContent = 'leaf selected';
+        parent.append(button);
+      </script></body></html>
+      """);
+    Guid owner = Guid.NewGuid();
+
+    ToolOutput view = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/deep")));
+    string full = await File.ReadAllTextAsync(Assert.Single(SpillPaths(view.Text)));
+    Assert.True(ToolOutputLimit.Fits(view.Text));
+    Assert.Contains("level-000 group", full);
+    Assert.Contains("level-029 group", full);
+    Assert.Contains("deep leaf", full);
+
+    ToolOutput clicked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(full, "deep leaf")))
+        .WaitAsync(StepTimeout);
+    Assert.Contains("leaf selected", clicked.Text);
+  }
+
+  [Fact]
   public async Task ScopedSnapshotRefsAreClickableAndDoNotReplaceThePageBaseline() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     sandbox.Site.Add("/scoped", """
@@ -869,6 +955,77 @@ public sealed class BrowserToolLoopbackTests {
     Assert.Contains("Changed since browser call ", clicked.Text);
     Assert.Contains("applied", clicked.Text);
     Assert.DoesNotContain("Outside context", clicked.Text);
+  }
+
+  // A scoped snapshot of a subtree that overflows the shared cap must spill the complete capture
+  // once and keep one uniform depth of kept refs in the view, like an oversized full view, not a
+  // blind prefix cut that drops the tail of the subtree
+  [Fact]
+  public async Task OversizedScopedSnapshotSpillsCompleteSubtreeWithAFittingDepthView() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/forest", """
+      <!doctype html><html><body>
+      <p>Grove index signage: this header stays outside the groups below.</p>
+      <output id="out">quiet</output>
+      <section aria-label="Forest" id="forest"></section>
+      <script>
+        let html = '';
+        for (let i = 0; i < 340; i++)
+          html += `<div role="group" aria-label="grove-${String(i).padStart(3, '0')}"
+              onclick="document.getElementById('out').textContent += ' picked'"
+              ><p>grove detail: ${'mossy ridge '.repeat(10)}</p></div>`;
+        document.getElementById('forest').innerHTML = html;
+      </script></body></html>
+      """);
+    Guid owner = Guid.NewGuid();
+    ToolOutput view = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/forest")));
+    string wholePage = await File.ReadAllTextAsync(Assert.Single(SpillPaths(view.Text)));
+    Assert.True(ToolOutputLimit.Fits(view.Text));
+
+    ToolOutput scoped = await sandbox.CallAsync(owner, "snapshot", ("ref", RefFor(wholePage, "Forest")));
+    string spill = Assert.Single(SpillPaths(scoped.Text));
+    Assert.Contains("urd-browser-snapshot-", spill);
+    Assert.True(ToolOutputLimit.Fits(scoped.Text));
+    string subtree = await File.ReadAllTextAsync(spill);
+    Assert.Contains("grove-000", subtree);
+    Assert.Contains("grove-339", subtree);
+    Assert.Contains("mossy ridge", subtree);
+    Assert.Contains("grove-000", scoped.Text);
+    Assert.Contains("grove-339", scoped.Text);
+    Assert.DoesNotContain("mossy ridge", scoped.Text);
+
+    ToolOutput picked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(scoped.Text, "grove-339")))
+        .WaitAsync(StepTimeout);
+    Assert.Contains("picked", picked.Text);
+  }
+
+  // Background results can be delivered out of capture order, so their captures must never
+  // become the baseline: the next foreground action then has no baseline to diff against and
+  // shows its own complete capture, not a diff against the unordered background view.
+  [Fact]
+  public async Task BackgroundSnapshotDoesNotBecomeThePageBaseline() {
+    await using Sandbox sandbox = await Sandbox.StartAsync();
+    sandbox.Site.Add("/stable", """
+      <!doctype html><html><body>
+      <p>stationary boardwalk signage</p>
+      <button onclick="document.getElementById('out').textContent = 'clicked'">Act</button>
+      <output id="out">idle</output>
+      </body></html>
+      """);
+    Guid owner = Guid.NewGuid();
+    await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/stable")));
+    await sandbox.CallAsync(owner, "evaluate",
+        ("expression", "document.getElementById('out').textContent = 'prepped'"));
+
+    sandbox.Background = true;
+    ToolOutput background = await sandbox.CallAsync(owner, "snapshot");
+    sandbox.Background = false;
+    Assert.Contains("prepped", background.Text);
+
+    ToolOutput clicked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(background.Text, "Act")));
+    Assert.Contains("clicked", clicked.Text);
+    Assert.DoesNotContain("Changed since browser call ", clicked.Text);
+    Assert.Contains("stationary boardwalk signage", clicked.Text);
   }
 
   // The ref matches nothing, so the scoped snapshot fails fast; the diagnostics it drained must

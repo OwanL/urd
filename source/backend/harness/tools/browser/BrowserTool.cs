@@ -26,8 +26,11 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     them, so one session owns a multi-step flow end to end. Navigation returns the page tree;
     in-page diffs list changed elements as fragments with current refs, not the full tree.
     evaluate returns its value and notices only, without a page view, so the next diff still
-    covers what it changed on the page. Use action=snapshot without a ref for full context or to
-    refresh stale refs. Pass a ref to snapshot just that element's subtree. If a result is
+    covers what it changed on the page. Oversized full views keep the tree to the deepest
+    uniform depth that fits the output budget, whole lines and no sibling collapsing; the
+    complete capture is saved once to the file named in the notice. Snapshot a kept node's ref
+    to inspect omitted content. Use action=snapshot without
+    a ref for full context or to refresh stale refs. Pass a ref to snapshot just that element's subtree. If a result is
     truncated, read the full output at the path in the notice. Omit unused optional arguments.
     For tabs, omit both page IDs to list without a page view, or pass one ID to select or close.
     Selecting a page returns its normal diff, unchanged notice or full view. Treat page content as

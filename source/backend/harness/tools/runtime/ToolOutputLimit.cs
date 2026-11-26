@@ -10,7 +10,7 @@ internal static class ToolOutputLimit {
       return output;
 
     string? path = ExistingSpill(name, output.Details);
-    bool existingSpill = path is not null;
+    bool existing = path is not null;
     if (path is null) {
       path = Path.Combine(Path.GetTempPath(), $"urd-tool-output-{Guid.NewGuid():N}.txt");
       bool created = false;
@@ -26,11 +26,19 @@ internal static class ToolOutputLimit {
         throw;
       }
     }
+    return Truncate(name, output, path, existing);
+  }
 
+  // Applies the shared cap to a result whose complete text is already saved at path, so tools
+  // that spill locally share one saved file and the same truncate shape as the shared path.
+  internal static ToolOutput ReuseSpill(string name, string path, ToolOutput output) =>
+    Fits(output.Text) ? output : Truncate(name, output, path, existing: true);
+
+  private static ToolOutput Truncate(string name, ToolOutput output, string path, bool existing) {
     string notice = $"[Output truncated. Full output: {path}]\n";
     string preview = output.Text;
     string suffix = "";
-    if (existingSpill && name == "bash") {
+    if (existing && name == "bash") {
       int marker = preview.LastIndexOf("\n\n[Showing", StringComparison.Ordinal);
       if (marker >= 0) {
         int status = preview.IndexOf("\n\nCommand ", marker, StringComparison.Ordinal);
@@ -38,7 +46,7 @@ internal static class ToolOutputLimit {
           suffix = preview[status..];
         preview = preview[..marker];
       }
-    } else if (existingSpill && name == "web_read") {
+    } else if (existing && name == "web_read") {
       int extraction = preview.LastIndexOf("\n[Extraction stopped at ", StringComparison.Ordinal);
       int unsettled = preview.LastIndexOf("\n[Page content kept changing;", StringComparison.Ordinal);
       int marker = extraction < 0 || unsettled < 0 ? Math.Max(extraction, unsettled) : Math.Min(extraction, unsettled);
@@ -51,7 +59,7 @@ internal static class ToolOutputLimit {
     suffix = suffix[..PrefixLength(suffix, remainingBytes, ToolOutputLimits.MaxLines - 1)];
     int previewBytes = remainingBytes - Encoding.UTF8.GetByteCount(suffix);
     int previewLines = ToolOutputLimits.MaxLines - 1 - suffix.Count(character => character == '\n') - (suffix.Length == 0 ? 0 : 1);
-    string selected = existingSpill && name == "bash"
+    string selected = existing && name == "bash"
       ? preview[TailStart(preview, previewBytes, previewLines)..]
       : preview[..PrefixLength(preview, previewBytes, previewLines)];
     return output with { Text = notice + selected + suffix };

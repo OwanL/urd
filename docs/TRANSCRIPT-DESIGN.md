@@ -603,6 +603,41 @@ with new references, active publication and readers/tool uses: a zero-reference 
 SQLite snapshot does not pin a file, and delays or repeat scans do not close the race.
 The exact exclusion/lease mechanism remains unselected for general attachments.
 
+#### Proposed adaptive oversized browser views — prototype gate, not selected
+
+Scope this proposal to an explicitly opened, oversized tool result or file reference in
+its owning transcript entry. It supplements the normal result card; it does not change
+the model-facing result, producer-side reduction/spill policy, ordinary replies, or
+history retention. A displayed reference is not proof that the model opened or consumed
+its target. Do not dereference arbitrary path-looking text or turn temporary tool paths
+into durable attachments.
+
+Use the complete file/raw representation as the comparison baseline. Keep the
+model-facing result and any referenced file visibly distinct; do not imply that a
+referenced file was sent to the model. An adaptive view may change how much content is
+loaded or rendered at once, but must retain access to the complete source without
+presenting a preview or excerpt as the whole result. No size threshold, presentation,
+or fetch strategy is selected.
+
+Reference expansion is explicit and on demand. Resolve only references supplied by an
+applicable supported contract; preserve the original result while loading, and report a
+missing, unreadable, or unsupported target as unavailable rather than silently replacing
+it, rereading a mutable source, or dropping the reference. When expansion is unavailable,
+the complete raw result remains the fallback where available; otherwise show the
+unavailable state without inventing content. Reads and mounted/rendered resources remain
+bounded and releasable.
+
+Before production integration, build a disposable prototype and compare the adaptive
+view against the complete-file/raw baseline on representative oversized inputs. Check
+content fidelity and navigation, reference expansion and failure fallback, first-use and
+expanded-view responsiveness, read volume, and browser/backend resource retention under
+scrolling and repeated open/close. Report measured conditions and limitations; existing
+latency targets are not automatically a benchmark pass for this feature. The prototype
+is an evidence gate, not approval of a UI, threshold, dependency, or production change.
+The backend snapshot-depth prototype ran this gate with real agents: 3 runs per arm over
+an oversized-inbox workload, all 12 responses correct, adaptive depth 49% cheaper than
+the complete view, and the fixed-depth negative control neutral on the grid.
+
 #### Assistant local-image embeds
 
 The first managed-image slice is assistant-to-user display, independent of model
@@ -664,8 +699,10 @@ source, not by asking the owner. Update this document immediately after decision
 7. **On-demand payloads/media:** automatic near-viewport loading of external Markdown
    images is approved; URLs stay external and no managed copies are created.
    Also cover inspector lifecycle, large model-facing results, clipboard uploads,
-   attachment publication/cleanup and image preview/viewer release. Display rendering
-   does not imply provider image delivery.
+   attachment publication/cleanup and image preview/viewer release. Prototype the
+   scoped adaptive oversized browser view against the complete-file/raw baseline before
+   production integration; reference expansion must have an explicit unavailable fallback.
+   Display rendering does not imply provider image delivery.
 8. **Budgets and qualification:** representative workload sizes, numeric latency
    and resource targets, cache/overscan policies, contention and failure cases.
 9. **Implementation sequencing:** bounded milestones and ownership only after

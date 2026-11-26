@@ -1,255 +1,28 @@
-import { useEffect, useRef, useState } from "preact/hooks";
-import { requestJson } from "../http/Requests.ts";
-import { RequestError } from "../http/RequestError.ts";
+import { useRef } from "preact/hooks";
+import type { McpAuthentication } from "./McpServer.ts";
+import type { McpConnectProblem } from "./McpConnectRequest.ts";
+import type { McpSettingsState } from "./useMcpSettings.ts";
 import "./mcp-settings.css";
 
-type Authentication = "automatic" | "bearerToken" | "customHeader";
-interface McpServer {
-  id: string;
-  name: string;
-  url: string;
-  authentication: Authentication;
-  tools: string[];
-}
-interface Operation {
-  state: "connecting" | "signIn" | "connected" | "failed";
-  authorizationUrl: string | null;
-  message: string | null;
-}
-const endpoint = (path: string) => new URL(`/api/${path}`, window.location.origin);
-const errorMessage = (error: unknown) =>
-  error instanceof Error ? error.message : "Request failed.";
-
-// Owned by Settings so drafts and accepted operations survive closing the popover.
-export function useMcpSettings(active: boolean) {
-  const [servers, setServers] = useState<McpServer[] | null>(null);
-  const [screen, setScreen] = useState<"list" | "add" | "detail">("list");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [url, setUrl] = useState("");
-  const [authentication, setAuthentication] = useState<Authentication>("automatic");
-  const [headerName, setHeaderName] = useState("");
-  const [credential, setCredential] = useState("");
-  const [error, setError] = useState("");
-  const [loadError, setLoadError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [operationId, setOperationId] = useState<string | null>(null);
-  const [operation, setOperation] = useState<Operation | null>(null);
-  const command = useRef(false);
-  const generation = useRef(0);
-  const pollGeneration = useRef(0);
-
-  function clearForm() {
-    setUrl("");
-    setAuthentication("automatic");
-    setHeaderName("");
-    setCredential("");
-  }
-  async function reload() {
-    const version = ++generation.current;
-    try {
-      const result = await requestJson<McpServer[]>(endpoint("mcp-servers"), "GET");
-      if (version === generation.current) {
-        setServers(result);
-        setLoadError("");
-      }
-    } catch (e) {
-      if (version === generation.current)
-        setLoadError(`Could not load servers: ${errorMessage(e)}`);
-    }
-  }
-  useEffect(() => {
-    if (active) void reload();
-  }, [active]);
-  useEffect(() => {
-    if (!operationId) return;
-    let stopped = false;
-    const version = ++pollGeneration.current;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      try {
-        const result = await requestJson<Operation>(
-          endpoint(`mcp-operations/${encodeURIComponent(operationId)}`),
-          "GET",
-        );
-        if (stopped || version !== pollGeneration.current) return;
-        setOperation(result);
-        setError("");
-        if (result.state === "connected") {
-          setOperationId(null);
-          setOperation(null);
-          clearForm();
-          setScreen("list");
-          void reload();
-        } else if (result.state !== "failed") timer = setTimeout(() => void poll(), 1000);
-      } catch (e) {
-        if (!stopped && version === pollGeneration.current) {
-          if (e instanceof RequestError && e.status === 404) {
-            setError("");
-            setOperation({
-              state: "failed",
-              authorizationUrl: null,
-              message: "Connection operation no longer available. Check the server list.",
-            });
-            setCredential("");
-            void reload();
-          } else {
-            setError(`Could not check connection: ${errorMessage(e)}`);
-            timer = setTimeout(() => void poll(), 3000);
-          }
-        }
-      }
-    };
-    void poll();
-    return () => {
-      stopped = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [operationId]);
-
-  async function start(path: string, body: unknown) {
-    if (command.current || operationId) return;
-    command.current = true;
-    setBusy(true);
-    setError("");
-    setOperation(null);
-    try {
-      const result = await requestJson<{ id: string }>(endpoint(path), "POST", body);
-      setOperationId(result.id);
-    } catch (e) {
-      setError(`Could not start connection: ${errorMessage(e)}`);
-    } finally {
-      command.current = false;
-      setBusy(false);
-    }
-  }
-  async function cancel() {
-    if (!operationId || command.current) return;
-    if (operation?.state === "failed") {
-      setOperationId(null);
-      setOperation(null);
-      setCredential("");
-      setError("");
-      return;
-    }
-    command.current = true;
-    setBusy(true);
-    setError("");
-    try {
-      await requestJson<unknown>(
-        endpoint(`mcp-operations/${encodeURIComponent(operationId)}`),
-        "DELETE",
-      );
-      ++pollGeneration.current;
-      setOperationId(null);
-      setOperation(null);
-      setCredential("");
-      void reload();
-    } catch (e) {
-      if (e instanceof RequestError && e.status === 404) {
-        ++pollGeneration.current;
-        setOperationId(null);
-        setOperation(null);
-        setCredential("");
-        void reload();
-      } else setError(`Could not cancel connection: ${errorMessage(e)}`);
-    } finally {
-      command.current = false;
-      setBusy(false);
-    }
-  }
-  async function remove(id: string) {
-    if (command.current || operationId) return;
-    command.current = true;
-    setBusy(true);
-    setError("");
-    try {
-      await requestJson<unknown>(endpoint(`mcp-servers/${encodeURIComponent(id)}`), "DELETE");
-      setScreen("list");
-      await reload();
-    } catch (e) {
-      setError(`Could not remove server: ${errorMessage(e)}`);
-    } finally {
-      command.current = false;
-      setBusy(false);
-    }
-  }
-  return {
-    servers,
-    screen,
-    setScreen,
-    selected,
-    setSelected,
-    url,
-    setUrl,
-    authentication,
-    setAuthentication,
-    headerName,
-    setHeaderName,
-    credential,
-    setCredential,
-    error,
-    setError,
-    loadError,
-    clearForm,
-    stopTracking: () => {
-      ++pollGeneration.current;
-      setOperationId(null);
-      setOperation(null);
-      setCredential("");
-      setError("Connection status unknown. Check the server list.");
-      void reload();
-    },
-    busy,
-    operationId,
-    operation,
-    start,
-    cancel,
-    remove,
-    reload,
-  };
-}
-
-type State = ReturnType<typeof useMcpSettings>;
-export function McpSettings({ state }: { state: State }) {
+export function McpSettings({ state }: { state: McpSettingsState }) {
   const heading = useRef<HTMLHeadingElement>(null);
   const urlInput = useRef<HTMLInputElement>(null);
   const headerInput = useRef<HTMLInputElement>(null);
   const credentialInput = useRef<HTMLInputElement>(null);
-  const server = state.servers?.find((item) => item.id === state.selected);
+  const server = state.servers?.find((item) => item.id === state.selectedId);
   const pending = state.busy || !!state.operationId;
+  const focusProblemField = (problem: McpConnectProblem | null) => {
+    if (problem === "url") urlInput.current?.focus();
+    else if (problem === "headerName") headerInput.current?.focus();
+    else if (problem === "credential") credentialInput.current?.focus();
+  };
   const go = (screen: "list" | "add" | "detail") => {
-    state.setError("");
-    if (!pending && (screen === "add" || (screen === "list" && state.screen === "add")))
-      state.clearForm();
-    state.setScreen(screen);
+    state.actions.show(screen);
     requestAnimationFrame(() => heading.current?.focus());
   };
   const submit = (event: Event) => {
     event.preventDefault();
-    try {
-      const parsed = new URL(state.url.trim());
-      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error();
-    } catch {
-      state.setError("Enter a valid HTTP or HTTPS URL.");
-      urlInput.current?.focus();
-      return;
-    }
-    if (state.authentication === "customHeader" && !state.headerName.trim()) {
-      state.setError("Enter a header name.");
-      headerInput.current?.focus();
-      return;
-    }
-    if (state.authentication !== "automatic" && !state.credential.trim()) {
-      state.setError("Enter a credential.");
-      credentialInput.current?.focus();
-      return;
-    }
-    void state.start("mcp-servers", {
-      url: state.url.trim(),
-      authentication: state.authentication,
-      headerName: state.authentication === "customHeader" ? state.headerName.trim() : null,
-      credential: state.authentication === "automatic" ? null : state.credential,
-    });
+    focusProblemField(state.actions.connect());
   };
   let authorizationUrl: string | null = null;
   try {
@@ -292,7 +65,7 @@ export function McpSettings({ state }: { state: State }) {
                   <button
                     type="button"
                     onClick={() => {
-                      state.setSelected(item.id);
+                      state.actions.select(item.id);
                       go("detail");
                     }}
                   >
@@ -314,44 +87,48 @@ export function McpSettings({ state }: { state: State }) {
               ref={urlInput}
               type="url"
               required
-              value={state.url}
+              value={state.form.url}
               disabled={pending}
-              onInput={(e) => state.setUrl(e.currentTarget.value)}
+              onInput={(e) => state.actions.editForm({ url: e.currentTarget.value })}
             />
           </label>
           <label>
             Authentication
             <select
-              value={state.authentication}
+              value={state.form.authentication}
               disabled={pending}
-              onChange={(e) => state.setAuthentication(e.currentTarget.value as Authentication)}
+              onChange={(e) =>
+                state.actions.editForm({
+                  authentication: e.currentTarget.value as McpAuthentication,
+                })
+              }
             >
               <option value="automatic">Automatic</option>
               <option value="bearerToken">Bearer token</option>
               <option value="customHeader">Custom header</option>
             </select>
           </label>
-          {state.authentication === "customHeader" && (
+          {state.form.authentication === "customHeader" && (
             <label>
               Header name
               <input
                 ref={headerInput}
-                value={state.headerName}
+                value={state.form.headerName}
                 disabled={pending}
-                onInput={(e) => state.setHeaderName(e.currentTarget.value)}
+                onInput={(e) => state.actions.editForm({ headerName: e.currentTarget.value })}
               />
             </label>
           )}
-          {state.authentication !== "automatic" && (
+          {state.form.authentication !== "automatic" && (
             <label>
-              {state.authentication === "bearerToken" ? "Bearer token" : "Header value"}
+              {state.form.authentication === "bearerToken" ? "Bearer token" : "Header value"}
               <input
                 ref={credentialInput}
                 type="password"
                 autocomplete="off"
-                value={state.credential}
+                value={state.form.credential}
                 disabled={pending}
-                onInput={(e) => state.setCredential(e.currentTarget.value)}
+                onInput={(e) => state.actions.editForm({ credential: e.currentTarget.value })}
               />
             </label>
           )}
@@ -374,13 +151,6 @@ export function McpSettings({ state }: { state: State }) {
           </p>
           <div>
             <strong>Discovered tools ({server.tools.length})</strong>
-            <p>
-              Agents and subagents can call these tools in new turns, including in existing chats.
-            </p>
-            <p>
-              Paused while LAN hosting is active. Changes apply to new turns; stopping a turn or
-              removing this server may not undo effects of calls already in progress.
-            </p>
             {server.tools.length > 0 && (
               <ul>
                 {server.tools.map((tool) => (
@@ -393,13 +163,15 @@ export function McpSettings({ state }: { state: State }) {
             <button
               type="button"
               disabled={pending}
-              onClick={() =>
-                void state.start(`mcp-servers/${encodeURIComponent(server.id)}/reconnect`, {})
-              }
+              onClick={() => state.actions.reconnect(server.id)}
             >
               Reconnect
             </button>
-            <button type="button" disabled={pending} onClick={() => void state.remove(server.id)}>
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => void state.actions.remove(server.id)}
+            >
               Remove
             </button>
           </div>
@@ -423,7 +195,7 @@ export function McpSettings({ state }: { state: State }) {
             ) : (
               <p>Sign-in link unavailable.</p>
             ))}
-          <button type="button" disabled={state.busy} onClick={() => void state.cancel()}>
+          <button type="button" disabled={state.busy} onClick={() => void state.actions.cancel()}>
             {state.operation?.state === "failed" ? "Dismiss" : "Cancel"}
           </button>
         </div>
@@ -432,7 +204,7 @@ export function McpSettings({ state }: { state: State }) {
         <div class="mcp-error" role="alert">
           {state.error}
           {state.operationId && !state.busy && (
-            <button type="button" onClick={state.stopTracking}>
+            <button type="button" onClick={state.actions.stopTracking}>
               Stop tracking
             </button>
           )}
@@ -441,7 +213,7 @@ export function McpSettings({ state }: { state: State }) {
       {state.loadError && (
         <div class="mcp-error" role="alert">
           {state.loadError}
-          <button type="button" onClick={() => void state.reload()}>
+          <button type="button" onClick={() => void state.actions.read()}>
             Retry
           </button>
         </div>

@@ -42,8 +42,8 @@ public static class RemoteMcpProbe {
       return await WithClientAsync(options, null, client => ListToolsAsync(client, cancellationToken), cancellationToken);
     } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) {
       throw;
-    } catch (Exception) {
-      throw new InvalidOperationException("Unable to discover MCP tools.");
+    } catch (Exception exception) {
+      throw new InvalidOperationException("Unable to discover MCP tools.", exception);
     }
   }
 

@@ -1,5 +1,8 @@
+using System.Reflection;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Microsoft.Win32.SafeHandles;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Context;
 using Urd.Core.Execution;
@@ -308,6 +311,55 @@ public sealed class SubagentRunTests {
         default:
           throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.");
       }
+    }
+  }
+
+  [Fact]
+  [SupportedOSPlatform("windows")]
+  public async Task ManagerShutdownRetriesAFailedChildJobKill() {
+    if (!OperatingSystem.IsWindows())
+      return;
+    var client = new ScriptedChatClient((request, token) => TextUpdates([request.Purpose switch {
+      "title" => ChildTitle,
+      "conversation" => ChildReport,
+      _ => PrepassTolerantChatClient.KeepAll(request.Messages)
+    }], token));
+    await using var fixture = await SubagentRunFixture.OpenAsync(client);
+    int killAttempts = 0;
+    bool jobHadProcesses = false;
+    await using var chat = new ChatProcesses(new GitBash(), KillJobAsync);
+    var registry = (SessionRegistry)typeof(SessionManager)
+        .GetField("registry", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(fixture.Manager)!;
+    AgentQuestions questions = fixture.Manager.Questions;
+    var runs = new SubagentRuns(fixture.Store, new PreferenceManager(fixture.Store), fixture.Selector,
+        questions, registry, CreateChild, _ => Task.CompletedTask);
+    HarnessToolContext caller = Caller(fixture);
+
+    await Assert.ThrowsAsync<ToolCleanupException>(() => runs.RunSubagentAsync(
+        caller, new("small", false, AssignmentTask), CancellationToken.None).WaitAsync(TestTimeout));
+    Assert.Equal(1, killAttempts);
+    Assert.True(jobHadProcesses);
+    SessionRecord child = ChildForCall(fixture, caller.CallId);
+    Assert.False(await fixture.Manager.IsSubagentLiveAsync(child.Id).WaitAsync(TestTimeout));
+    AgentQuestionResult lateQuestion = await questions.Enqueue(child.Id, caller.SessionId, caller.RequestId,
+        "late-question", "Are you still there?", wake: false, CancellationToken.None).WaitAsync(TestTimeout);
+    Assert.Equal(AgentQuestions.RecipientFinished, lateQuestion.Error);
+
+    await fixture.Manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
+    Assert.Equal(2, killAttempts);
+
+    SubagentSession CreateChild(SessionRecord record, int depth) {
+      chat.StartBash("exec sleep 60", fixture.DatabaseDirectory, new Dictionary<string, string>(), _ => { });
+      return new SubagentSession(record, fixture.Store, _ => client, processes: chat, depth: depth);
+    }
+
+    async Task KillJobAsync(SafeFileHandle job) {
+      if (Interlocked.Increment(ref killAttempts) == 1) {
+        jobHadProcesses = WindowsShell.ActiveProcesses(job) > 0;
+        throw new TimeoutException("Injected chat-job kill failure.");
+      }
+      WindowsShell.Terminate(job);
+      await WindowsShell.WaitForEmptyAsync(job);
     }
   }
 
@@ -1247,6 +1299,7 @@ public sealed class SubagentRunTests {
     private readonly ScriptedChatClient Client;
 
     internal SessionManager Manager { get; }
+    internal ModelSelector Selector { get; }
     internal Guid ParentSessionId { get; }
     internal UrdStore Store => store;
     internal TemporaryDatabase Database => database;
@@ -1258,9 +1311,10 @@ public sealed class SubagentRunTests {
       providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"),
           new ScriptedOpenAIHandler(BucketCatalog, "application/json"));
       Client = client;
+      Selector = new ModelSelector(providers);
       Manager = tools is null
-          ? new SessionManager(store, _ => client, modelSelector: new ModelSelector(providers))
-          : new SessionManager(store, _ => client, tools, DatabaseDirectory, new ModelSelector(providers));
+          ? new SessionManager(store, _ => client, modelSelector: Selector)
+          : new SessionManager(store, _ => client, tools, DatabaseDirectory, Selector);
       ParentSessionId = store.Sessions.CreatePrimary(Guid.NewGuid(), DatabaseDirectory).Id;
     }
 

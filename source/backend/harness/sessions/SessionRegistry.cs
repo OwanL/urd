@@ -7,6 +7,7 @@ internal sealed class SessionRegistry {
   private readonly AsyncLock sessionsLock = new();
   private readonly Dictionary<Guid, PrimarySession> sessions = new();
   private readonly Dictionary<Guid, SubagentSession> children = new();
+  private readonly List<SubagentSession> childrenPendingProcessCleanup = [];
   private volatile TaskCompletionSource? shutdown;
 
   internal async Task<T> RunOpenAsync<T>(Func<T> work, CancellationToken cancellation = default) {
@@ -41,9 +42,12 @@ internal sealed class SessionRegistry {
     sessions.Remove(id);
   }
 
-  internal async Task UntrackChildAsync(Guid id) {
+  internal async Task UntrackChildAsync(Guid id, bool retainForShutdown = false) {
     using var held = await sessionsLock.AcquireAsync();
-    children.Remove(id);
+    // A finished child is no longer addressable. Keep failed process owners for shutdown
+    // unless its snapshot already took ownership of this child.
+    if (children.Remove(id, out SubagentSession? child) && retainForShutdown && shutdown is null)
+      childrenPendingProcessCleanup.Add(child);
   }
 
   internal async Task<bool> IsChildAsync(Guid id) {
@@ -76,7 +80,8 @@ internal sealed class SessionRegistry {
     if (shutdown is null) {
       shutdown = new(TaskCreationOptions.RunContinuationsAsynchronously);
       questions.CloseAll();
-      handles = [.. sessions.Values, .. children.Values];
+      handles = [.. sessions.Values, .. children.Values, .. childrenPendingProcessCleanup];
+      childrenPendingProcessCleanup.Clear();
     }
     return (shutdown, handles);
   }

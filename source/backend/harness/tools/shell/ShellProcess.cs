@@ -59,22 +59,13 @@ internal sealed class ShellProcess : IAsyncDisposable {
     }
   }
 
-  internal async Task CloseWithChatAsync() {
-    Task cleanup;
+  internal Task CloseWithChatAsync() {
     lock (stateLock) {
       keepBackgroundProcesses = false;
-      cleanup = cancellation ??= CancelCoreAsync();
-    }
-    try {
-      await cleanup.ConfigureAwait(false);
-    } finally {
-      // Kill-on-close remains the fallback if explicit cleanup failed; the failure is preserved.
-      lock (stateLock) {
-        if (completion.IsCompleted) {
-          job.Dispose();
-          reclaimed = true;
-        }
-      }
+      // A previous call cancellation or chat shutdown may not have emptied the job.
+      if (cancellation is null || cancellation.IsFaulted)
+        cancellation = CancelCoreAsync();
+      return cancellation;
     }
   }
 
@@ -93,17 +84,20 @@ internal sealed class ShellProcess : IAsyncDisposable {
     } catch (Exception failure) {
       failures.Add(failure);
     }
+    bool jobEmpty = failures.Count == 0;
     try {
       await completion.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
     } catch (Exception failure) {
       failures.Add(failure);
     }
+    if (jobEmpty && completion.IsCompleted) {
+      lock (stateLock) {
+        job.Dispose();
+        reclaimed = true;
+      }
+    }
     if (failures.Count != 0)
       throw new AggregateException("Shell cancellation or output cleanup failed.", failures);
-    lock (stateLock) {
-      job.Dispose();
-      reclaimed = true;
-    }
   }
 
   internal static void DrainAvailableOutput(Stream stream, int available, byte[] buffer, Action<ReadOnlyMemory<byte>> receiveOutput) {

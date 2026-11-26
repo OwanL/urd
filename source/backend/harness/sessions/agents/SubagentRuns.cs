@@ -32,13 +32,15 @@ internal sealed class SubagentRuns(
   }
 
   private async Task CleanupChildAsync(SubagentSession child) {
+    Task? processCleanup = null;
     try {
-      await Task.WhenAll(child.KillProcessesAsync(), closeBrowserOwner(child.Id));
+      processCleanup = child.KillProcessesAsync();
+      await Task.WhenAll(processCleanup, closeBrowserOwner(child.Id));
     } catch (Exception failure) {
       throw new ToolCleanupException("Subagent resource cleanup failed.", failure);
     } finally {
       questions.CloseRecipient(child.Id);
-      await registry.UntrackChildAsync(child.Id);
+      await registry.UntrackChildAsync(child.Id, retainForShutdown: processCleanup is { IsCompletedSuccessfully: false });
     }
   }
 

@@ -210,6 +210,31 @@ public sealed class MessageMarkdownSchedulerTests {
     using var blocker = blocking is null ? null : await blocking;
   }
 
+  [Fact]
+  public async Task LastInterestCancelledDuringCaptureSkipsParsing() {
+    var abandonedKey = Key(Large);
+    var capturing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var captured = new TaskCompletionSource<MessageMarkdownSource>(TaskCreationOptions.RunContinuationsAsynchronously);
+    int abandonedParses = 0;
+    await using var scheduler = CreateScheduler(parse: source => {
+      if (source.Message == abandonedKey.Message) Interlocked.Increment(ref abandonedParses);
+      return MarkdownParser.Parse(source.Source);
+    });
+    using var cancellation = new CancellationTokenSource();
+    var abandoned = scheduler.RequestAsync(abandonedKey, async _ => {
+      capturing.SetResult();
+      return await captured.Task.WaitAsync(Timeout);
+    }, cancellation.Token);
+    await capturing.Task.WaitAsync(Timeout);
+    await cancellation.CancelAsync();
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => abandoned);
+    captured.SetResult(Source(abandonedKey, Large));
+
+    // The same lane cannot reach this request until the abandoned capture returns.
+    using var next = await Ready(scheduler, Key(Large), Large).WaitAsync(Timeout);
+    Assert.Equal(0, abandonedParses);
+  }
+
   [Theory]
   [InlineData(false)]
   [InlineData(true)]

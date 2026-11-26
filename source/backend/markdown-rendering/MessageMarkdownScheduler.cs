@@ -273,7 +273,10 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
 
   void Process(Work work) {
     try {
-      var source = CaptureSource(work);
+      if (!CanContinue(work)) return;
+      var source = work.Capture!(shutdown.Token).GetAwaiter().GetResult();
+      if (!work.Key.MatchesSource(source)) throw new MarkdownUnavailableException();
+      if (!CanContinue(work)) return;
       var index = parse!(source); // Synchronous parsing is deliberately non-cancellable.
       if (index.SourceUtf8Bytes != source.Utf8Bytes) throw new MarkdownUnavailableException();
       lock (gate) Publish(work, source, index);
@@ -282,18 +285,27 @@ internal sealed class MessageMarkdownScheduler : IAsyncDisposable {
     }
   }
 
-  MessageMarkdownSource CaptureSource(Work work) {
-    var source = work.Capture!(shutdown.Token).GetAwaiter().GetResult();
-    if (!work.Key.MatchesSource(source)) throw new MarkdownUnavailableException();
-    return source;
+  bool CanContinue(Work work) {
+    lock (gate) {
+      if (HasInterest(work)) return true;
+      // Do not let a retry join work this worker has decided to abandon.
+      work.Accepting = false;
+      return false;
+    }
+  }
+
+  bool HasInterest(Work work) {
+    if (disposed || work.Invalidated) return false;
+    for (int index = work.Interests.Count - 1; index >= 0; index--) {
+      var interest = work.Interests[index];
+      if (interest.Cancellation.IsCancellationRequested) Cancel(interest);
+    }
+    return work.Interests.Count > 0;
   }
 
   void Publish(Work work, MessageMarkdownSource source, MarkdownRenderIndex index) {
-    if (disposed || work.Invalidated) return;
     work.Accepting = false;
-    foreach (var interest in work.Interests.ToArray())
-      if (interest.Cancellation.IsCancellationRequested) Cancel(interest);
-    if (work.Interests.Count == 0) return;
+    if (!HasInterest(work)) return;
     var entry = cache.Add(work.Key, source, index);
     foreach (var interest in work.Interests.ToArray()) {
       var lease = Lease(entry); // Pin before completing any observer's task.

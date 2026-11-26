@@ -23,8 +23,8 @@ internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     try {
       string path = ToolArguments.RequireString(arguments, "path");
-      int offset = PositiveInteger(arguments, "offset", 1);
-      int limit = PositiveInteger(arguments, "limit", int.MaxValue);
+      int offset = ToolArguments.OptionalInteger(arguments, "offset", 1, 1);
+      int limit = ToolArguments.OptionalInteger(arguments, "limit", 1, int.MaxValue);
       string absolutePath = ToolPaths.Resolve(path, context.WorkingDirectory);
       // Admission precedes any I/O await, so reads observe earlier mutations in the reply.
       return await files.ReadAfterMutationsAsync(absolutePath,
@@ -33,16 +33,8 @@ internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
       return new ToolOutput("read cancelled.", [], IsError: true);
     } catch (DecoderFallbackException) {
       return new ToolOutput("read failed: file is not valid UTF-8 text or a supported image. Use bash for binary inspection.", [], IsError: true);
-    } catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or KeyNotFoundException or NotSupportedException) {
+    } catch (Exception error) when (ToolFailures.IsExpected(error)) {
       return new ToolOutput($"read failed: {error.Message}", [], IsError: true);
     }
-  }
-
-  private static int PositiveInteger(JsonElement arguments, string name, int fallback) {
-    if (!arguments.TryGetProperty(name, out JsonElement value))
-      return fallback;
-    if (value.ValueKind != JsonValueKind.Number || !value.TryGetInt32(out int number) || number < 1)
-      throw new ArgumentException($"{name} must be a positive integer.");
-    return number;
   }
 }

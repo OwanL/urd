@@ -88,7 +88,7 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
     try {
       return await ActAsync(action, arguments, context, cancellation).ConfigureAwait(false);
     } catch (Exception error) when ((error is PlaywrightException or TimeoutException)
-        && action == "snapshot" && Optional(arguments, "ref") is not null) {
+        && action == "snapshot" && ToolArguments.OptionalString(arguments, "ref") is not null) {
       throw new InvalidOperationException($"Scoped snapshot failed; the ref may not be found or may be stale. Take a snapshot without a ref to refresh refs. {error.Message}", error);
     } catch (Exception error) when ((error is PlaywrightException or TimeoutException)
         && action is "click" or "type" or "hover" or "fill_form" or "select" or "upload") {
@@ -103,7 +103,7 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
     switch (action) {
       case "navigate": return await NavigateAsync(context.SessionId, arguments, cancellation).ConfigureAwait(false);
       case "snapshot": return await ResultAsync(context.SessionId, [], cancellation, full: true,
-          @ref: Optional(arguments, "ref")).ConfigureAwait(false);
+          @ref: ToolArguments.OptionalString(arguments, "ref")).ConfigureAwait(false);
       case "click": return await ClickAsync(context.SessionId, arguments, cancellation).ConfigureAwait(false);
       case "type": return await TypeAsync(context.SessionId, arguments, cancellation).ConfigureAwait(false);
       case "fill_form": return await FillFormAsync(context.SessionId, arguments, cancellation).ConfigureAwait(false);
@@ -131,7 +131,7 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
 
   private async Task<ToolOutput> NavigateAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
     string url = Address(arguments);
-    bool newTab = OptionalBool(arguments, "new_tab");
+    bool newTab = ToolArguments.OptionalBool(arguments, "new_tab", false);
     BrowserPage<IPage> page = host.Pages.Selected(owner) is { } active && !newTab
         ? active
         : await host.OpenAsync(owner, cancellation).ConfigureAwait(false);
@@ -159,8 +159,8 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
   }
 
   private async Task<ToolOutput> TabsAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    string? select = Optional(arguments, "select");
-    string? close = Optional(arguments, "close");
+    string? select = ToolArguments.OptionalString(arguments, "select");
+    string? close = ToolArguments.OptionalString(arguments, "close");
     if (string.IsNullOrWhiteSpace(select))
       select = null;
     if (string.IsNullOrWhiteSpace(close))
@@ -203,10 +203,10 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
   }
 
   private async Task<ToolOutput> WaitAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    string? text = Optional(arguments, "text");
+    string? text = ToolArguments.OptionalString(arguments, "text");
     int? ms = null;
     if (arguments.TryGetProperty("ms", out JsonElement given) && given.ValueKind is not JsonValueKind.Null)
-      ms = RequireInt(given);
+      ms = RequireMilliseconds(given);
     if (text is null && ms is null)
       throw new ArgumentException("wait needs text or ms.");
     if (text is not null && ms is not null)
@@ -230,11 +230,11 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
   }
 
   private async Task<ToolOutput> DialogAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    bool accept = OptionalBool(arguments, "accept");
-    bool dismiss = OptionalBool(arguments, "dismiss");
+    bool accept = ToolArguments.OptionalBool(arguments, "accept", false);
+    bool dismiss = ToolArguments.OptionalBool(arguments, "dismiss", false);
     if (accept == dismiss)
       throw new ArgumentException("Pass exactly one of accept or dismiss.");
-    string? promptText = Optional(arguments, "prompt");
+    string? promptText = ToolArguments.OptionalString(arguments, "prompt");
     (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
     host.Touch(owner, page.Id);
     string verdict = accept ? "accepted" : "dismissed";

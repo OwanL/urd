@@ -36,8 +36,8 @@ internal sealed class EditTool(FileMutationQueue files) : AgentTool {
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
     try {
       string path = ToolArguments.RequireString(arguments, "path");
-      JsonElement edits = arguments.GetProperty("edits");
-      if (edits.ValueKind != JsonValueKind.Array || edits.GetArrayLength() == 0)
+      if (!arguments.TryGetProperty("edits", out JsonElement edits) || edits.ValueKind != JsonValueKind.Array
+          || edits.GetArrayLength() == 0)
         throw new ArgumentException("edits must contain at least one replacement.");
       string absolutePath = ToolPaths.Resolve(path, context.WorkingDirectory);
       // Queue before the first suspension, including the initial file read.
@@ -49,7 +49,7 @@ internal sealed class EditTool(FileMutationQueue files) : AgentTool {
       return new ToolOutput("edit cancelled. The file may be partly written; cancellation does not roll back changes.", [], IsError: true);
     } catch (DecoderFallbackException) {
       return new ToolOutput("edit failed: file is not valid UTF-8. No changes were written.", [], IsError: true);
-    } catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or KeyNotFoundException or NotSupportedException) {
+    } catch (Exception error) when (ToolFailures.IsExpected(error)) {
       return new ToolOutput($"edit failed: {error.Message}", [], IsError: true);
     }
   }

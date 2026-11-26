@@ -37,7 +37,7 @@ internal sealed class WriteTool(FileMutationQueue files) : AgentTool {
       }, cancellation).ConfigureAwait(false);
     } catch (OperationCanceledException) {
       return new ToolOutput("write cancelled. The file may be partly written; cancellation does not roll back changes.", [], IsError: true);
-    } catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException or KeyNotFoundException or NotSupportedException) {
+    } catch (Exception error) when (ToolFailures.IsExpected(error)) {
       return new ToolOutput($"write failed: {error.Message}", [], IsError: true);
     }
   }

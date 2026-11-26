@@ -18,7 +18,7 @@ internal sealed partial class BrowserTool {
   private async Task<ToolOutput> TypeAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
     string @ref = Require(arguments, "ref");
     string text = Require(arguments, "text");
-    bool submit = OptionalBool(arguments, "submit");
+    bool submit = ToolArguments.OptionalBool(arguments, "submit", false);
     (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
@@ -91,7 +91,7 @@ internal sealed partial class BrowserTool {
 
   private async Task<ToolOutput> SelectAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
     string @ref = Require(arguments, "ref");
-    string[] values = RequireStrings(arguments, "values");
+    string[] values = ToolArguments.RequireStrings(arguments, "values");
     (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
@@ -102,8 +102,8 @@ internal sealed partial class BrowserTool {
   }
 
   private async Task<ToolOutput> ClickAtAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    int x = RequireInt(arguments, "x");
-    int y = RequireInt(arguments, "y");
+    int x = ToolArguments.RequireInteger(arguments, "x");
+    int y = ToolArguments.RequireInteger(arguments, "y");
     (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)
@@ -121,7 +121,7 @@ internal sealed partial class BrowserTool {
 
   private async Task<ToolOutput> UploadAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
     string @ref = Require(arguments, "ref");
-    string[] paths = RequireStrings(arguments, "paths");
+    string[] paths = ToolArguments.RequireStrings(arguments, "paths");
     (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
     host.Touch(owner, page.Id);
     if (interaction.PendingDialog is not null)

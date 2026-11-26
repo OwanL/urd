@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace Urd.Core.Tools;
 
-// Reads and validates the model's tool arguments.
+// Browser-specific argument reads: addresses, page ids and nonempty element references.
 internal sealed partial class BrowserTool {
   private static string Address(JsonElement arguments) {
     string value = Require(arguments, "url");
@@ -22,7 +22,7 @@ internal sealed partial class BrowserTool {
       throw new ArgumentException("form must be an array of fields.");
     List<FormField> fields = [];
     foreach (JsonElement entry in form.EnumerateArray()) {
-      string kind = Optional(entry, "type") ?? "text";
+      string kind = ToolArguments.OptionalString(entry, "type") ?? "text";
       if (kind is not ("text" or "checkbox" or "select"))
         throw new ArgumentException($"Unknown form field type \"{kind}\"; expected text, checkbox or select.");
       fields.Add(new FormField(Require(entry, "ref"), kind, Require(entry, "value")));
@@ -32,45 +32,18 @@ internal sealed partial class BrowserTool {
     return [.. fields];
   }
 
+  // Element references, action names and addresses must be nonempty.
   private static string Require(JsonElement element, string name) {
-    if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind is not JsonValueKind.String
-        || value.GetString() is not { } text || text.Length == 0)
+    string value = ToolArguments.RequireString(element, name);
+    if (value.Length == 0)
       throw new ArgumentException($"{name} is required and must be a nonempty string.");
-    return text;
+    return value;
   }
 
-  private static string? Optional(JsonElement element, string name) =>
-      element.TryGetProperty(name, out JsonElement value) && value.ValueKind is JsonValueKind.String
-          ? value.GetString()
-          : null;
-
-  private static bool OptionalBool(JsonElement element, string name) {
-    if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind is JsonValueKind.Null)
-      return false;
-    if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-      throw new ArgumentException($"{name} must be a boolean.");
-    return value.GetBoolean();
-  }
-
-  private static string[] RequireStrings(JsonElement element, string name) {
-    if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind is not JsonValueKind.Array)
-      throw new ArgumentException($"{name} must be an array of strings.");
-    string[] items = value.EnumerateArray().Select(item => item.ValueKind is JsonValueKind.String ? item.GetString() ?? "" : "").ToArray();
-    if (items.Any(string.IsNullOrEmpty))
-      throw new ArgumentException($"{name} must not contain empty strings.");
-    return items;
-  }
-
-  private static int RequireInt(JsonElement element, string name) {
-    if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind is not JsonValueKind.Number)
-      throw new ArgumentException($"{name} is required and must be a number.");
-    return value.GetInt32();
-  }
-
-  private static int RequireInt(JsonElement value) {
-    if (value.ValueKind is not JsonValueKind.Number)
+  private static int RequireMilliseconds(JsonElement value) {
+    if (value.ValueKind is not JsonValueKind.Number || !value.TryGetInt32(out int milliseconds))
       throw new ArgumentException("ms must be a number.");
-    return value.GetInt32();
+    return milliseconds;
   }
 
   // One fill_form field; its kind selects how the value is applied to the element.

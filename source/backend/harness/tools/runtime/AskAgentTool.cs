@@ -29,24 +29,12 @@ internal sealed class AskAgentTool : HarnessTool {
       arguments.TryGetProperty("wake", out JsonElement wake) && wake.ValueKind == JsonValueKind.False;
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, HarnessToolContext context, CancellationToken cancellation) {
-    string recipient = arguments.GetProperty("recipient").GetString()
-        ?? throw new ArgumentException("Recipient is required.");
-    string prompt = arguments.GetProperty("prompt").GetString()
-        ?? throw new ArgumentException("Prompt is required.");
-    bool wake = ReadWake(arguments);
+    string recipient = ToolArguments.RequireString(arguments, "recipient");
+    string prompt = ToolArguments.RequireString(arguments, "prompt");
+    bool wake = ToolArguments.OptionalBool(arguments, "wake", true);
     AgentQuestionResult result = await context.Sessions.AskAgentAsync(context, recipient, prompt, wake, cancellation);
     return result.Error is { } error
         ? new ToolOutput(error, [], IsError: true)
         : new ToolOutput(result.Answer ?? "The question was answered without an answer.", []);
-  }
-
-  private static bool ReadWake(JsonElement arguments) {
-    if (!arguments.TryGetProperty("wake", out JsonElement wake))
-      return true;
-    return wake.ValueKind switch {
-      JsonValueKind.True => true,
-      JsonValueKind.False => false,
-      _ => throw new ArgumentException("The wake option must be a boolean.")
-    };
   }
 }

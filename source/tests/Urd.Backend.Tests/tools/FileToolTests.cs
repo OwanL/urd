@@ -107,6 +107,16 @@ public sealed class FileToolTests : IDisposable {
     Assert.Equal("", (await Run(tool, new { path, offset = 3 })).Text);
   }
 
+  [Fact]
+  public async Task MissingArgumentsReportTheRequiredName() {
+    var write = await Run(new WriteTool(files), new { path = Path.Combine(directory, "x.txt") });
+    Assert.True(write.IsError, write.Text);
+    Assert.Equal("write failed: content is required.", write.Text);
+    var read = await Run(new ReadTool(files), new { });
+    Assert.True(read.IsError, read.Text);
+    Assert.Equal("read failed: path is required.", read.Text);
+  }
+
   private Task<ToolOutput> Run(AgentTool tool, object arguments,
       bool acceptsImages = true, string? workingDirectory = null, CancellationToken cancellation = default) =>
     tool.RunAsync(JsonSerializer.SerializeToElement(arguments),

@@ -22,9 +22,9 @@ internal sealed class SubagentTool : HarnessTool {
     """);
 
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, HarnessToolContext context, CancellationToken cancellation) {
-    string bucket = arguments.GetProperty("bucket").GetString() ?? throw new ArgumentException("Bucket is required.");
-    bool includeUserInput = arguments.GetProperty("includeUserInput").GetBoolean();
-    string task = arguments.GetProperty("task").GetString() ?? throw new ArgumentException("Task is required.");
+    string bucket = ToolArguments.RequireString(arguments, "bucket");
+    bool includeUserInput = ToolArguments.RequireBool(arguments, "includeUserInput");
+    string task = ToolArguments.RequireString(arguments, "task");
     SubagentRunResult result = await context.Sessions.RunSubagentAsync(context, new(bucket, includeUserInput, task), cancellation);
     return result.Error is { } error
         ? new ToolOutput(error, [], IsError: true)

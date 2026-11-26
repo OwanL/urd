@@ -1,6 +1,5 @@
 import type { ModelSettings } from "../ModelSettings.ts";
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import type { ProviderCredentialStatus } from "../ProviderCredentials.ts";
 import type { ProviderSignIn } from "../ProviderSignIn.ts";
 import {
   canOfferBuckets,
@@ -9,12 +8,12 @@ import {
 } from "./ProviderBucketSetup.ts";
 import { connectionCommands } from "./ProviderConnectionCommands.ts";
 import { forgetConnectionStatus } from "./ProviderConnectionRecords.ts";
-import { credentialState, signInPending } from "./ProviderConnectionStatus.ts";
+import { signInPending } from "./ProviderConnectionStatus.ts";
 import { credentialCommands } from "./ProviderCredentialCommands.ts";
 import { modelCommands, type ModelSettingsEdit } from "./ProviderModelCommands.ts";
 import { commandFailureNotice, type RunProviderCommand } from "./ProviderSettingsCommand.ts";
 import { readProviderSettings } from "./ProviderSettingsReadCycle.ts";
-import { authorizationLink, reserveSignInTab } from "./ProviderSignInTab.ts";
+import { providerSignInTabs } from "./ProviderSignInTabs.ts";
 import type {
   AddDraft,
   ConnectionDraft,
@@ -64,12 +63,8 @@ export class ProviderSettingsController {
 
   private setupVisible = false;
   private setupView = 0;
-  private signInIntent = 0;
-  private openingTab = false;
-  private readonly reservations = new Set<Window>();
   private newConnectionId: string | null = null;
   private bucketRequest: BucketSetupRequest | null = null;
-  private readonly setupSignIns = new Map<string, SetupContext>();
   private uncertainModelConnectionId: string | null = null;
   private disposed = false;
   private active = false;
@@ -85,6 +80,7 @@ export class ProviderSettingsController {
   private readonly connectionCommands: ReturnType<typeof connectionCommands>;
   private readonly credentialCommands: ReturnType<typeof credentialCommands>;
   private readonly modelCommands: ReturnType<typeof modelCommands>;
+  private readonly signInTabs: ReturnType<typeof providerSignInTabs>;
 
   constructor(
     client: ProviderSettingsClient,
@@ -105,6 +101,21 @@ export class ProviderSettingsController {
     );
     this.credentialCommands = credentialCommands(client, this.command, snapshot, publish);
     this.modelCommands = modelCommands(client, this.command, snapshot, publish);
+    this.signInTabs = providerSignInTabs({
+      snapshot,
+      publish,
+      activity: () => ({
+        canMutate: this.canMutate,
+        visible: this.visible,
+        setupVisible: this.setupVisible,
+        setupView: this.setupView,
+        disposed: this.disposed,
+      }),
+      createConnection: (created) => this.createConnection(created),
+      commands: this.credentialCommands,
+      notifyProviderReady: (connection, view) => this.notifyProviderReady({ connection, view }),
+      changed,
+    });
   }
 
   get snapshot(): ProviderSettingsSnapshot {
@@ -119,8 +130,7 @@ export class ProviderSettingsController {
   setActivity(active: boolean, visible: boolean, providersTab = active): void {
     const wasReadable = this.canRead;
     const wasSetupVisible = this.setupVisible;
-    if (this.visible && !visible && !this.openingTab && this.reservations.size === 0)
-      this.signInIntent++;
+    if (this.visible && !visible) this.signInTabs.onHidden();
     this.active = active;
     this.visible = visible;
     this.setupVisible = active && providersTab;
@@ -137,8 +147,7 @@ export class ProviderSettingsController {
   dispose(): void {
     this.disposed = true;
     this.stopReads();
-    for (const tab of this.reservations) this.closeReservation(tab);
-    this.setupSignIns.clear();
+    this.signInTabs.dispose();
     this.clearBucketRequest();
   }
 
@@ -240,7 +249,7 @@ export class ProviderSettingsController {
   edit(id: string, update: Partial<ConnectionDraft>): void {
     const draft = this.snapshot.drafts[id];
     if (!draft || this.snapshot.confirmation) return;
-    if (this.snapshot.selectedId === id) this.signInIntent++;
+    this.signInTabs.onConnectionEdited(id);
     if (this.newConnectionId === id) this.newConnectionId = null;
     this.patch({ drafts: { ...this.snapshot.drafts, [id]: { ...draft, ...update } } });
   }
@@ -286,8 +295,8 @@ export class ProviderSettingsController {
         snapshot: () => this.snapshot,
         publish: (update) => this.patch(update),
         uncertainModelConnectionId: () => this.uncertainModelConnectionId,
-        forgetSetupSignIn: (id) => this.setupSignIns.delete(id),
-        captureSignInCompletion: (id) => this.captureSignInCompletion(id),
+        forgetSetupSignIn: this.signInTabs.forgetSetupSignIn,
+        captureSignInCompletion: this.signInTabs.captureSignInCompletion,
       });
     } finally {
       if (isCurrent()) {
@@ -296,22 +305,6 @@ export class ProviderSettingsController {
         this.schedulePoll();
       }
     }
-  }
-
-  private captureSignInCompletion(id: string) {
-    const context = this.setupSignIns.get(id);
-    return (next: ProviderSignIn, credentials: ProviderCredentialStatus | undefined) => {
-      this.setupSignIns.delete(id);
-      if (
-        context &&
-        next.status === "completed" &&
-        credentials &&
-        credentialState(context.connection, credentials) === "connected" &&
-        this.notifyProviderReady(context)
-      )
-        return;
-      this.changed();
-    };
   }
 
   private schedulePoll(): void {
@@ -364,43 +357,8 @@ export class ProviderSettingsController {
     return this.createConnection();
   }
 
-  async createAndSignIn(): Promise<void> {
-    if (
-      !this.canMutate ||
-      !this.setupVisible ||
-      !this.visible ||
-      this.snapshot.selectedId !== null ||
-      this.snapshot.add.route !== "chatGpt"
-    )
-      return;
-    const tab = this.reserveTab();
-    const existingIds = new Set(this.snapshot.connections.map(({ id }) => id));
-    const intent = this.signInIntent;
-    let signIn: Promise<void> | undefined;
-    await this.createConnection((connection, view) => {
-      const saved = this.snapshot.connections.find(({ id }) => id === connection.id);
-      if (
-        existingIds.has(connection.id) ||
-        connection.route !== "chatGpt" ||
-        connection.authentication !== "oAuth" ||
-        !this.canMutate ||
-        !this.setupVisible ||
-        (!this.visible && !tab) ||
-        this.setupView !== view ||
-        this.signInIntent !== intent ||
-        this.snapshot.selectedId !== connection.id ||
-        !saved ||
-        saved.name !== connection.name ||
-        saved.route !== connection.route ||
-        saved.api !== connection.api ||
-        saved.endpoint !== connection.endpoint ||
-        saved.authentication !== connection.authentication
-      )
-        return;
-      signIn = this.startSignIn(connection, true, tab);
-    });
-    if (!signIn) this.closeReservation(tab);
-    await signIn;
+  createAndSignIn(): Promise<void> {
+    return this.signInTabs.createAndSignIn();
   }
 
   private createConnection(
@@ -442,9 +400,7 @@ export class ProviderSettingsController {
     if (this.newConnectionId === id) this.newConnectionId = null;
     if (this.bucketRequest?.connection.id === id) this.skipBucketSuggestions();
     const signIn = this.snapshot.signIns[id];
-    if (signIn) {
-      this.setupSignIns.delete(signIn.id);
-    }
+    if (signIn) this.signInTabs.forgetSetupSignIn(signIn.id);
     this.patch(forgetConnectionStatus(this.snapshot, id));
   }
 
@@ -457,78 +413,12 @@ export class ProviderSettingsController {
   }
 
   beginSignIn(connection: ProviderConnection, setup = false): Promise<void> {
-    if (
-      !this.canMutate ||
-      Object.values(this.snapshot.signIns).some(
-        (item) => item.connectionId === connection.id && signInPending(item),
-      )
-    )
-      return Promise.resolve();
-    return this.startSignIn(connection, setup, this.reserveTab());
-  }
-
-  private async startSignIn(
-    connection: ProviderConnection,
-    setup: boolean,
-    tab: Window | null,
-  ): Promise<void> {
-    const view = this.setupView;
-    let started = false;
-    try {
-      await this.credentialCommands.beginSignIn(
-        connection,
-        setup
-          ? (id) => {
-              if (!this.disposed) this.setupSignIns.set(id, { connection, view });
-            }
-          : undefined,
-        (signIn) => {
-          started = true;
-          if (this.disposed) {
-            this.closeReservation(tab);
-            return;
-          }
-          const url = authorizationLink(signIn.authorizationUrl);
-          let blocked = !tab;
-          if (tab && signInPending(signIn) && url && this.reservations.has(tab)) {
-            try {
-              tab.location.href = url;
-              this.reservations.delete(tab);
-            } catch {
-              blocked = true;
-              this.closeReservation(tab);
-            }
-          } else this.closeReservation(tab);
-          this.patch({
-            blockedSignIns: { ...this.snapshot.blockedSignIns, [connection.id]: blocked },
-          });
-        },
-      );
-    } finally {
-      if (!started) this.closeReservation(tab);
-    }
-  }
-
-  private reserveTab(): Window | null {
-    this.openingTab = true;
-    try {
-      const tab = reserveSignInTab();
-      if (tab) this.reservations.add(tab);
-      return tab;
-    } finally {
-      this.openingTab = false;
-    }
-  }
-
-  private closeReservation(tab: Window | null): void {
-    if (tab && this.reservations.delete(tab)) tab.close();
+    return this.signInTabs.beginSignIn(connection, setup);
   }
 
   cancelSignIn(signIn: ProviderSignIn): Promise<void> {
     if (this.newConnectionId === signIn.connectionId) this.newConnectionId = null;
-    return this.credentialCommands.cancelSignIn(signIn, (id) => {
-      this.setupSignIns.delete(id);
-    });
+    return this.signInTabs.cancelSignIn(signIn);
   }
 
   saveModelSettings(settings: ModelSettings): Promise<void> {

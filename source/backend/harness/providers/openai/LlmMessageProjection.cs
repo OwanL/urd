@@ -1,20 +1,52 @@
 using Microsoft.Extensions.AI;
+using OpenAI.Responses;
+
+#pragma warning disable OPENAI001, SCME0001 // Build fresh Responses items using the pinned SDK's patch API.
 
 namespace Urd.Core.Providers;
 
 // Prepares portable messages and adapts image and tool-result content for provider requests.
 internal static class LlmMessageProjection {
-  internal static IReadOnlyList<ChatMessage> Prepare(IEnumerable<ChatMessage> messages, LlmProviderScope scope) {
+  internal static IReadOnlyList<ChatMessage> Prepare(IEnumerable<ChatMessage> messages, LlmProviderScope scope,
+      bool chatGptTools = false) {
     LlmProviderContext.ValidateScope(scope);
     ChatMessage[] prepared = messages.Select(message => {
       if (message.RawRepresentation is LlmProviderResponse response)
-        return LlmProviderContext.Read(response, response.Scope == scope
-            ? ContextReplayMode.NativeReplay : ContextReplayMode.PortableExport);
+        return response.Scope == scope ? LlmProviderContext.Replay(response) : Export(message, scope.Api, chatGptTools);
 
       ValidatePortable(message);
-      return message;
+      // Older histories can contain local calls without a saved provider response.
+      return chatGptTools && message.Contents.Any(content => content is FunctionCallContent)
+          ? Export(message, scope.Api, chatGptTools) : message;
     }).ToArray();
     return scope.Api == LlmApi.OpenAIChatCompletions ? ProjectChatCompletions(prepared) : prepared;
+  }
+
+  // On a switch use the decoded text and calls, never the old provider's native objects or private reasoning.
+  private static ChatMessage Export(ChatMessage restored, LlmApi api, bool chatGptTools) {
+    var contents = new List<AIContent>(restored.Contents.Count);
+    foreach (AIContent content in restored.Contents) {
+      if (content is TextContent text) {
+        var visible = new TextContent(text.Text);
+        if (api == LlmApi.OpenAIResponses &&
+            text.AdditionalProperties?.TryGetValue(LlmProviderContext.AssistantPhase, out object? phase) == true &&
+            phase is "commentary" or "final_answer") {
+          var item = ResponseItem.CreateAssistantMessageItem(text.Text, []);
+          item.Patch.Set("$.phase"u8, (string)phase);
+          visible.RawRepresentation = item;
+        }
+        contents.Add(visible);
+      } else if (content is FunctionCallContent call) {
+        var portable = new FunctionCallContent(call.CallId, call.Name, call.Arguments);
+        if (chatGptTools) {
+          var item = ResponseItem.CreateFunctionCallItem(call.CallId, call.Name, BinaryData.FromObjectAsJson(call.Arguments));
+          item.Patch.Set("$.namespace"u8, "urd");
+          portable.RawRepresentation = item;
+        }
+        contents.Add(portable);
+      }
+    }
+    return new ChatMessage(ChatRole.Assistant, contents);
   }
 
   internal static IReadOnlyList<ChatMessage> AdaptForModel(IEnumerable<ChatMessage> messages, bool supportsImages) {
@@ -142,3 +174,5 @@ internal static class LlmMessageProjection {
       throw new InvalidDataException("Invalid provider context.");
   }
 }
+
+#pragma warning restore OPENAI001, SCME0001

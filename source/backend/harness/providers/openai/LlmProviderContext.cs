@@ -12,6 +12,7 @@ namespace Urd.Core.Providers;
 
 internal static class LlmProviderContext {
   internal const int MaximumBytes = 4 * 1024 * 1024;
+  internal const string AssistantPhase = "urd.assistant.phase";
   private const string ResponseKey = "urd.providerResponse";
 
   internal static LlmProviderResponse? GetResponse(ChatResponseUpdate update) =>
@@ -21,7 +22,9 @@ internal static class LlmProviderContext {
   internal static void SetResponse(ChatResponseUpdate update, LlmProviderResponse response) =>
       (update.AdditionalProperties ??= [])[ResponseKey] = response;
 
-  internal static ChatMessage Restore(LlmProviderResponse response) => Read(response, ContextReplayMode.Restore);
+  internal static ChatMessage Restore(LlmProviderResponse response) => Read(response, nativeReplay: false);
+
+  internal static ChatMessage Replay(LlmProviderResponse response) => Read(response, nativeReplay: true);
 
   internal static LlmProviderResponse CaptureResponses(LlmProviderScope scope, IReadOnlyList<ResponseItem> items) {
     ValidateScope(scope);
@@ -80,8 +83,6 @@ internal static class LlmProviderContext {
     BinaryData data = ModelReaderWriter.Write(native);
     CheckSize(data.ToMemory().Length);
     using var payload = JsonDocument.Parse(data);
-    // Unlike Responses' opaque appended definitions, Chat has no supported unknown-item replay route.
-    ExtractChat(payload.RootElement, [], portable: false);
     using var envelope = new MemoryStream();
     using (var writer = new Utf8JsonWriter(envelope)) {
       writer.WriteStartObject();
@@ -100,7 +101,7 @@ internal static class LlmProviderContext {
     return response;
   }
 
-  internal static ChatMessage Read(LlmProviderResponse response, ContextReplayMode mode) {
+  private static ChatMessage Read(LlmProviderResponse response, bool nativeReplay) {
     try {
       CheckSize(Encoding.UTF8.GetByteCount(response.Json));
       using JsonDocument document = JsonDocument.Parse(response.Json);
@@ -113,22 +114,22 @@ internal static class LlmProviderContext {
         Require(items.ValueKind == JsonValueKind.Array);
         foreach (JsonElement item in items.EnumerateArray()) {
           Require(item.ValueKind == JsonValueKind.Object);
-          if (mode == ContextReplayMode.NativeReplay) {
+          if (nativeReplay) {
             _ = RequiredString(item, "type");
             ResponseItem raw = ModelReaderWriter.Read<ResponseItem>(BinaryData.FromString(item.GetRawText()))!;
             message.Contents.Add(new AIContent { RawRepresentation = raw });
           } else {
-            ExtractResponseItem(item, message.Contents, mode == ContextReplayMode.PortableExport);
+            ExtractResponseItem(item, message.Contents);
           }
         }
       } else {
         Require(response.Scope.Api == LlmApi.OpenAIChatCompletions);
         JsonElement item = root.GetProperty("message");
-        ExtractChat(item, message.Contents, mode == ContextReplayMode.PortableExport);
-        if (mode == ContextReplayMode.NativeReplay)
+        ExtractChat(item, message.Contents);
+        if (nativeReplay)
           message.RawRepresentation = ModelReaderWriter.Read<AssistantChatMessage>(BinaryData.FromString(item.GetRawText()));
       }
-      if (mode == ContextReplayMode.Restore)
+      if (!nativeReplay)
         message.RawRepresentation = response;
       return message;
     } catch (Exception error) when (error is JsonException or InvalidOperationException or
@@ -138,49 +139,47 @@ internal static class LlmProviderContext {
     }
   }
 
-  private static void ExtractResponseItem(JsonElement item, IList<AIContent> contents, bool portable) {
+  private static void ExtractResponseItem(JsonElement item, IList<AIContent> contents) {
     switch (RequiredString(item, "type")) {
       case "message":
-        ExtractResponseMessage(item, contents, portable);
+        ExtractResponseMessage(item, contents);
         break;
       case "function_call":
-        if (portable) {
-          RequireKnown(item, "type", "id", "status", "call_id", "name", "arguments", "namespace");
-          if (item.TryGetProperty("namespace", out JsonElement toolNamespace) && toolNamespace.GetString() != "urd")
-            throw new NotSupportedException("Provider context contains a nonportable function namespace.");
-        }
-        contents.Add(ReadCall(item, RequiredString(item, "call_id")));
+        // Only bare functions and Urd's ChatGPT namespace identify a local tool. A foreign
+        // namespace must not become a same-named local call when the destination changes.
+        bool local = !item.TryGetProperty("namespace", out JsonElement ns) || ns.ValueKind == JsonValueKind.Null ||
+            (ns.ValueKind == JsonValueKind.String && ns.ValueEquals("urd"));
+        contents.Add(local ? ReadCall(item, RequiredString(item, "call_id")) : new AIContent());
         break;
       case "reasoning":
-        if (portable)
-          break;
         contents.Add(ReadReasoning(item));
         break;
       default:
-        Nonportable(contents, portable);
+        contents.Add(new AIContent());
         break;
     }
   }
 
-  private static void ExtractResponseMessage(JsonElement item, IList<AIContent> contents, bool portable) {
-    if (portable)
-      RequireKnown(item, "type", "id", "status", "role", "content");
+  private static void ExtractResponseMessage(JsonElement item, IList<AIContent> contents) {
     if (RequiredString(item, "role") != "assistant") {
-      Nonportable(contents, portable);
+      contents.Add(new AIContent());
       return;
     }
-    foreach (JsonElement part in item.GetProperty("content").EnumerateArray()) {
-      if (RequiredString(part, "type") != "output_text") {
-        Nonportable(contents, portable);
-        continue;
-      }
-      if (portable) {
-        RequireKnown(part, "type", "text", "annotations", "logprobs");
-        if (part.TryGetProperty("annotations", out JsonElement annotations) && annotations.GetArrayLength() != 0)
-          throw new NotSupportedException("Provider context contains nonportable annotations.");
-      }
-      contents.Add(new TextContent(RequiredString(part, "text", allowEmpty: true)));
+
+    JsonElement parts = item.GetProperty("content");
+    string? phase = item.TryGetProperty("phase", out JsonElement value) && value.ValueKind == JsonValueKind.String
+        ? value.GetString() : null;
+    // Phase belongs to the whole message, not to the response or to each text fragment.
+    if (phase is "commentary" or "final_answer" && parts.GetArrayLength() > 0 &&
+        parts.EnumerateArray().All(part => RequiredString(part, "type") == "output_text")) {
+      string text = string.Concat(parts.EnumerateArray().Select(part => RequiredString(part, "text", allowEmpty: true)));
+      contents.Add(new TextContent(text) { AdditionalProperties = new() { [AssistantPhase] = phase } });
+      return;
     }
+
+    foreach (JsonElement part in parts.EnumerateArray())
+      contents.Add(RequiredString(part, "type") == "output_text"
+          ? new TextContent(RequiredString(part, "text", allowEmpty: true)) : new AIContent());
   }
 
   private static TextReasoningContent ReadReasoning(JsonElement item) {
@@ -195,9 +194,8 @@ internal static class LlmProviderContext {
     };
   }
 
-  private static void ExtractChat(JsonElement item, IList<AIContent> contents, bool portable) {
+  private static void ExtractChat(JsonElement item, IList<AIContent> contents) {
     Require(RequiredString(item, "role") == "assistant");
-    RequireKnown(item, "role", "content", "tool_calls", "reasoning_content", "reasoning", "name", "refusal", "function_call", "audio");
     foreach (string unsupported in new[] { "name", "refusal", "function_call", "audio" })
       Require(!item.TryGetProperty(unsupported, out JsonElement value) || value.ValueKind == JsonValueKind.Null);
 
@@ -214,7 +212,7 @@ internal static class LlmProviderContext {
       Require(reasoning is null);
       reasoning = text;
     }
-    if (!portable && reasoning is not null)
+    if (reasoning is not null)
       contents.Add(new TextReasoningContent(reasoning));
   }
 
@@ -224,7 +222,6 @@ internal static class LlmProviderContext {
       return;
     }
     foreach (JsonElement part in content.EnumerateArray()) {
-      RequireKnown(part, "type", "text");
       Require(RequiredString(part, "type") == "text");
       contents.Add(new TextContent(RequiredString(part, "text", allowEmpty: true)));
     }
@@ -232,10 +229,8 @@ internal static class LlmProviderContext {
 
   private static void ExtractChatCalls(JsonElement calls, IList<AIContent> contents) {
     foreach (JsonElement call in calls.EnumerateArray()) {
-      RequireKnown(call, "type", "id", "function");
       Require(RequiredString(call, "type") == "function");
       JsonElement function = call.GetProperty("function");
-      RequireKnown(function, "name", "arguments");
       contents.Add(ReadCall(function, RequiredString(call, "id")));
     }
   }
@@ -253,18 +248,6 @@ internal static class LlmProviderContext {
     Require(scope.Generation >= 0 && scope.ConnectionId != Guid.Empty);
     Require(scope.Api is LlmApi.OpenAIResponses or LlmApi.OpenAIChatCompletions);
     Require(!string.IsNullOrWhiteSpace(scope.ModelId) && scope.ModelId.Length <= 256 && !scope.ModelId.Any(char.IsControl));
-  }
-
-  private static void RequireKnown(JsonElement value, params string[] names) {
-    if (value.EnumerateObject().Any(property => !names.Contains(property.Name, StringComparer.Ordinal)))
-      throw new NotSupportedException("Provider context contains nonportable fields.");
-  }
-
-  private static void Nonportable(IList<AIContent> contents, bool portable) {
-    if (portable)
-      throw new NotSupportedException("Provider context contains nonportable content.");
-    // Preserve its position without inventing a portable interpretation. The envelope owns replay.
-    contents.Add(new AIContent());
   }
 
   private static string RequiredString(JsonElement value, string name, bool allowEmpty = false) {

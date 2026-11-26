@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Compaction;
@@ -18,7 +19,7 @@ public sealed class ChatGptCompactionTests {
   private const string PromptMarker = "Summarize the removed conversation history";
 
   [Fact]
-  public async Task ManualCompactionSendsOneChatGptSummaryWithoutMaxOutputTokens() {
+  public async Task ManualCompactionKeepsRecentRepliesUsableOnAnotherModel() {
     await using var fixture = new ChatGptFixture();
     PrimarySession session = await fixture.OpenAsync();
     await SubmitTurnAsync(session, fixture.Selection, "ancient-turn: " + new string('x', 100_000));
@@ -41,6 +42,14 @@ public sealed class ChatGptCompactionTests {
     Assert.Equal(Summary, saved.Summary);
     TranscriptHistoryPage history = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision));
     Assert.Single(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Compaction);
+
+    await SubmitTurnAsync(session, fixture.Selection with { ModelId = "another-model" }, "continue");
+    using var switched = JsonDocument.Parse(requests[^1].Body);
+    Assert.Equal("another-model", switched.RootElement.GetProperty("model").GetString());
+    JsonElement reply = Assert.Single(switched.RootElement.GetProperty("input").EnumerateArray(),
+        item => item.TryGetProperty("phase", out _));
+    Assert.Equal("final_answer", reply.GetProperty("phase").GetString());
+    Assert.False(reply.TryGetProperty("id", out _));
   }
 
   private static async Task SubmitTurnAsync(PrimarySession session, LlmSelection selection, string text) {
@@ -69,7 +78,10 @@ public sealed class ChatGptCompactionTests {
       manager = new(store, () => FakeOpenAIIdentity.Callback, transport, FakeOpenAIIdentity.Issuer);
     }
 
-    private static string SummaryWire() => Responses(text: Summary).Replace("hello", Summary, StringComparison.Ordinal);
+    private static string SummaryWire() {
+      string phased = Message.Replace("\"role\":\"assistant\"", "\"role\":\"assistant\",\"phase\":\"final_answer\"", StringComparison.Ordinal);
+      return Responses([phased.Replace("hello", Summary, StringComparison.Ordinal)], text: Summary);
+    }
 
     internal UrdStore Store => store;
     internal ScriptedOpenAIHandler Inference { get; }

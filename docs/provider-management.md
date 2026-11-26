@@ -204,9 +204,12 @@ the model to pick up the setting, or enable Images in model settings to override
 `LlmProviderContext` captures a versioned native response scoped to connection ID, binding
 generation, API and exact **requested** model ID, not the provider's resolved alias.
 `LlmMessageProjection` prepares replay and adapts image/tool-result content for model requests.
-Same-scope replay retains ordered native items, function IDs and private reasoning. An
-explicit changed scope retains portable visible text/calls while omitting private reasoning;
-nonportable visible content fails explicitly. Native payloads have a 4 MiB UTF-8 limit and
+Same-scope replay retains ordered native items, function IDs and private reasoning. When the
+model, connection, generation or API changes, Urd builds history from the saved assistant text
+and tool calls. Responses requests preserve known assistant phases (`commentary`, `final_answer`);
+Chat Completions gets the text without a phase. Calls keep their IDs so results stay paired.
+Private reasoning, provider item IDs and unrecognized metadata are not sent to the new scope.
+This also applies to the recent history retained after compaction. Native payloads have a 4 MiB UTF-8 limit and
 are rejected rather than truncated. The codec retains appended-definition representations
 without implementing a discovery policy. Schema 7 stores this envelope in
 `execution_provider_context`, atomically with successful request completion and tool-call

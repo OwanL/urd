@@ -1,4 +1,3 @@
-using System.Reflection;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
@@ -19,7 +18,7 @@ public sealed class BrowserViewerOwnersTests {
     Assert.Null(await manager.BrowserViewerOwnersAsync(Guid.NewGuid()));
     Assert.Null(await manager.BrowserViewerOwnersAsync(child));
     Assert.Equal(new[] { primary }, await manager.BrowserViewerOwnersAsync(primary));
-    Assert.Null(Registry(manager).FindPrimary(primary));
+    Assert.Null(manager.Registry.FindPrimary(primary));
 
     using var cancellation = new CancellationTokenSource();
     await cancellation.CancelAsync();
@@ -57,7 +56,7 @@ public sealed class BrowserViewerOwnersTests {
     Assert.DoesNotContain(missing.Id, owners);
     Assert.Equal(new[] { other }, await manager.BrowserViewerOwnersAsync(other));
 
-    await Registry(manager).UntrackChildAsync(child.Id);
+    await manager.Registry.UntrackChildAsync(child.Id);
     owners = (await manager.BrowserViewerOwnersAsync(primary))!;
     Assert.DoesNotContain(child.Id, owners);
     Assert.DoesNotContain(nested.Id, owners);
@@ -79,12 +78,9 @@ public sealed class BrowserViewerOwnersTests {
     Assert.Equal(new[] { primary }, await manager.BrowserViewerOwnersAsync(primary).WaitAsync(TestTimeout));
   }
 
-  private static SessionRegistry Registry(SessionManager manager) => (SessionRegistry)typeof(SessionManager)
-      .GetField("registry", BindingFlags.Instance | BindingFlags.NonPublic)!.GetValue(manager)!;
-
   private static Task<bool> TrackAsync(SessionManager manager, UrdStore store, SessionRecord record) =>
-      Registry(manager).RunOpenAsync(() => {
-        Registry(manager).TrackChild(new SubagentSession(record, store, _ => throw new InvalidOperationException("Must not run.")));
+      manager.Registry.RunOpenAsync(() => {
+        manager.Registry.TrackChild(new SubagentSession(record, store, _ => throw new InvalidOperationException("Must not run.")));
         return true;
       });
 }

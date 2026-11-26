@@ -1,14 +1,15 @@
 import { useEffect, useId, useRef, useState } from "preact/hooks";
 import { RequestError } from "../http/RequestError.ts";
 import { requestJson } from "../http/Requests.ts";
+import {
+  acknowledged,
+  lostAcknowledgement,
+  observeRead,
+  readApplies,
+  type HostingDisplay,
+  type HostingStatus,
+} from "./LanHostingReconciliation.ts";
 import "./lan-hosting-setting.css";
-
-interface HostingStatus {
-  enabled: boolean;
-  remembered: boolean;
-  origins: string[];
-  startupError: string | null;
-}
 
 function message(error: unknown): string {
   if (
@@ -24,9 +25,9 @@ function message(error: unknown): string {
 
 export function LanHostingSetting() {
   const disclaimerId = useId();
-  const [status, setStatus] = useState<HostingStatus | null>(null);
+  const [display, setDisplay] = useState<HostingDisplay>({ status: null, error: null });
+  const { status, error } = display;
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
   const sequence = useRef(0);
   const busy = useRef(false);
@@ -51,15 +52,21 @@ export function LanHostingSetting() {
               new URL("/api/hosting/lan", location.origin),
               "GET",
             );
-            if (mounted && current === sequence.current && !busy.current) {
-              setStatus(result);
-              if (!commandFailed.current) setError(null);
-            }
+            if (mounted && readApplies(current, sequence.current, busy.current))
+              setDisplay((previous) =>
+                observeRead(
+                  { status: result, error: null },
+                  commandFailed.current ? previous.error : null,
+                ),
+              );
           } catch (failure) {
-            if (mounted && current === sequence.current && !busy.current) {
-              setStatus(null);
-              if (!commandFailed.current) setError(message(failure));
-            }
+            if (mounted && readApplies(current, sequence.current, busy.current))
+              setDisplay((previous) =>
+                observeRead(
+                  { status: null, error: message(failure) },
+                  commandFailed.current ? previous.error : null,
+                ),
+              );
           }
         }
         reading = false;
@@ -93,25 +100,26 @@ export function LanHostingSetting() {
     commandFailed.current = false;
     const current = ++sequence.current;
     setPending(true);
-    setError(null);
     setCopied(null);
+    // A new command supersedes a remembered lost acknowledgement.
+    setDisplay((previous) => ({ ...previous, error: null }));
     try {
       const result = await requestJson<HostingStatus>(
         new URL("/api/hosting/lan", location.origin),
         "POST",
         { enabled },
       );
-      if (current === sequence.current) setStatus(result);
+      if (acknowledged(current, sequence.current))
+        setDisplay((previous) => ({ ...previous, status: result }));
     } catch (failure) {
-      if (current === sequence.current) {
+      if (acknowledged(current, sequence.current)) {
         commandFailed.current = true;
-        setError(message(failure));
         // A failed response does not establish whether the command took effect.
-        setStatus(null);
+        setDisplay(lostAcknowledgement(message(failure)));
       }
     } finally {
       busy.current = false;
-      if (current === sequence.current) setPending(false);
+      if (acknowledged(current, sequence.current)) setPending(false);
       // Reconcile the acknowledgement with tray changes made while the request was in flight.
       refreshStatus.current();
     }
@@ -122,7 +130,7 @@ export function LanHostingSetting() {
       await navigator.clipboard.writeText(origin);
       setCopied(origin);
     } catch {
-      setError("Could not copy the address.");
+      setDisplay((previous) => ({ ...previous, error: "Could not copy the address." }));
     }
   };
 

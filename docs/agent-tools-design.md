@@ -110,10 +110,9 @@ was implemented separately; see the [browser guide](browser-development.md) for 
     Qualify this mapping per supported provider route.
 20. **Tool relevance** (owner review 2026-11-11). Every tool explicitly declares typed
     `RelevantWhen` metadata, separate from its agent-facing `Description`.
-    `ToolRelevance.Always` declares unconditional inclusion (all six current tools);
-    `ToolRelevance.When(guidance)` supplies immutable, nonblank relevance guidance for
-    future pruning and dynamic discovery. This adds metadata only: no selector is
-    implemented, and all configured tools remain available to the model up front.
+    `ToolRelevance.Always` declares unconditional inclusion for current tools. This is
+    metadata only: no selector is implemented, and all configured tools remain available
+    to the model up front.
 21. **Tool-row presentation** (owner review 2026-11-12).
     - One fixed-height, single-line row per call: tool icon · major · minor, plus
       right-aligned elapsed time shown only from 5 s, in whole units (`7s`, `2m 13s`).

@@ -25,27 +25,4 @@ public sealed class ToolRelevanceTests {
     }
   }
 
-  [Fact]
-  public void AlwaysIsASingletonDistinctFromConditionalRelevance() {
-    Assert.Same(ToolRelevance.Always, ToolRelevance.Always);
-    Assert.NotEqual(ToolRelevance.Always, ToolRelevance.When("inspect files"));
-  }
-
-  [Fact]
-  public void WhenPreservesGuidanceAndConditionalsHaveValueEquality() {
-    const string guidance = "Inspect files when the task requires it.";
-
-    var relevance = ToolRelevance.When(guidance);
-
-    Assert.Equal(guidance, Assert.IsType<ToolRelevance.Conditional>(relevance).Guidance);
-    Assert.Equal(ToolRelevance.When(guidance), relevance);
-    Assert.NotEqual(relevance, ToolRelevance.When("Use a different tool."));
-  }
-
-  [Fact]
-  public void WhenRejectsNullAndBlankGuidance() {
-    Assert.Throws<ArgumentNullException>(() => ToolRelevance.When(null!));
-    Assert.Throws<ArgumentException>(() => ToolRelevance.When(""));
-    Assert.Throws<ArgumentException>(() => ToolRelevance.When(" \t\r\n "));
-  }
 }

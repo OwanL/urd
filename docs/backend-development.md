@@ -531,6 +531,12 @@ $env:MSBUILDDISABLENODEREUSE = '1'
 & $dotnet test Urd.slnx --no-restore --configuration Release --disable-build-servers -m:1 -p:UseSharedCompilation=false
 ```
 
+For iteration, append `--filter 'FullyQualifiedName~ClassName'` to run just the
+relevant tests. For a broader pass without launching the browser-tool Chromium
+fixtures, use `--filter 'Category!=BrowserToolLoopback'`. Run the real browser-tool
+suite with `--filter 'Category=BrowserToolLoopback'` when changing that tool, or
+omit the filter to run the full suite.
+
 Normal restore is locked and must not change the committed `packages.lock.json`
 files. A mismatch fails instead of silently upgrading. Restore needs public NuGet
 access or already cached packages; it does not require personal credentials.

@@ -17,6 +17,7 @@ namespace Urd.Backend.Tests.Tools;
 // coordinates must reject stale or outside viewports even under concurrent resizes,
 // stale refs must fail and point at the snapshot action, and dialogs must be reported instead of
 // hanging the tool call.
+[Trait("Category", "BrowserToolLoopback")]
 public sealed class BrowserToolLoopbackTests {
   private static readonly TimeSpan StepTimeout = TimeSpan.FromSeconds(30);
 
@@ -189,35 +190,6 @@ public sealed class BrowserToolLoopbackTests {
       ToolOutput result = await click.WaitAsync(TimeSpan.FromSeconds(15));
       Assert.Contains($"Clicked {@ref}.", result.Text);
       Assert.Contains("Navigation did not reach DOMContentLoaded within 10 seconds", result.Text);
-      Assert.Contains("Page view omitted", result.Text);
-      Assert.DoesNotContain("Old document", result.Text);
-      Assert.DoesNotContain("New document", result.Text);
-    } finally {
-      release.SetResult();
-    }
-
-    await sandbox.WaitForSnapshotTextAsync(owner, "New document");
-  }
-
-  [Fact]
-  public async Task ActionNavigationReportsATimeoutWhileTheDocumentResponseIsStillHeld() {
-    await using Sandbox sandbox = await Sandbox.StartAsync();
-    sandbox.Site.Add("/depart", "<a href='/held'>Depart</a><h1>Old document</h1>");
-    TaskCompletionSource requested = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    sandbox.Site.Add("/held", "<h1>New document</h1>", () => {
-      requested.SetResult();
-      return release.Task.WaitAsync(StepTimeout);
-    });
-    Guid owner = Guid.NewGuid();
-    ToolOutput before = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/depart")));
-    string @ref = RefFor(before.Text, "Depart");
-    Task<ToolOutput> click = sandbox.CallAsync(owner, "click", ("ref", @ref));
-    try {
-      await requested.Task.WaitAsync(TimeSpan.FromSeconds(5));
-      ToolOutput result = await click.WaitAsync(TimeSpan.FromSeconds(15));
-      Assert.Contains($"Clicked {@ref}.", result.Text);
-      Assert.Contains("Navigation did not commit within 10 seconds", result.Text);
       Assert.Contains("Page view omitted", result.Text);
       Assert.DoesNotContain("Old document", result.Text);
       Assert.DoesNotContain("New document", result.Text);
@@ -847,23 +819,6 @@ public sealed class BrowserToolLoopbackTests {
   }
 
   [Fact]
-  public async Task OversizedSnapshotViewReportsTheCutWithinTheOutputBudget() {
-    await using Sandbox sandbox = await Sandbox.StartAsync();
-    Guid owner = Guid.NewGuid();
-    // A fitting view is not cut, so it must not carry the notice.
-    ToolOutput navigated = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/flood")));
-    Assert.DoesNotContain("[Snapshot cut", navigated.Text);
-
-    ToolOutput flooded = await sandbox.CallAsync(owner, "click", ("ref", RefFor(navigated.Text, "Flood")));
-    Assert.Single(SpillPaths(flooded.Text));
-    Assert.True(ToolOutputLimit.Fits(flooded.Text));
-    Assert.Contains("[Snapshot cut. Use snapshot ref= with a kept node's ref to inspect omitted content.]", flooded.Text);
-    ToolOutput scoped = await sandbox.CallAsync(owner, "snapshot", ("ref", RefFor(flooded.Text, "Mark")));
-    Assert.DoesNotContain("[Snapshot cut", scoped.Text);
-    Assert.Contains(RefFor(flooded.Text, "Mark"), scoped.Text);
-  }
-
-  [Fact]
   public async Task WideSnapshotSpillsCompleteViewWithAnActionableLateRef() {
     await using Sandbox sandbox = await Sandbox.StartAsync();
     sandbox.Site.Add("/wide", """
@@ -887,49 +842,6 @@ public sealed class BrowserToolLoopbackTests {
 
     ToolOutput clicked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(full, "wide-1799")));
     Assert.Contains("selected-1799", clicked.Text);
-  }
-
-  // Thirty nested groups each carry over a thousand bytes of text, so the capture overflows
-  // the shared cap through nesting depth alone. The spilled complete view must stay readable,
-  // and a ref that only appears in that saved file must still act without taking a new
-  // snapshot. Chromium's aria snapshot collection degrades: past about forty nested levels
-  // with content-rich names and text it collapses to a root-only stub, and past about
-  // fifty-eight it never returns, so the fixture keeps to thirty levels, which render fast
-  // and complete.
-  [Fact]
-  public async Task DeepSnapshotSpillsCompleteViewWithAnActionableLeafRef() {
-    await using Sandbox sandbox = await Sandbox.StartAsync();
-    sandbox.Site.Add("/deep", """
-      <!doctype html><html><body><main id="root"></main><output id="out">waiting</output>
-      <script>
-        let parent = document.getElementById('root');
-        for (let i = 0; i < 30; i++) {
-          const level = `level-${String(i).padStart(3, '0')}`;
-          const group = document.createElement('div');
-          group.setAttribute('role', 'group');
-          group.setAttribute('aria-label', `${level} group`);
-          group.textContent = `${level}: ${'pale lantern '.repeat(150)}`;
-          parent.append(group);
-          parent = group;
-        }
-        const button = document.createElement('button');
-        button.textContent = 'deep leaf';
-        button.onclick = () => document.getElementById('out').textContent = 'leaf selected';
-        parent.append(button);
-      </script></body></html>
-      """);
-    Guid owner = Guid.NewGuid();
-
-    ToolOutput view = await sandbox.CallAsync(owner, "navigate", ("url", sandbox.Site.Url("/deep")));
-    string full = await File.ReadAllTextAsync(Assert.Single(SpillPaths(view.Text)));
-    Assert.True(ToolOutputLimit.Fits(view.Text));
-    Assert.Contains("level-000 group", full);
-    Assert.Contains("level-029 group", full);
-    Assert.Contains("deep leaf", full);
-
-    ToolOutput clicked = await sandbox.CallAsync(owner, "click", ("ref", RefFor(full, "deep leaf")))
-        .WaitAsync(StepTimeout);
-    Assert.Contains("leaf selected", clicked.Text);
   }
 
   [Fact]

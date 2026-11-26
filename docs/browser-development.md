@@ -283,7 +283,8 @@ npm run build
 | `npm run format` / `npm run format:check` | Write formatting / check formatting without changes. |
 | `npm run lint` / `npm run lint:fast` | Combined typed lint / syntax-only feedback. |
 | `npm run typecheck` / `npm run typecheck:watch` | Strict compiler once / persistent watch. |
-| `npm test` | Fast Node unit tests discovered from `tests/**/*.test.ts`; no frontend component framework. |
+| `npm test` | Node unit tests discovered from `tests/**/*.test.ts`; no Chromium launch. For one file, use `node --test path/to/file.test.ts`. |
+| `npm run test:browser` | Chromium checks for browser viewer input and layout; requires Playwright Chromium (`npx playwright install chromium`). |
 | `npm run build` / `npm run build:watch` | Bundle once / watch into `source/ui/dist`; neither runs a server. |
 | `npm run test:integration` | Real Server and SDK-to-loopback-provider test; requires built UI assets and the Release backend build. |
 | `npm run dev:browser:host` | Explicit temporary browser fixture host; real Urd plus a credential-free loopback model fixture, never saved accounts. |
@@ -321,10 +322,10 @@ require the browser marker. Unknown API paths are not redirected to HTML.
 The fixture launches the built Server with its own temporary data root and port
 `0`, creates a custom no-auth connection to its owned loopback model endpoint, and
 refreshes only that fixture's catalog. It exercises the real managed provider, SDK,
-execution and SQLite path, not a production fake-client flag. Automated browser tests are
-not retained. For manual inspection, run `npm run dev:browser:host` and open its printed
-Urd origin. This starts a development host, not tests.
-Playwright remains a dependency only for the separate manual `tests/support/TranscriptBaseline.ts`
+execution and SQLite path, not a production fake-client flag. For manual inspection,
+run `npm run dev:browser:host` and open its printed Urd origin. This starts a development
+host, not tests.
+Playwright also supports the manual `tests/support/TranscriptBaseline.ts`
 diagnostic, not routine verification. Its raw-SQL seed still requires schema 16, while
 [the schema owner](../source/backend/harness/storage/DatabaseSchema.cs) is at version 29
 (as checked 2026-11-17), so it aborts before the workload. Requalify its seed SQL and

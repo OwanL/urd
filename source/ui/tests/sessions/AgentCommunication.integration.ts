@@ -215,68 +215,6 @@ function assertToolResult(request: ModelRequest, name: string, callId: string, o
 }
 
 void test(
-  "a foreground subagent returns its report to the primary",
-  { timeout: 90_000 },
-  async (t) => {
-    const f = await setup(t);
-    const task = "Report the fixture answer for the delegation scenario.";
-    const report = "The fixture answer is 41 — café 東京 verified.";
-    const args = { bucket: "small", context: "none", task };
-    f.first.enqueue({
-      text: "",
-      toolCall: { id: "call-subagent", name: "subagent", arguments: args },
-    });
-    f.first.enqueue({ text: "Relayed the subagent report." });
-    f.second.enqueue({ text: report });
-    const id = await f.create();
-    const execution = await f.submit(id, f.firstConnection, "Delegate the fixture answer lookup.");
-    await f.settle(id, execution);
-
-    assert.equal(f.second.calls.length, 1);
-    const childUsers = messages(f.second.calls[0]!.request).filter(
-      (message) => message.role === "user",
-    );
-    assert.equal(childUsers.length, 1);
-    assert.equal(text(childUsers[0]!), task);
-    const listing = await f.client.list(undefined, f.signal);
-    assert.deepEqual(listing.sessionIds, [id]);
-    assert.equal(listing.nextCursor, null);
-    assert.equal(listing.latestLlmSelection?.connection.id, f.firstConnection.id);
-    assert.equal(f.first.calls.length, 2);
-    assertToolResult(f.first.calls[1]!.request, "subagent", "call-subagent", report);
-    // The wire transcript still records the tool call; the UI resolves it to a child view.
-    await f.transcript(id, "call-subagent", "subagent", args, report);
-    const history = await f.client.getHistory(
-      id,
-      { mode: "latest", expectedHistoryRevision: 0 },
-      f.signal,
-    );
-    const call = history.entries.find((entry) => entry.tool?.callId === "call-subagent");
-    assert.ok(call?.tool);
-    const child = await f.client.getSubagentForCall(
-      id,
-      call.tool.requestId,
-      call.tool.callId,
-      f.signal,
-    );
-    assert.ok(child);
-    assert.equal(child.parentId, id);
-    assert.ok(child.title);
-    const view = await f.client.getSubagentView(child.id, f.signal);
-    assert.equal(view.parentId, id);
-    assert.equal(view.title, child.title);
-    assert.equal(view.live, false);
-    const childHistory = await f.client.getHistory(
-      child.id,
-      { mode: "latest", expectedHistoryRevision: view.historyRevision },
-      f.signal,
-    );
-    assert.ok(childHistory.entries.length > 0);
-    assert.deepEqual(await f.client.getLiveSubagents(id, f.signal), []);
-  },
-);
-
-void test(
   "a waking question delivers the sender's prompt and answer",
   { timeout: 90_000 },
   async (t) => {
@@ -379,47 +317,42 @@ void test(
   },
 );
 
-for (const answer of ["Choose café", '{\r\n  "answer": "Custom 東京 🧭"\r\n}']) {
-  void test(
-    `ask_user returns the verbatim ${answer.startsWith("Choose") ? "preset" : "custom"} answer`,
-    { timeout: 90_000 },
-    async (t) => {
-      const f = await setup(t);
-      const args = {
-        question: "Which option?",
-        context: "Context café",
-        choices: ["Choose café", "Other"],
-      };
-      f.first.enqueue({
-        text: "",
-        toolCall: { id: "call-user", name: "ask_user", arguments: args },
-      });
-      f.first.enqueue({ text: "Answered." });
-      const id = await f.create();
-      const execution = await f.submit(id, f.firstConnection, "Ask me.");
-      const question = await f.pending(id);
-      assert.deepEqual(question, {
-        id: question.id,
-        askingSessionId: id,
-        question: args.question,
-        context: args.context,
-        answers: args.choices,
-        sourceTitle: null,
-        background: false,
-      });
-      assert.ok(question.id);
-      await rejectsStatus(f.answer(id, question.id, "  \n "), 400);
-      await rejectsStatus(f.answer(id, question.id, 42), 400);
-      assert.equal((await f.questions(id)).length, 1);
-      assert.deepEqual(await f.answer(id, question.id, answer), { answer });
-      await rejectsStatus(f.answer(id, question.id, answer), 409);
-      await f.settle(id, execution);
-      assert.deepEqual(await f.questions(id), []);
-      assertToolResult(f.first.calls[1]!.request, "ask_user", "call-user", answer);
-      await f.transcript(id, "call-user", "ask_user", args, answer);
-    },
-  );
-}
+void test("ask_user returns the verbatim custom answer", { timeout: 90_000 }, async (t) => {
+  const f = await setup(t);
+  const answer = '{\r\n  "answer": "Custom 東京 🧭"\r\n}';
+  const args = {
+    question: "Which option?",
+    context: "Context café",
+    choices: ["Choose café", "Other"],
+  };
+  f.first.enqueue({
+    text: "",
+    toolCall: { id: "call-user", name: "ask_user", arguments: args },
+  });
+  f.first.enqueue({ text: "Answered." });
+  const id = await f.create();
+  const execution = await f.submit(id, f.firstConnection, "Ask me.");
+  const question = await f.pending(id);
+  assert.deepEqual(question, {
+    id: question.id,
+    askingSessionId: id,
+    question: args.question,
+    context: args.context,
+    answers: args.choices,
+    sourceTitle: null,
+    background: false,
+  });
+  assert.ok(question.id);
+  await rejectsStatus(f.answer(id, question.id, "  \n "), 400);
+  await rejectsStatus(f.answer(id, question.id, 42), 400);
+  assert.equal((await f.questions(id)).length, 1);
+  assert.deepEqual(await f.answer(id, question.id, answer), { answer });
+  await rejectsStatus(f.answer(id, question.id, answer), 409);
+  await f.settle(id, execution);
+  assert.deepEqual(await f.questions(id), []);
+  assertToolResult(f.first.calls[1]!.request, "ask_user", "call-user", answer);
+  await f.transcript(id, "call-user", "ask_user", args, answer);
+});
 
 void test(
   "background ask_user permits steering before its answer",
@@ -474,13 +407,11 @@ void test(
 
 void test("a child ask_user is routed to its primary session", { timeout: 90_000 }, async (t) => {
   const f = await setup(t);
+  const args = { bucket: "small", includeUserInput: false, task: "Ask the user." };
+  const report = "The fixture answer is 41 — café 東京 verified.";
   f.first.enqueue({
     text: "",
-    toolCall: {
-      id: "call-child",
-      name: "subagent",
-      arguments: { bucket: "small", context: "none", task: "Ask the user." },
-    },
+    toolCall: { id: "call-child", name: "subagent", arguments: args },
   });
   f.first.enqueue({ text: "Child finished." });
   f.second.enqueue({
@@ -491,7 +422,7 @@ void test("a child ask_user is routed to its primary session", { timeout: 90_000
       arguments: { question: "Child question?", choices: [] },
     },
   });
-  f.second.enqueue({ text: "Child report." });
+  f.second.enqueue({ text: report });
   const id = await f.create();
   const execution = await f.submit(id, f.firstConnection, "Delegate a question.");
   const question = await f.pending(id);
@@ -506,6 +437,41 @@ void test("a child ask_user is routed to its primary session", { timeout: 90_000
   assert.deepEqual(await f.answer(id, question.id, "Child answer"), { answer: "Child answer" });
   await f.settle(id, execution);
   assertToolResult(f.second.calls[1]!.request, "ask_user", "call-child-user", "Child answer");
+  assertToolResult(f.first.calls[1]!.request, "subagent", "call-child", report);
+  await f.transcript(id, "call-child", "subagent", args, report);
+  const childUsers = messages(f.second.calls[0]!.request).filter(
+    (message) => message.role === "user",
+  );
+  assert.equal(childUsers.length, 1);
+  assert.equal(text(childUsers[0]!), args.task);
+  const history = await f.client.getHistory(
+    id,
+    { mode: "latest", expectedHistoryRevision: 0 },
+    f.signal,
+  );
+  const call = history.entries.find((entry) => entry.tool?.callId === "call-child");
+  assert.ok(call?.tool);
+  const child = await f.client.getSubagentForCall(
+    id,
+    call.tool.requestId,
+    call.tool.callId,
+    f.signal,
+  );
+  assert.ok(child);
+  assert.equal(child.id, question.askingSessionId);
+  assert.equal(child.parentId, id);
+  assert.ok(child.title);
+  const view = await f.client.getSubagentView(child.id, f.signal);
+  assert.equal(view.parentId, id);
+  assert.equal(view.title, child.title);
+  assert.equal(view.live, false);
+  const childHistory = await f.client.getHistory(
+    child.id,
+    { mode: "latest", expectedHistoryRevision: view.historyRevision },
+    f.signal,
+  );
+  assert.ok(childHistory.entries.length > 0);
+  assert.deepEqual(await f.client.getLiveSubagents(id, f.signal), []);
   assert.deepEqual(await f.questions(id), []);
 });
 

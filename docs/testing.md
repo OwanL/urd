@@ -23,7 +23,7 @@ in maintenance cost and must not be used to evade the budget.
 | Execution | Positive completion evidence, buffered Unicode output/deadline flush, write-failure fencing, parallel/background tool ownership, waiting, Stop/failure drain and explicit no-replay recovery. Real SDK loops exercise both provider APIs, direct/background image results, native context persistence and reopen. |
 | Providers | Issued identity/state/account binding, private context scope, uncertain refresh persistence/recovery, credential mutation and cancellation drain, representative rejected native output and secret-safe errors. |
 | HTTP | Representative session/provider wire/status/selection flows, browser admission, disconnected acknowledgements, host draining and exclusive process data ownership. Core policy is not replayed through every route. |
-| Browser logic | Fast Node tests own shared transport, client mappings, draft/receipt uncertainty and feature state/geometry models; an offline real-server/SDK integration flow remains. No automated browser/DOM tests. |
+| Browser logic | Fast Node tests own shared transport, client mappings, draft/receipt uncertainty and feature state/geometry models. Browser viewer input and layout have separate Chromium checks; offline real-server/SDK integration covers the HTTP boundary. |
 
 Use small data tables when cases exercise genuinely different outcomes through the
 same setup. Assert observable results, not private task identity or incidental
@@ -69,21 +69,33 @@ behavior and indexed query plans. This removes routine evidence at that scale. T
 instruction-catalog integration fixture uses a small catalog while retaining normal
 selection and scripted overflow paths; it is not a large-catalog stress test.
 
-## Browser-test removal
+### Browser and agent communication cuts
 
-On 2026-11-11 the owner chose to remove automated browser tests entirely, rather than
-split the large workspace/renderer suites or retain browser smoke tests. Their Playwright
-suites, synthetic browser harness and command entries are removed. Fast unit tests and
-the offline HTTP/SDK integration flow remain. This deliberately drops automated checks
-for actual DOM layout, selection, focus, clipboard and composed browser interaction;
-model tests are not equivalent coverage. Manual diagnostic/development tools remain
-separate from the routine test suite. Do not reintroduce browser tests without approval.
+The remaining Chromium tool tests keep an actionable wide spill, output budgeting,
+and a post-commit navigation timeout. They no longer exercise a deep actionable spill,
+the exact cut notice, or a held-response timeout before commit. Pre-commit cancellation
+remains covered. The viewer stream test keeps click-triggered dialog reopening, without
+repeating it for keys or waiting past the production deadline.
+
+The agent communication integration now checks the foreground child report in the child
+question flow instead of launching a second server fixture. The `ask_user` round trip keeps
+the custom CRLF/Unicode answer; it no longer repeats the flow with a preset answer.
+
+## Separate Chromium checks
+
+The November 2026 removal applied to the general workspace and renderer Playwright
+suites. The later browser viewer has its own input and layout tests. Run
+`npm run test:browser` from `source/ui/` to exercise those tests; `npm test` does not
+launch Chromium. The backend browser-tool loopbacks have a separate filter. See
+[backend development](backend-development.md#prerequisite-and-commands).
+The old general workspace/renderer DOM coverage is not restored.
 
 ## Verification
 
 Use the pinned toolchains and commands in [backend development](backend-development.md#prerequisite-and-commands)
 and [browser development](browser-development.md#toolchain-and-checks): Release
 backend tests, UI static checks/unit tests, and the offline SDK integration test.
+Run the separate Chromium checks when touching the browser tool or viewer.
 The size budget is a maintenance constraint, not a substitute for these checks or for
 reviewing whether assertions would catch a real regression. Test fixtures must
 use owned temporary data and fake providers, never the user's live profile.

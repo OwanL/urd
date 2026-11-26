@@ -7,11 +7,12 @@ namespace Urd.Core.Tools;
 // The model-facing browser tool over the shared BrowserHost: it opens, lists and drives the
 // owner's own pages, and answers page dialogs. Sign-ins live in the shared profile, so agents must not sign
 // accounts out; access challenges are reported and handed to the user, never bypassed.
-internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
+internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
   private const int ElementTimeoutMilliseconds = 10_000;
   private const int SnapshotTimeoutMilliseconds = 30_000;
   private const int MaxWaitMilliseconds = 60_000;
 
+  private readonly BrowserHost host = host;
   private readonly BrowserSnapshots snapshots = new();
 
   public override string Name => "browser";
@@ -146,102 +147,6 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     return await ResultAsync(owner, [note], cancellation, full: true).ConfigureAwait(false);
   }
 
-  private async Task<ToolOutput> ClickAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    string @ref = Require(arguments, "ref");
-    (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
-    host.Touch(owner, page.Id);
-    if (interaction.PendingDialog is not null)
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await RunActionAsync(owner, interaction, $"Clicked {@ref}.", () => page.Page.GetByRef(@ref)
-        .ClickAsync(InputClickOptions()), cancellation, allowGrace: true).ConfigureAwait(false);
-  }
-
-  private async Task<ToolOutput> TypeAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    string @ref = Require(arguments, "ref");
-    string text = Require(arguments, "text");
-    bool submit = OptionalBool(arguments, "submit");
-    (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
-    host.Touch(owner, page.Id);
-    if (interaction.PendingDialog is not null)
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    ILocator target = page.Page.GetByRef(@ref);
-    async Task TypeIntoAsync() {
-      await target.ClickAsync(InputClickOptions()).ConfigureAwait(false);
-      await target.PressSequentiallyAsync(text).ConfigureAwait(false);
-      if (submit)
-        await target.PressAsync("Enter", InputPressOptions()).ConfigureAwait(false);
-    }
-    return await RunActionAsync(owner, interaction, $"Typed into {@ref}.{(submit ? " Submitted with Enter." : "")}",
-        TypeIntoAsync, cancellation, allowGrace: true).ConfigureAwait(false);
-  }
-
-  private async Task<ToolOutput> FillFormAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    FormField[] fields = RequireForm(arguments);
-    (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
-    host.Touch(owner, page.Id);
-    if (interaction.PendingDialog is not null)
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    async Task FillFieldsAsync() {
-      foreach (FormField field in fields) {
-        ILocator target = page.Page.GetByRef(field.Ref);
-        switch (field.Kind) {
-          case "text":
-            await target.FillAsync(field.Value, new LocatorFillOptions { Timeout = ElementTimeoutMilliseconds })
-                .ConfigureAwait(false);
-            break;
-          case "checkbox":
-            await target.SetCheckedAsync(Ticked(field.Value), new LocatorSetCheckedOptions { Timeout = ElementTimeoutMilliseconds })
-                .ConfigureAwait(false);
-            break;
-          default: // "select" is validated when the form is read.
-            await target.SelectOptionAsync(field.Value, new LocatorSelectOptionOptions { Timeout = ElementTimeoutMilliseconds })
-                .ConfigureAwait(false);
-            break;
-        }
-      }
-    }
-    return await RunActionAsync(owner, interaction, $"Filled {fields.Length} form fields.", FillFieldsAsync, cancellation)
-        .ConfigureAwait(false);
-  }
-
-  private static bool Ticked(string value) {
-    if (!bool.TryParse(value, out bool ticked))
-      throw new ArgumentException($"Checkbox values are true or false, not \"{value}\".");
-    return ticked;
-  }
-
-  private async Task<ToolOutput> HoverAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    string @ref = Require(arguments, "ref");
-    (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
-    host.Touch(owner, page.Id);
-    if (interaction.PendingDialog is not null)
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await RunActionAsync(owner, interaction, $"Hovered {@ref}.", () => page.Page.GetByRef(@ref)
-        .HoverAsync(new LocatorHoverOptions { Timeout = ElementTimeoutMilliseconds }), cancellation).ConfigureAwait(false);
-  }
-
-  private async Task<ToolOutput> PressAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    string key = Require(arguments, "key");
-    (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
-    host.Touch(owner, page.Id);
-    if (interaction.PendingDialog is not null)
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await RunActionAsync(owner, interaction, $"Pressed {key}.", () => page.Page.Keyboard.PressAsync(key),
-        cancellation, allowGrace: true).ConfigureAwait(false);
-  }
-
-  private async Task<ToolOutput> SelectAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    string @ref = Require(arguments, "ref");
-    string[] values = RequireStrings(arguments, "values");
-    (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
-    host.Touch(owner, page.Id);
-    if (interaction.PendingDialog is not null)
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    return await RunActionAsync(owner, interaction, $"Selected {string.Join(", ", values)} in {@ref}.",
-        () => page.Page.GetByRef(@ref).SelectOptionAsync(values, new() { Timeout = ElementTimeoutMilliseconds }),
-        cancellation).ConfigureAwait(false);
-  }
-
   private async Task<ToolOutput> BackAsync(Guid owner, CancellationToken cancellation) {
     (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
     host.Touch(owner, page.Id);
@@ -297,24 +202,6 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
         cancellation).ConfigureAwait(false);
   }
 
-  private async Task<ToolOutput> ClickAtAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    int x = RequireInt(arguments, "x");
-    int y = RequireInt(arguments, "y");
-    (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
-    host.Touch(owner, page.Id);
-    if (interaction.PendingDialog is not null)
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    ScreenshotRecord? basis = interaction.LatestScreenshot;
-    if (basis is null)
-      throw new InvalidOperationException("Take a screenshot first; click_at needs coordinates from the latest screenshot.");
-    if (x < 0 || x >= basis.Width || y < 0 || y >= basis.Height)
-      throw new ArgumentException($"Coordinates must be inside the {basis.Width}x{basis.Height} screenshot.");
-    // The epoch check and the click are atomic against resize and capture on the same page.
-    return await RunActionAsync(owner, interaction, $"Clicked at {x},{y}.",
-        () => interaction.ClickScreenshotAsync(basis, x, y, cancellation), cancellation, allowGrace: true)
-        .ConfigureAwait(false);
-  }
-
   private async Task<ToolOutput> WaitAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
     string? text = Optional(arguments, "text");
     int? ms = null;
@@ -340,24 +227,6 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
       note = $"Waited {ms.Value} ms.";
     }
     return await ResultAsync(owner, [note], cancellation).ConfigureAwait(false);
-  }
-
-  private async Task<ToolOutput> UploadAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
-    string @ref = Require(arguments, "ref");
-    string[] paths = RequireStrings(arguments, "paths");
-    (BrowserPage<IPage> page, BrowserInteraction interaction) = Current(owner);
-    host.Touch(owner, page.Id);
-    if (interaction.PendingDialog is not null)
-      return await ResultAsync(owner, [], cancellation).ConfigureAwait(false);
-    string[] files = paths.Select(path => {
-      string full = Path.GetFullPath(path);
-      if (!File.Exists(full))
-        throw new ArgumentException($"No file at \"{full}\".");
-      return full;
-    }).ToArray();
-    return await RunActionAsync(owner, interaction, $"Uploaded {files.Length} file(s) into {@ref}.",
-        () => page.Page.GetByRef(@ref).SetInputFilesAsync(files, new() { Timeout = ElementTimeoutMilliseconds }),
-        cancellation).ConfigureAwait(false);
   }
 
   private async Task<ToolOutput> DialogAsync(Guid owner, JsonElement arguments, CancellationToken cancellation) {
@@ -390,209 +259,4 @@ internal sealed class BrowserTool(BrowserHost host) : HarnessTool {
     return await ResultAsync(owner, [$"Evaluated: {value}"], [], withSnapshot: false, cancellation)
         .ConfigureAwait(false);
   }
-
-  // The pinned Playwright still honors these flags despite the obsolete attributes. Let the
-  // tool own the navigation wait instead of letting the input command time out before commit.
-#pragma warning disable CS0612
-  private static LocatorClickOptions InputClickOptions() => new() { Timeout = ElementTimeoutMilliseconds, NoWaitAfter = true };
-  private static LocatorPressOptions InputPressOptions() => new() { Timeout = ElementTimeoutMilliseconds, NoWaitAfter = true };
-#pragma warning restore CS0612
-
-  private async Task<ToolOutput> RunActionAsync(Guid owner, BrowserInteraction interaction, string note,
-      Func<Task> command, CancellationToken cancellation, bool allowGrace = false) {
-    List<string> notes = [note];
-    PageCommandResult result = await RunPagedCommandAsync(interaction, command, cancellation, notes, allowGrace)
-        .ConfigureAwait(false);
-    if (result == PageCommandResult.Dialog)
-      notes.Clear();
-    // A snapshot can wait for the new document's body even after commit.
-    return await ResultAsync(owner, notes, [], withSnapshot: result != PageCommandResult.NavigationTimedOut,
-        cancellation).ConfigureAwait(false);
-  }
-
-  private enum PageCommandResult { Ready, Dialog, NavigationTimedOut }
-
-  // The dialog signal covers both the command and any navigation it started. Stop waiting on
-  // cancellation or a dialog without retrying input that may already have taken effect.
-  private static async Task<PageCommandResult> RunPagedCommandAsync(BrowserInteraction interaction, Func<Task> command,
-      CancellationToken cancellation, List<string>? actionNotes = null, bool allowGrace = false) {
-    cancellation.ThrowIfCancellationRequested();
-    using CancellationTokenSource waiting = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
-    Task dialogPending = interaction.WaitDialogPendingAsync(waiting.Token);
-    int before = interaction.Navigation.Version;
-    try {
-      if (dialogPending.IsCompleted) {
-        cancellation.ThrowIfCancellationRequested();
-        return PageCommandResult.Dialog;
-      }
-      Task commandTask = command();
-      if (await Task.WhenAny(commandTask, dialogPending).ConfigureAwait(false) != commandTask) {
-        _ = AwaitQuietlyAsync(commandTask);
-        cancellation.ThrowIfCancellationRequested();
-        return PageCommandResult.Dialog;
-      }
-      if (cancellation.IsCancellationRequested || interaction.PendingDialog is not null) {
-        _ = AwaitQuietlyAsync(commandTask);
-        cancellation.ThrowIfCancellationRequested();
-        return PageCommandResult.Dialog;
-      }
-      await commandTask.ConfigureAwait(false);
-      NavigationWait navigation = NavigationWait.Ready;
-      if (actionNotes is not null) {
-        Task<NavigationWait> loading = interaction.Navigation.WaitAfterAsync(before, allowGrace, waiting.Token);
-        if (await Task.WhenAny(loading, dialogPending).ConfigureAwait(false) == loading)
-          navigation = await loading.ConfigureAwait(false);
-      }
-      cancellation.ThrowIfCancellationRequested();
-      if (dialogPending.IsCompleted)
-        return PageCommandResult.Dialog;
-      if (navigation != NavigationWait.Ready) {
-        string milestone = navigation == NavigationWait.TimedOutBeforeCommit ? "commit" : "reach DOMContentLoaded";
-        actionNotes!.Add($"Navigation did not {milestone} within 10 seconds. Page view omitted; use snapshot after the page loads.");
-        return PageCommandResult.NavigationTimedOut;
-      }
-      return PageCommandResult.Ready;
-    } finally {
-      await waiting.CancelAsync().ConfigureAwait(false);
-    }
-  }
-
-  private static async Task AwaitQuietlyAsync(Task command) {
-    try {
-      await command.ConfigureAwait(false);
-    } catch {
-      // The abandoned command fails once the dialog is answered or the page is gone.
-    }
-  }
-
-  private Task<ToolOutput> ResultAsync(Guid owner, List<string> notes, CancellationToken cancellation,
-      bool full = false, string? @ref = null) =>
-      ResultAsync(owner, notes, [], withSnapshot: true, cancellation, full, @ref);
-
-  private async Task<ToolOutput> ResultAsync(Guid owner, List<string> notes, IReadOnlyList<DataContent> images,
-      bool withSnapshot, CancellationToken cancellation, bool full = false, string? @ref = null) {
-    BrowserPage<IPage>? active = host.Pages.Selected(owner);
-    List<string> lines = [.. notes];
-    if (active is null) {
-      lines.Add("No pages are open.");
-      lines.AddRange(Notices(owner));
-      return new ToolOutput(Body(lines), images);
-    }
-    BrowserInteraction interaction = BrowserInteraction.For(active.Page);
-    host.Touch(owner, active.Id);
-    lines.AddRange(Notices(owner));
-    if (interaction.PendingDialog is { } open) {
-      lines.Add(DialogBlock(open));
-    } else {
-      (string[] errors, string[] failed) = interaction.DrainEvents();
-      try {
-        lines.AddRange(errors.Select(text => $"Console error: {text}"));
-        lines.AddRange(failed.Select(text => $"Failed request: {text}"));
-        if (withSnapshot) {
-          lines.Add(active.Page.Url);
-          try {
-            string text = await snapshots.DescribeAsync(active.Page, interaction, Body(lines), full, @ref,
-                cancellation).ConfigureAwait(false);
-            return new ToolOutput(text, images);
-          } catch (Exception error) when (error is PlaywrightException or TimeoutException) {
-            // The page may have opened a dialog while the action ran; that stays the headline.
-            if (interaction.PendingDialog is not { } appeared)
-              throw;
-            lines.Add(DialogBlock(appeared));
-          }
-        }
-        return new ToolOutput(Body(lines), images);
-      } catch {
-        // A result was not built, so deduplicated events must be available to the next action.
-        interaction.RestoreEvents(errors, failed);
-        throw;
-      }
-    }
-    return new ToolOutput(Body(lines), images);
-  }
-
-  private string[] Notices(Guid owner) {
-    string drained = host.DrainNotices(owner);
-    return drained.Length == 0 ? [] : drained.Split(Environment.NewLine);
-  }
-
-  private static string DialogBlock(PendingDialog open) {
-    string detail = string.IsNullOrEmpty(open.DefaultValue) ? "" : $" (default \"{open.DefaultValue}\")";
-    return $"A dialog blocks this page: {open.Type} \"{open.Message}\"{detail}. "
-        + "Resolve it with the dialog action; other actions on this page wait until then.";
-  }
-
-  private static string Body(IEnumerable<string> lines) => string.Join('\n', lines.Where(line => line.Length > 0));
-
-  private static string Address(JsonElement arguments) {
-    string value = Require(arguments, "url");
-    if (!Uri.TryCreate(value, UriKind.Absolute, out Uri? url) || url.Scheme is not ("http" or "https") || url.Host.Length == 0)
-      throw new ArgumentException("url must be an absolute http(s) address.");
-    return url.ToString();
-  }
-
-  private static Guid ParsePageId(string value) {
-    if (!Guid.TryParse(value, out Guid id))
-      throw new ArgumentException($"\"{value}\" is not a page id from the tabs listing.");
-    return id;
-  }
-
-  private static FormField[] RequireForm(JsonElement arguments) {
-    if (!arguments.TryGetProperty("form", out JsonElement form) || form.ValueKind is not JsonValueKind.Array)
-      throw new ArgumentException("form must be an array of fields.");
-    List<FormField> fields = [];
-    foreach (JsonElement entry in form.EnumerateArray()) {
-      string kind = Optional(entry, "type") ?? "text";
-      if (kind is not ("text" or "checkbox" or "select"))
-        throw new ArgumentException($"Unknown form field type \"{kind}\"; expected text, checkbox or select.");
-      fields.Add(new FormField(Require(entry, "ref"), kind, Require(entry, "value")));
-    }
-    if (fields.Count == 0)
-      throw new ArgumentException("form must list at least one field.");
-    return [.. fields];
-  }
-
-  private static string Require(JsonElement element, string name) {
-    if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind is not JsonValueKind.String
-        || value.GetString() is not { } text || text.Length == 0)
-      throw new ArgumentException($"{name} is required and must be a nonempty string.");
-    return text;
-  }
-
-  private static string? Optional(JsonElement element, string name) =>
-      element.TryGetProperty(name, out JsonElement value) && value.ValueKind is JsonValueKind.String
-          ? value.GetString()
-          : null;
-
-  private static bool OptionalBool(JsonElement element, string name) {
-    if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind is JsonValueKind.Null)
-      return false;
-    if (value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
-      throw new ArgumentException($"{name} must be a boolean.");
-    return value.GetBoolean();
-  }
-
-  private static string[] RequireStrings(JsonElement element, string name) {
-    if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind is not JsonValueKind.Array)
-      throw new ArgumentException($"{name} must be an array of strings.");
-    string[] items = value.EnumerateArray().Select(item => item.ValueKind is JsonValueKind.String ? item.GetString() ?? "" : "").ToArray();
-    if (items.Any(string.IsNullOrEmpty))
-      throw new ArgumentException($"{name} must not contain empty strings.");
-    return items;
-  }
-
-  private static int RequireInt(JsonElement element, string name) {
-    if (!element.TryGetProperty(name, out JsonElement value) || value.ValueKind is not JsonValueKind.Number)
-      throw new ArgumentException($"{name} is required and must be a number.");
-    return value.GetInt32();
-  }
-
-  private static int RequireInt(JsonElement value) {
-    if (value.ValueKind is not JsonValueKind.Number)
-      throw new ArgumentException("ms must be a number.");
-    return value.GetInt32();
-  }
-
-  // One fill_form field; its kind selects how the value is applied to the element.
-  private sealed record FormField(string Ref, string Kind, string Value);
 }

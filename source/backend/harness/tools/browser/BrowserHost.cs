@@ -9,10 +9,7 @@ namespace Urd.Core.Tools;
 // close thirty minutes after its last agent or viewer activity - never while one of its
 // questions to the user is pending. Every exit stages the profile's session cookies, so
 // logins survive restarts.
-internal sealed class BrowserHost : IAsyncDisposable {
-  private static readonly TimeSpan OwnerIdleAfter = TimeSpan.FromMinutes(30);
-  private static readonly TimeSpan BrowserIdleAfter = TimeSpan.FromMinutes(5);
-  private static readonly TimeSpan PendingRecheck = TimeSpan.FromMinutes(1);
+internal sealed partial class BrowserHost : IAsyncDisposable {
   private static readonly TimeSpan CloseTimeout = TimeSpan.FromSeconds(5);
   private const int NoticeDetailLimit = 120;
 
@@ -193,57 +190,6 @@ internal sealed class BrowserHost : IAsyncDisposable {
     }
   }
 
-  // Launches lazily, once; callers waiting on a shared launch each cancel only their own wait.
-  private Task<PersistentContext> BeginLaunchAsync(CancellationToken cancellation) {
-    Task<PersistentContext> shared;
-    lock (gate) {
-      ObjectDisposedException.ThrowIf(disposed, this);
-      // A failed or closed launch is handed off to an exit so the next use relaunches cleanly.
-      if (launch is { IsCompleted: true } completed && (!completed.IsCompletedSuccessfully || completed.Result.IsClosed)) {
-        launch = null;
-        exiting = ExitBrowserAsync(completed);
-      }
-      emptySince = null;
-      if (launch is null) {
-        launch = RunLaunchAsync(exiting ?? Task.CompletedTask);
-        ObserveFailure(launch);
-      }
-      shared = launch;
-    }
-    return shared.WaitAsync(cancellation);
-  }
-
-  private async Task<PersistentContext> RunLaunchAsync(Task predecessor) {
-    await Task.Yield();
-    await predecessor;
-    return await PersistentContext.StartAsync(profilePath, cookiePath, shutdown.Token);
-  }
-
-  private static async Task ExitBrowserAsync(Task<PersistentContext> pending) {
-    await Task.Yield();
-    PersistentContext? browser;
-    try {
-      browser = await pending;
-    } catch (Exception) {
-      return; // Nothing launched; nothing to save or close.
-    }
-    try {
-      await browser.ExitAsync();
-    } catch (Exception) {
-      // Exiting is best effort; the next launch restores the last staged cookies.
-    }
-  }
-
-  // Caller holds the gate. Stops the browser; the next open relaunches with restored cookies.
-  private void Retire() {
-    if (launch is null)
-      return;
-    Task<PersistentContext> pending = launch;
-    launch = null;
-    emptySince = null;
-    exiting = ExitBrowserAsync(pending);
-  }
-
   // Caller holds the gate. Registers the page as its owner's most recent one, evicting the
   // owner's least recently used page past the limit. Throws when the owner was already closed
   // by a concurrent CloseOwnerAsync or disposal.
@@ -259,104 +205,6 @@ internal sealed class BrowserHost : IAsyncDisposable {
     UpdateEmpty();
     Signal(); // A page may have appeared for an idle owner; the sweep recomputes.
     return registration.Page;
-  }
-
-  private void Attach(Guid owner, Guid page, IPage live) {
-    // Popups and downloads belong to the opener's owner. A page closed outside the host, by a
-    // site or by the browser, removes itself so listings stay truthful.
-    live.FrameNavigated += (_, frame) => {
-      if (frame == live.MainFrame)
-        NotifyChanged(owner);
-    };
-    live.Load += (_, _) => NotifyChanged(owner);
-    live.Popup += (_, popup) => OnPopup(owner, page, popup);
-    live.Download += (_, download) => OnDownload(owner, download);
-    live.Close += (_, _) => OnPageSelfClosed(owner, page, live);
-  }
-
-  private void OnPopup(Guid owner, Guid opener, IPage popup) {
-    _ = OnPopupCoreAsync(owner, opener, popup);
-  }
-
-  // A popup belongs to the opener's owner and becomes its most recent page. If the opener
-  // was already removed when the popup arrives, close it; registered popups remain independent.
-  private async Task OnPopupCoreAsync(Guid owner, Guid opener, IPage popup) {
-    BrowserPage<IPage>? registered = null;
-    BrowserPage<IPage>? evicted = null;
-    lock (gate) {
-      if (!disposed && owners.ContainsKey(owner) && pages.Get(owner, opener) is not null)
-        registered = RegisterCore(owner, popup, out evicted, opener);
-    }
-    if (registered is null) {
-      await CloseQuietlyAsync(popup);
-      return;
-    }
-    BrowserInteraction interaction = BrowserInteraction.For(popup);
-    Attach(owner, registered.Id, popup);
-    try {
-      await interaction.WatchNavigationAsync();
-    } catch (PlaywrightException) {
-      // A popup may close while the browser is attaching its DevTools session.
-    }
-    NotifyChanged(owner);
-    if (evicted is not null)
-      await CloseEvictedAsync(owner, evicted);
-  }
-
-  private void OnPageSelfClosed(Guid owner, Guid page, IPage live) {
-    bool removed = false;
-    lock (gate) {
-      if (pages.Get(owner, page)?.Page == live) {
-        pages.Remove(owner, page);
-        removed = true;
-        if (owners.TryGetValue(owner, out OwnerEntry? entry))
-          entry.Pages--;
-        UpdateEmpty();
-      }
-    }
-    if (removed)
-      NotifyChanged(owner);
-  }
-
-  private void OnDownload(Guid owner, IDownload download) {
-    OwnerEntry? entry;
-    lock (gate) {
-      if (!owners.TryGetValue(owner, out entry))
-        entry = null; // The owner is closed; cancel the download instead of saving it.
-      else
-        entry.Downloads++;
-    }
-    if (entry is null)
-      _ = CancelQuietlyAsync(download);
-    else
-      _ = SaveDownloadAsync(owner, entry, download);
-  }
-
-  private async Task SaveDownloadAsync(Guid owner, OwnerEntry entry, IDownload download) {
-    string name = download.SuggestedFilename;
-    try {
-      string target = UniqueTarget(entry.DownloadFolder, name);
-      Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-      await download.SaveAsAsync(target);
-      DownloadNotice(owner, entry, $"Saved download \"{name}\" to \"{target}\".");
-    } catch (Exception error) {
-      DownloadNotice(owner, entry, $"Download failed: {name} ({error.Message}).");
-    } finally {
-      bool cleanup;
-      lock (gate)
-        cleanup = --entry.Downloads == 0 && entry.Orphaned;
-      if (cleanup)
-        DeleteDownloadFolderQuietly(entry.DownloadFolder);
-    }
-  }
-
-  // Each download gets its own directory, so concurrent saves cannot claim the same path.
-  private static string UniqueTarget(string folder, string suggested) {
-    string name = Path.GetFileName(suggested.Replace('\\', '/'));
-    name = new string(name.Select(character => Path.GetInvalidFileNameChars().Contains(character) ? '_' : character).ToArray());
-    if (string.IsNullOrWhiteSpace(name) || name is "." or "..")
-      name = "download";
-    return Path.Combine(folder, Guid.NewGuid().ToString("N"), name);
   }
 
   private async Task CloseEvictedAsync(Guid owner, BrowserPage<IPage> evicted) {
@@ -385,22 +233,6 @@ internal sealed class BrowserHost : IAsyncDisposable {
     }
   }
 
-  private static async Task CancelQuietlyAsync(IDownload download) {
-    try {
-      await download.CancelAsync().WaitAsync(CloseTimeout);
-    } catch (Exception error) when (error is PlaywrightException or TimeoutException) {
-      // The download may already be gone.
-    }
-  }
-
-  private static void DeleteDownloadFolderQuietly(string folder) {
-    try {
-      Directory.Delete(folder, recursive: true);
-    } catch (Exception error) when (error is IOException or UnauthorizedAccessException) {
-      // A just-finished download may still hold the folder briefly.
-    }
-  }
-
   // Caller holds the gate. Starts the browser exit countdown once the last page is closed.
   private void UpdateEmpty() {
     if (owners.Values.Any(entry => entry.Pages > 0) || launch is null) {
@@ -410,13 +242,6 @@ internal sealed class BrowserHost : IAsyncDisposable {
     if (emptySince is null) {
       emptySince = DateTimeOffset.UtcNow;
       Signal();
-    }
-  }
-
-  private void DownloadNotice(Guid owner, OwnerEntry expected, string text) {
-    lock (gate) {
-      if (owners.TryGetValue(owner, out OwnerEntry? entry) && entry == expected)
-        entry.Notices.Add(text);
     }
   }
 
@@ -439,17 +264,9 @@ internal sealed class BrowserHost : IAsyncDisposable {
       if (!owners.Remove(owner, out OwnerEntry? removed))
         return;
       entry = removed;
-      IReadOnlyList<BrowserPage<IPage>> snapshot = pages.List(owner);
-      foreach (BrowserPage<IPage> page in snapshot)
-        pages.Remove(owner, page.Id);
-      entry.Pages = 0;
-      owned = snapshot.Select(page => page.Page).ToArray();
-      UpdateEmpty();
+      owned = RemoveAllPages(owner, entry);
     }
-    if (owned.Length > 0)
-      NotifyChanged(owner);
-    foreach (IPage page in owned)
-      await CloseQuietlyAsync(page);
+    await CloseRemovedPagesAsync(owner, owned);
     bool cleanup;
     lock (gate) {
       cleanup = entry.Downloads == 0;
@@ -460,118 +277,22 @@ internal sealed class BrowserHost : IAsyncDisposable {
       DeleteDownloadFolderQuietly(entry.DownloadFolder);
   }
 
-  // One background sweep decides idle evictions and the browser exit. It never holds the gate
-  // across an await, so agent interactions and page operations are never blocked by it.
-  private async Task SweepAsync() {
-    while (true) {
-      Task? countdown;
-      Task wakeTask;
-      lock (gate) {
-        if (disposed)
-          return;
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        DateTimeOffset? deadline = NextDeadline();
-        wake = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        wakeTask = wake.Task;
-        if (deadline is { } due) {
-          TimeSpan wait = due - now;
-          countdown = Task.Delay(wait > TimeSpan.Zero ? wait : TimeSpan.Zero, CancellationToken.None);
-        } else {
-          countdown = null;
-        }
-      }
-      if (countdown is null) {
-        await wakeTask;
-        continue;
-      }
-      if (await Task.WhenAny(countdown, wakeTask) != wakeTask)
-        await SweepOnce();
-    }
+  // Caller holds the gate. Unregisters every page the owner has and returns them for closing.
+  private IPage[] RemoveAllPages(Guid owner, OwnerEntry entry) {
+    IReadOnlyList<BrowserPage<IPage>> owned = pages.List(owner);
+    foreach (BrowserPage<IPage> page in owned)
+      pages.Remove(owner, page.Id);
+    entry.Pages = 0;
+    UpdateEmpty();
+    return owned.Select(page => page.Page).ToArray();
   }
 
-  // Caller holds the gate. The nearest owner idle eviction or the browser exit countdown.
-  private DateTimeOffset? NextDeadline() {
-    DateTimeOffset? deadline = null;
-    foreach (OwnerEntry entry in owners.Values) {
-      if (entry.Pages == 0)
-        continue;
-      DateTimeOffset due = entry.DeferredUntil ?? entry.LastActivity + OwnerIdleAfter;
-      if (deadline is not { } best || due < best)
-        deadline = due;
-    }
-    if (launch is not null && emptySince is { } empty) {
-      DateTimeOffset due = empty + BrowserIdleAfter;
-      if (deadline is not { } best || due < best)
-        deadline = due;
-    }
-    return deadline;
+  private async Task CloseRemovedPagesAsync(Guid owner, IPage[] removed) {
+    if (removed.Length > 0)
+      NotifyChanged(owner);
+    foreach (IPage page in removed)
+      await CloseQuietlyAsync(page);
   }
-
-  private static bool IsIdleDue(OwnerEntry entry, DateTimeOffset now) =>
-      (entry.DeferredUntil ?? entry.LastActivity + OwnerIdleAfter) <= now;
-
-  private async Task SweepOnce() {
-    Dictionary<Guid, OwnerEntry> expired = [];
-    lock (gate) {
-      if (disposed)
-        return;
-      DateTimeOffset now = DateTimeOffset.UtcNow;
-      foreach ((Guid owner, OwnerEntry entry) in owners) {
-        if (entry.Pages == 0 || !IsIdleDue(entry, now))
-          continue;
-        if (entry.Active > 0) {
-          // Never close under an in-flight agent interaction; recheck soon.
-          entry.DeferredUntil = now + PendingRecheck;
-          Signal();
-          continue;
-        }
-        expired.Add(owner, entry);
-      }
-    }
-    foreach ((Guid owner, OwnerEntry entry) in expired) {
-      bool pending;
-      try {
-        pending = await hasPendingQuestion(owner);
-      } catch (Exception) {
-        // Fail safe: treat an unknown answer as a pending question.
-        pending = true;
-      }
-      IPage[] idlePages;
-      lock (gate) {
-        if (disposed)
-          return;
-        DateTimeOffset now = DateTimeOffset.UtcNow;
-        if (!owners.TryGetValue(owner, out OwnerEntry? current) || current != entry || !IsIdleDue(current, now))
-          continue;
-        if (pending || current.Active > 0) {
-          // A pending question or active operation keeps the owner's pages; recheck soon.
-          current.DeferredUntil = now + PendingRecheck;
-          Signal();
-          continue;
-        }
-        IReadOnlyList<BrowserPage<IPage>> snapshot = pages.List(owner);
-        foreach (BrowserPage<IPage> page in snapshot)
-          pages.Remove(owner, page.Id);
-        current.Pages = 0;
-        idlePages = snapshot.Select(page => page.Page).ToArray();
-        UpdateEmpty();
-      }
-      if (idlePages.Length > 0)
-        NotifyChanged(owner);
-      foreach (IPage page in idlePages)
-        await CloseQuietlyAsync(page);
-    }
-    lock (gate) {
-      if (disposed)
-        return;
-      DateTimeOffset now = DateTimeOffset.UtcNow;
-      if (launch is not null && emptySince is { } empty && now - empty >= BrowserIdleAfter)
-        Retire();
-    }
-  }
-
-  private static void ObserveFailure(Task pending) => _ = pending.ContinueWith(task => { _ = task.Exception; }, CancellationToken.None,
-      TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
 
   private sealed class OwnerEntry(string downloadFolder) {
     public string DownloadFolder { get; } = downloadFolder;

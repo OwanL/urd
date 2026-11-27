@@ -117,6 +117,7 @@ internal sealed class BrowserViewerStreams {
       // A restore only blocks admission once it claims the viewport. An unclaimed restore
       // can wait for the next last viewer to leave instead.
       await blocker.WaitAsync(PlaywrightTimeout, cancellation);
+      cancellation.ThrowIfCancellationRequested();
       lock (gate)
         (stream, blocker) = TryAdmit(page, viewer, pageInput);
     }

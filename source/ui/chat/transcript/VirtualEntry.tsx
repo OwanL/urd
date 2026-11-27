@@ -16,6 +16,8 @@ import {
   isAgentExchange,
 } from "./tool-calls/AgentExchange.tsx";
 import { ToolRow } from "./tool-calls/ToolRow.tsx";
+import { ToolCallMotion } from "./tool-calls/ToolCallMotion.tsx";
+import type { TranscriptDraftRow } from "./TranscriptDrafts.tsx";
 import { SubagentRow } from "./tool-calls/SubagentRow.tsx";
 import type { SubagentRowPresentation } from "./tool-calls/SubagentPresentation.ts";
 import { boundaryResponseStatus } from "../prepass/PrepassRows.tsx";
@@ -28,11 +30,14 @@ export function VirtualEntry({
   display,
   streamId,
   sessionId,
+  draftRow,
   descriptor,
   toolLabel,
   subagent,
   rank,
   top,
+  motion,
+  enter,
   root,
   paused,
   saved,
@@ -46,11 +51,8 @@ export function VirtualEntry({
   display: TranscriptDisplay;
   streamId: string | null;
   sessionId: string;
-  descriptor: TranscriptEntryDescriptor;
-  toolLabel: ToolCallLabel | null;
-  subagent: SubagentRowPresentation | undefined;
-  rank: number;
-  top: number;
+  motion: boolean;
+  enter: boolean;
   root: HTMLElement | null;
   paused: boolean;
   saved: MarkdownSavedSourcePosition | undefined;
@@ -62,9 +64,26 @@ export function VirtualEntry({
   ) => void;
   onSourceRestore: (key: string, restore: RestoreSource | null) => void;
   onPublished: (key: string, restoredScrollTop?: number) => void;
-}) {
+} & (
+  | {
+      draftRow: TranscriptDraftRow;
+      descriptor?: never;
+      toolLabel?: never;
+      subagent?: never;
+      rank?: never;
+      top?: never;
+    }
+  | {
+      draftRow?: never;
+      descriptor: TranscriptEntryDescriptor;
+      toolLabel: ToolCallLabel | null;
+      subagent: SubagentRowPresentation | undefined;
+      rank: number;
+      top: number;
+    }
+)) {
   const row = useRef<HTMLDivElement>(null);
-  const key = entryKey(descriptor.entry);
+  const key = draftRow ? draftRow.key : entryKey(descriptor.entry);
   const registerSource = useCallback(
     (capture: ((signal: AbortSignal) => Promise<MarkdownSavedSourcePosition | null>) | null) =>
       onSourceCapture(key, capture),
@@ -81,18 +100,25 @@ export function VirtualEntry({
 
   useLayoutEffect(() => {
     const element = row.current;
-    if (!element) return;
-    const update = () => onMeasure(descriptor, rank, element.getBoundingClientRect().height);
+    if (!element || !descriptor || rank === undefined) return;
+    let lastHeight = 0;
+    const update = () => {
+      const height = element.getBoundingClientRect().height;
+      if (height === lastHeight) return;
+      lastHeight = height;
+      onMeasure(descriptor, rank, height);
+    };
     const observer = new ResizeObserver(update);
     observer.observe(element);
     update();
     return () => observer.disconnect();
   }, [descriptor, rank, onMeasure]);
 
-  const role = descriptor.entry.kind === "user" ? "user" : "assistant";
-  const { text, images } = transcriptMessageContent(descriptor);
+  const { text, images } = descriptor
+    ? transcriptMessageContent(descriptor)
+    : { text: null, images: [] };
   const richBody =
-    text !== null ? (
+    descriptor && text !== null ? (
       <display.MessageBody
         display={display}
         streamId={streamId}
@@ -107,89 +133,112 @@ export function VirtualEntry({
         onPublished={published}
       />
     ) : null;
-  const agentExchange = isAgentExchange(descriptor, toolLabel);
+  const agentExchange = descriptor && isAgentExchange(descriptor, toolLabel);
   const entryClass = [
     "transcript-entry",
     subagent?.kind === "hidden" ? "transcript-subagent-hidden" : "",
     subagent && subagent.kind !== "hidden" ? "transcript-subagent-entry" : "",
-    descriptor.tool && !agentExchange && !subagent ? "transcript-tool-entry" : "",
+    draftRow || (descriptor?.tool && !agentExchange && !subagent) ? "transcript-tool-entry" : "",
+    draftRow ? "transcript-entry-draft" : "",
     agentExchange ? "agent-exchange-entry" : "",
   ]
     .filter(Boolean)
     .join(" ");
-  const status = boundaryResponseStatus(
-    descriptor.entry.kind,
-    descriptor.response,
-    descriptor.preparation,
-    statusContext,
-    descriptor.entry.historyRevision,
+  const status =
+    descriptor &&
+    boundaryResponseStatus(
+      descriptor.entry.kind,
+      descriptor.response,
+      descriptor.preparation,
+      statusContext,
+      descriptor.entry.historyRevision,
+    );
+  const toolRowProps = { root, paused, motion, enter };
+  const content = draftRow ? (
+    draftRow.draft.name === "subagent" ? (
+      <div class="subagent-row">
+        {draftRow.subagentHeading !== null && (
+          <h3 class="subagent-heading">{draftRow.subagentHeading}</h3>
+        )}
+        <div class="subagent-title">
+          <span>
+            Subagent call · {draftRow.draft.state === "drafting" ? "Drafting" : "Drafted"}
+          </span>
+        </div>
+      </div>
+    ) : (
+      <ToolRow draftRow={draftRow} {...toolRowProps} />
+    )
+  ) : richBody !== null || images.length > 0 ? (
+    descriptor.agentQuestion && richBody !== null ? (
+      <AgentQuestionExchange senderTitle={descriptor.agentQuestion.senderTitle} body={richBody} />
+    ) : (
+      <EditableMessage entry={descriptor.entry} text={text ?? undefined} images={images}>
+        <TranscriptUserImages sessionId={sessionId} images={images} root={root} paused={paused} />
+        {richBody}
+      </EditableMessage>
+    )
+  ) : descriptor.compaction ? (
+    <CompactionMarker
+      client={client}
+      sessionId={sessionId}
+      entry={descriptor.entry}
+      compaction={descriptor.compaction}
+    />
+  ) : subagent?.kind === "hidden" ? null : descriptor.tool && subagent ? (
+    <SubagentRow
+      client={client}
+      sessionId={sessionId}
+      historyRevision={descriptor.entry.historyRevision}
+      tool={descriptor.tool}
+      presentation={subagent}
+      root={root}
+      paused={paused}
+    />
+  ) : descriptor.tool && toolLabel && agentExchange ? (
+    <AgentToolExchange
+      client={client}
+      sessionId={sessionId}
+      entry={descriptor.entry}
+      tool={descriptor.tool}
+      label={toolLabel}
+      root={root}
+      paused={paused}
+    />
+  ) : descriptor.tool ? (
+    <ToolRow
+      tool={descriptor.tool}
+      label={toolLabel}
+      completion={descriptor.entry.kind === "toolCompletion"}
+      {...toolRowProps}
+    />
+  ) : (
+    <div class={`message message-${descriptor.entry.kind === "user" ? "user" : "assistant"}`} />
   );
   return (
     <div
       ref={row}
       class={entryClass}
-      data-transcript-entry=""
-      data-entry-key={key}
+      data-transcript-entry={descriptor && ""}
+      data-entry-key={descriptor && key}
       data-entry-rank={rank}
-      style={{ top: `${top}px` }}
+      style={top === undefined ? undefined : { top: `${top}px` }}
     >
-      {status.before}
-      {richBody !== null || images.length > 0 ? (
-        descriptor.agentQuestion && richBody !== null ? (
-          <AgentQuestionExchange
-            senderTitle={descriptor.agentQuestion.senderTitle}
-            body={richBody}
-          />
-        ) : (
-          <EditableMessage entry={descriptor.entry} text={text ?? undefined} images={images}>
-            <TranscriptUserImages
-              sessionId={sessionId}
-              images={images}
-              root={root}
-              paused={paused}
-            />
-            {richBody}
-          </EditableMessage>
-        )
-      ) : descriptor.compaction ? (
-        <CompactionMarker
-          client={client}
-          sessionId={sessionId}
-          entry={descriptor.entry}
-          compaction={descriptor.compaction}
-        />
-      ) : subagent?.kind === "hidden" ? null : descriptor.tool && subagent ? (
-        <SubagentRow
-          client={client}
-          sessionId={sessionId}
-          historyRevision={descriptor.entry.historyRevision}
-          tool={descriptor.tool}
-          presentation={subagent}
-          root={root}
-          paused={paused}
-        />
-      ) : descriptor.tool && toolLabel && agentExchange ? (
-        <AgentToolExchange
-          client={client}
-          sessionId={sessionId}
-          entry={descriptor.entry}
-          tool={descriptor.tool}
-          label={toolLabel}
-          root={root}
-          paused={paused}
-        />
-      ) : descriptor.tool ? (
-        <ToolRow
-          tool={descriptor.tool}
-          label={toolLabel}
-          completion={descriptor.entry.kind === "toolCompletion"}
-          root={root}
-          paused={paused}
-        />
+      {status?.before}
+      {draftRow || (descriptor.tool && subagent?.kind !== "hidden") ? (
+        <ToolCallMotion
+          key="tool"
+          motion={motion}
+          enter={enter}
+          preview={draftRow?.draft.state === "drafting" ? draftRow.presentation.preview : null}
+          continueBatch={draftRow?.batchedWithNext ?? false}
+        >
+          {content}
+        </ToolCallMotion>
       ) : (
-        <div class={`message message-${role}`} />
+        content
       )}
-      {status.after}
+      {status?.after}
     </div>
   );
 }

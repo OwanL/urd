@@ -1,6 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
+import type { ToolDraftStore } from "../../sessions/ToolDrafts.ts";
 import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { EditableMessage } from "../message-editing/EditableMessage.tsx";
@@ -44,6 +45,7 @@ export interface TranscriptProps {
   emptyState?: ComponentChildren;
   client: SessionClient;
   history: TranscriptHistoryPage | null;
+  draftStore?: ToolDraftStore | undefined;
   historyRevision?: number | null;
   notice?: string | null;
   display?: TranscriptDisplay | undefined;
@@ -92,6 +94,7 @@ export function Transcript(props: TranscriptProps) {
         navigation={props.transcriptPosition}
         onNavigationChange={props.onTranscriptPositionChange ?? ignoreNavigationChange}
         renderPrepass={props.renderPrepass}
+        draftStore={props.draftStore}
       >
         {props.children}
       </VirtualTranscript>

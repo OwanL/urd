@@ -1,6 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useMemo } from "preact/hooks";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
+import type { ToolDraftStore } from "../../sessions/ToolDrafts.ts";
 import { IconButton } from "../../controls/IconButton.tsx";
 import type { ResponseStatusContext } from "../prepass/PrepassRows.tsx";
 import type { TranscriptNavigationState } from "./navigation/TranscriptNavigationStorage.ts";
@@ -8,12 +9,14 @@ import type { TranscriptDisplay } from "./TranscriptDisplay.ts";
 import type { RenderPrepass } from "./Transcript.tsx";
 import { ToolRowInteractionsProvider } from "./tool-calls/ToolRowInteractions.tsx";
 import { VirtualEntry } from "./VirtualEntry.tsx";
+import { TranscriptDrafts, useToolTailMotion } from "./TranscriptDrafts.tsx";
 import { useTranscriptViewport } from "./viewport/useTranscriptViewport.ts";
 import "./transcript.css";
 
 interface VirtualTranscriptProps {
   children?: ComponentChildren;
   renderPrepass?: RenderPrepass | undefined;
+  draftStore?: ToolDraftStore | undefined;
   client: SessionClient;
   display: TranscriptDisplay;
   streamId: string | null;
@@ -30,6 +33,7 @@ interface VirtualTranscriptProps {
 export function VirtualTranscript({
   children,
   renderPrepass,
+  draftStore,
   client,
   display,
   streamId,
@@ -56,10 +60,14 @@ export function VirtualTranscript({
     onSourceCapture,
     onSourceRestore,
     onPublished,
-    spacerHeight,
     tailTop,
-    tailRef,
+    messagesRef,
+    followsLatest,
+    windowRevision,
+    liveWindowStart,
     hasWindow,
+    liveWindowEntries,
+    windowEntries,
     loading,
     error,
     retry,
@@ -75,6 +83,27 @@ export function VirtualTranscript({
     onNavigationChange,
   });
 
+  const { motion, enterDraft, enterDurable } = useToolTailMotion(
+    sessionId,
+    windowRevision,
+    liveWindowEntries,
+    followsLatest && !paused,
+  );
+  const entryProps = {
+    client,
+    display,
+    streamId,
+    sessionId,
+    root,
+    paused,
+    statusContext,
+    onMeasure,
+    onSourceCapture,
+    onSourceRestore,
+    onPublished,
+    motion,
+  };
+
   return (
     <div class="transcript-area">
       <div
@@ -86,39 +115,43 @@ export function VirtualTranscript({
         aria-busy={loading}
         tabIndex={0}
       >
-        <div class="messages messages-virtual" style={{ height: `${spacerHeight}px` }}>
+        <div
+          class="messages messages-virtual"
+          ref={messagesRef}
+          style={{ paddingTop: `${tailTop}px` }}
+        >
           <ToolRowInteractionsProvider
             client={client}
             sessionId={sessionId}
             historyRevision={historyRevision}
             root={root}
           >
-            {rows.map(({ key, descriptor, toolLabel, subagent, rank, top, saved }) => {
-              return (
+            <TranscriptDrafts
+              store={draftStore}
+              sessionId={sessionId}
+              entries={windowEntries}
+              liveRevision={liveWindowEntries ? windowRevision : null}
+              enterDraft={enterDraft}
+              durableRows={rows.map(({ key, ...row }) => (
                 <VirtualEntry
                   key={key}
-                  client={client}
-                  display={display}
-                  streamId={streamId}
-                  sessionId={sessionId}
-                  descriptor={descriptor}
-                  toolLabel={toolLabel}
-                  subagent={subagent}
-                  rank={rank}
-                  top={top}
-                  root={root}
-                  paused={paused}
-                  saved={saved}
-                  statusContext={statusContext}
-                  onMeasure={onMeasure}
-                  onSourceCapture={onSourceCapture}
-                  onSourceRestore={onSourceRestore}
-                  onPublished={onPublished}
+                  {...entryProps}
+                  {...row}
+                  enter={Boolean(row.descriptor.tool) && enterDurable(row.rank - liveWindowStart)}
                 />
-              );
-            })}
+              ))}
+              renderDraft={(draftRow, enter) => (
+                <VirtualEntry
+                  key={draftRow.key}
+                  {...entryProps}
+                  saved={undefined}
+                  draftRow={draftRow}
+                  enter={enter}
+                />
+              )}
+            />
           </ToolRowInteractionsProvider>
-          <div ref={tailRef} class="transcript-tail" style={{ top: `${tailTop}px` }}>
+          <div class="transcript-tail">
             {renderPrepass?.(rows.map(({ descriptor }) => descriptor))}
             {children}
           </div>

@@ -7,6 +7,7 @@ import { SubagentProviderControl } from "./composer/SubagentProviderControl.tsx"
 import { SessionIndicators } from "./composer/SessionIndicators.tsx";
 import { sameContextModel, type LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
+import type { ToolDraftStore } from "../sessions/ToolDrafts.ts";
 import type { SessionSnapshot } from "../sessions/SessionSnapshot.ts";
 import { preferenceSaveBlocks } from "../preferences/usePreferences.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
@@ -69,6 +70,7 @@ interface ChatProps {
   refresh: number;
   browserRefresh: number;
   notice: string | null;
+  draftStore?: ToolDraftStore | undefined;
   provisioning: string | null;
   onRefresh(): void;
   onSetUpProvider(): void;
@@ -109,6 +111,7 @@ export function Chat({
   refresh,
   browserRefresh,
   notice,
+  draftStore,
   provisioning,
   onRefresh,
   onSetUpProvider,
@@ -308,6 +311,7 @@ export function Chat({
           history={history}
           historyRevision={snapshot?.historyRevision ?? null}
           notice={notice}
+          draftStore={draftStore}
           sessionId={sessionId}
           visible={visible && notice !== null}
           position={position}

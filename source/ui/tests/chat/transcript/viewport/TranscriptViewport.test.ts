@@ -8,6 +8,11 @@ import {
   type TranscriptViewportAnchor,
   type TranscriptViewportGeometry,
 } from "../../../../chat/transcript/viewport/TranscriptViewport.ts";
+import {
+  captureTranscriptDraftAnchor,
+  restoreTranscriptDraftAnchor,
+  type TranscriptDraftAnchor,
+} from "../../../../chat/transcript/viewport/TranscriptScrollLayout.ts";
 
 function entry(rank: number, historyRevision = 1): TranscriptEntryRef {
   return {
@@ -63,6 +68,72 @@ function measurement(
     generation,
   };
 }
+
+function fakeElement(top: number, bottom: number): HTMLElement {
+  return { getBoundingClientRect: () => ({ top, bottom }) } as unknown as HTMLElement;
+}
+
+function fakeScrollRoot(
+  top: number,
+  bottom: number,
+  rows: readonly HTMLElement[],
+  scrollTop: number,
+  contains: (row: HTMLElement) => boolean = (row) => rows.includes(row),
+): HTMLElement {
+  return {
+    getBoundingClientRect: () => ({ top, bottom }),
+    querySelectorAll: () => rows,
+    contains,
+    scrollTop,
+  } as unknown as HTMLElement;
+}
+
+void test("captures the viewport offset of an intersecting draft row", () => {
+  const above = fakeElement(70, 100);
+  const draft = fakeElement(90, 130);
+  const root = fakeScrollRoot(100, 300, [above, draft], 0);
+
+  const captured = captureTranscriptDraftAnchor(root);
+
+  assert.deepEqual(captured, [{ row: draft, viewportOffset: -10 }]);
+  assert.equal(captureTranscriptDraftAnchor(fakeScrollRoot(100, 300, [above], 0)), null);
+});
+
+void test("preserves a visible draft when the first visible row is removed", () => {
+  const first = fakeElement(90, 130);
+  let survivorTop = 130;
+  const survivor = {
+    getBoundingClientRect: () => ({ top: survivorTop, bottom: survivorTop + 40 }),
+  } as unknown as HTMLElement;
+  let firstPresent = true;
+  const root = fakeScrollRoot(100, 300, [first, survivor], 100, (row) =>
+    row === first ? firstPresent : row === survivor,
+  );
+  const captured = captureTranscriptDraftAnchor(root);
+  assert.ok(captured);
+
+  firstPresent = false;
+  survivorTop = 90;
+  assert.equal(restoreTranscriptDraftAnchor(root, captured), 60);
+  assert.equal(root.scrollTop, 60);
+});
+
+void test("restores a draft row by identity without requiring its draft class", () => {
+  const row = { className: "transcript-entry" } as unknown as HTMLElement;
+  let rowTop = 130;
+  row.getBoundingClientRect = () => ({ top: rowTop, bottom: rowTop + 40 }) as DOMRect;
+  const root = fakeScrollRoot(100, 300, [], 50, (candidate) => candidate === row);
+  const anchor: TranscriptDraftAnchor[] = [{ row, viewportOffset: 10 }];
+
+  assert.equal(restoreTranscriptDraftAnchor(root, anchor), 70);
+  assert.equal(root.scrollTop, 70);
+
+  root.scrollTop = 50;
+  rowTop = 110;
+  assert.equal(restoreTranscriptDraftAnchor(root, anchor), null);
+  assert.equal(root.scrollTop, 50);
+  assert.equal(restoreTranscriptDraftAnchor(fakeScrollRoot(100, 300, [], 50), anchor), null);
+});
 
 void test("locates distant positions from sparse weighted inputs at 100,000-entry scale", () => {
   const viewport = new TranscriptViewport(

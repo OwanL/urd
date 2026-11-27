@@ -179,8 +179,9 @@ not current behavior; they are retained as dated design evidence.
   `execution_provider_context`. `LlmResponseAccumulator.cs` excludes reasoning from
   public text. Do not expose the native envelope as a shortcut to reasoning UI.
 - `ProviderStreamState.cs` withholds executable calls until validated completion.
-  Draft tool streaming requires an additional observation contract that preserves
-  execution safeguards. Normal provider validation rejects image content; opaque
+  At this dated snapshot, draft previews still needed an observation contract;
+  the implemented display-only `tool-draft` path is described under Streaming and
+  reconciliation. Normal provider validation rejects image content; opaque
   same-scope native-codec replay tests are not image input/output feature support.
 - `/api` requires `X-Urd-Client: browser`. An image element cannot supply that marker.
   Future binary delivery needs an explicit design, not accidentally weakening the
@@ -260,16 +261,17 @@ history contract, not a decision to archive all provider-native/private context.
 Distinguish preparing a model-facing result from actually submitting it in a request;
 UI availability alone is not evidence that a model consumed it.
 
-Keep partial tool input distinct from validated saved calls. Correlate draft and
-final identity; preserve positive provider-terminal and cleanup requirements for
-execution. Incomplete argument text need not be valid JSON. Decide what draft
-state a new observer needs without replaying an unlimited event log. Existing
-[practical crash recovery](ARCHITECTURE.md#practical-crash-recovery-coherent-continuation-not-exact-loss-budgets)
-explicitly permits losing an unfinished tool draft on backend crash. Do not reopen
-that decision or introduce per-token durability. Browser reconnect to a still-running
-backend is a separate synchronization problem; obtain current provisional state
-without mistaking it for committed history. Stage 1 adds push change notices
-(decision 16); draft-state delivery for stage 3 reuses that channel, not a new one.
+Tool-call previews are implemented as in-memory, display-only `tool-draft` updates
+on the watched-session event stream. They show provider-supplied partial arguments
+before execution; they are not saved calls or authorization, and incomplete text
+need not be valid JSON. Normal validation and terminal/cleanup requirements still
+gate execution. The validated reservation promotes the matching preview in place;
+failed, stopped or retried attempts discard it. Providers without incremental input
+receive no fabricated streaming. This is distinct from `tool-progress`, which shows
+transient output from an already-running tool. Updates are coalesced/latest per call;
+reconnect to a live backend receives current provisional state, not committed
+history. Existing [practical crash recovery](ARCHITECTURE.md#practical-crash-recovery-coherent-continuation-not-exact-loss-budgets)
+permits losing unfinished drafts on backend crash; do not add per-token durability.
 
 Reasoning needs explicit provider provenance/content semantics. Prefer default
 collapse when classification is unknown; do not infer summaries from model names

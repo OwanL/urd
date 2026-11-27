@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "preact/hooks";
 import type {
   TranscriptEntryDescriptor,
   TranscriptPositionWindow,
@@ -14,10 +14,13 @@ import { entryKey, windowCoversFraction } from "./TranscriptRows.ts";
 import {
   alignTranscriptScrollport,
   bottomPadding,
+  captureTranscriptDraftAnchor,
   layoutProfile,
   recordTranscriptUserScroll,
+  restoreTranscriptDraftAnchor,
   topPadding,
   transcriptScrollFraction,
+  type TranscriptDraftAnchor,
 } from "./TranscriptScrollLayout.ts";
 import {
   applyTranscriptWindow,
@@ -51,8 +54,8 @@ export function useTranscriptViewport({
   onNavigationChange,
 }: TranscriptViewportOptions) {
   const scroll = useRef<HTMLDivElement>(null);
-  const tail = useRef<HTMLDivElement>(null);
-  const [tailHeight, setTailHeight] = useState(0);
+  const messages = useRef<HTMLDivElement>(null);
+  const tailHeight = useRef(0);
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [positionWindow, setPositionWindow] = useState<TranscriptPositionWindow | null>(null);
   const hasWindow = positionWindow !== null;
@@ -61,14 +64,21 @@ export function useTranscriptViewport({
   const [modelVersion, setModelVersion] = useState(0);
   const [, setScrollVersion] = useState(0);
   const [documentInactive, setDocumentInactive] = useState(() => document.hidden);
-  const { lookupRow, getRetainedRows, lastScrollport, updateSelection, prepareMountedRows } =
-    useTranscriptRows(scroll, historyRevision);
+  const {
+    lookupRow,
+    getRetainedRows,
+    lastScrollport,
+    updateSelection,
+    prepareMountedRows,
+    coversScrollTop,
+  } = useTranscriptRows(scroll, historyRevision, positionWindow);
   const renderedActive = useRef(visible && !documentInactive);
   const resumingVisibility = visible && !documentInactive && !renderedActive.current;
   renderedActive.current = visible && !documentInactive;
   const flushNavigationRef = useRef<() => void>(() => {});
   const scrollAdjustment = useRef<number | null>(null);
   const programmaticScroll = useRef<number | null>(null);
+  const draftAnchor = useRef<TranscriptDraftAnchor[] | null>(null);
 
   // Scrolling already recorded the reading position, so suspension only persists it.
   const onReadsSuspended = useCallback(() => flushNavigationRef.current(), []);
@@ -100,6 +110,19 @@ export function useTranscriptViewport({
   const onProgrammaticScroll = useCallback((top: number) => {
     programmaticScroll.current = top;
   }, []);
+  const keepDraftAnchorInPlace = useCallback(
+    (node: HTMLElement) => {
+      const anchor = draftAnchor.current;
+      if (!anchor) return;
+      if (!anchor.some(({ row }) => node.contains(row))) {
+        draftAnchor.current = null;
+        return;
+      }
+      const target = restoreTranscriptDraftAnchor(node, anchor);
+      if (target !== null) onProgrammaticScroll(target);
+    },
+    [onProgrammaticScroll],
+  );
   const onAnchorRecorded = useCallback(() => {
     scrollAdjustment.current = null;
     saveCurrentState();
@@ -202,7 +225,6 @@ export function useTranscriptViewport({
     const observer = new ResizeObserver(() => {
       setScrollVersion((value) => value + 1);
       const width = node.clientWidth;
-      if (width > 0) setTailHeight(tail.current?.offsetHeight ?? 0);
       const model = viewport.current;
       if (width <= 0 || !model || model.snapshot().width === width) return;
       const adjustment = resizeViewport(model, width);
@@ -211,9 +233,48 @@ export function useTranscriptViewport({
       saveCurrentState();
     });
     observer.observe(node);
-    if (tail.current) observer.observe(tail.current);
     return () => observer.disconnect();
   }, [resizeViewport, root, saveCurrentState]);
+
+  const mountedRowsCoverScroll = useCallback(
+    (node: HTMLElement) => {
+      const model = viewport.current;
+      if (!model) return false;
+      const snapshot = model.snapshot();
+      const maximum = Math.max(
+        0,
+        snapshot.correctedTotalHeight +
+          topPadding +
+          bottomPadding +
+          tailHeight.current -
+          node.clientHeight,
+      );
+      const top = snapshot.followsLatest
+        ? maximum
+        : Math.max(0, Math.min(maximum, node.scrollTop + (scrollAdjustment.current ?? 0)));
+      return coversScrollTop(node, top);
+    },
+    [coversScrollTop],
+  );
+
+  useLayoutEffect(() => {
+    const content = messages.current;
+    if (!root || !content || !visible || documentInactive) return;
+    const observer = new ResizeObserver(() => {
+      if (root.clientHeight === 0) return;
+      const prefix = Number.parseFloat(content.style.paddingTop);
+      tailHeight.current = Math.max(0, Math.round(content.offsetHeight - prefix - bottomPadding));
+      // Drafts are in flow, so their current animated height is already in scrollHeight.
+      // Pin in the observer, before paint, rather than waiting for another render.
+      if (viewport.current?.snapshot().followsLatest) {
+        root.scrollTop = root.scrollHeight;
+        programmaticScroll.current = root.scrollTop;
+      } else keepDraftAnchorInPlace(root);
+      if (!mountedRowsCoverScroll(root)) setScrollVersion((value) => value + 1);
+    });
+    observer.observe(content, { box: "border-box" });
+    return () => observer.disconnect();
+  }, [documentInactive, keepDraftAnchorInPlace, mountedRowsCoverScroll, root, visible]);
 
   const reading = usePositionWindow({
     client,
@@ -249,11 +310,13 @@ export function useTranscriptViewport({
     );
     if (target !== null) programmaticScroll.current = target;
     applyWidthRestore(node, onProgrammaticScroll);
+    keepDraftAnchorInPlace(node);
   }, [
     applyWidthRestore,
     documentInactive,
     hasPendingRestore,
     isInitialized,
+    keepDraftAnchorInPlace,
     lastScrollport,
     modelVersion,
     onProgrammaticScroll,
@@ -261,7 +324,6 @@ export function useTranscriptViewport({
     resumingVisibility,
     root,
     visible,
-    tailHeight,
   ]);
 
   const onMeasure = useCallback(
@@ -292,7 +354,7 @@ export function useTranscriptViewport({
     scrollport: scroll.current,
     suspended: !visible || documentInactive || resumingVisibility,
     scrollAdjustment: scrollAdjustment.current ?? 0,
-    tailHeight,
+    tailHeight: tailHeight.current,
   });
   const estimatedHeight = viewport.current?.snapshot().correctedTotalHeight ?? 0;
   const scrollRef = useCallback((node: HTMLDivElement | null) => {
@@ -301,7 +363,6 @@ export function useTranscriptViewport({
   }, []);
 
   function rememberScroll() {
-    setScrollVersion((value) => value + 1);
     const node = scroll.current;
     const model = viewport.current;
     if (
@@ -316,9 +377,16 @@ export function useTranscriptViewport({
     const priorTarget = programmaticScroll.current;
     const actualUserScroll = priorTarget === null || priorTarget !== node.scrollTop;
     programmaticScroll.current = null;
-    if (!actualUserScroll) return;
+    if (!actualUserScroll) {
+      if (!mountedRowsCoverScroll(node)) setScrollVersion((value) => value + 1);
+      return;
+    }
+    setScrollVersion((value) => value + 1);
     interruptForUserScroll();
     if (recordTranscriptUserScroll(node, model, lookupRow)) scrollAdjustment.current = null;
+    const snapshot = model.snapshot();
+    draftAnchor.current =
+      !snapshot.followsLatest && !snapshot.anchor ? captureTranscriptDraftAnchor(node) : null;
     saveCurrentState();
     void captureVisibleAnchor();
     const fraction = transcriptScrollFraction(node, model);
@@ -330,6 +398,7 @@ export function useTranscriptViewport({
     if (!model) return;
     abortCapture();
     model.jumpToLatest();
+    draftAnchor.current = null;
     clearRestore();
     scrollAdjustment.current = null;
     saveCurrentState();
@@ -363,7 +432,13 @@ export function useTranscriptViewport({
     [abortCapture, cancelCaptureFrame, cancelRead, clearSeekTimer, store],
   );
 
-  const spacerHeight = Math.max(0, estimatedHeight + topPadding + bottomPadding + tailHeight);
+  const windowEntries = useMemo(
+    () =>
+      positionWindow?.state.sessionId === sessionId
+        ? positionWindow.entries.map(({ descriptor }) => descriptor)
+        : null,
+    [positionWindow, sessionId],
+  );
   const rows = positioned.map((row) => {
     const key = entryKey(row.descriptor.entry);
     const saved = savedPositionForRow(row);
@@ -378,10 +453,14 @@ export function useTranscriptViewport({
     paused: !visible || documentInactive,
     onMeasure,
     ...rowSources,
-    spacerHeight,
     tailTop: topPadding + estimatedHeight,
-    tailRef: tail,
+    messagesRef: messages,
+    followsLatest: viewport.current?.snapshot().followsLatest ?? false,
+    windowRevision: positionWindow?.state.historyRevision ?? null,
+    liveWindowStart: positionWindow?.entries[0]?.position.rank ?? 0,
     hasWindow,
+    windowEntries,
+    liveWindowEntries: positionWindow && !positionWindow.hasAfter ? windowEntries : null,
     loading: reading.loading,
     error: reading.error,
     retry: reading.retry,

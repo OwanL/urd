@@ -10,6 +10,35 @@ export interface RetainedScrollPosition {
   readonly width: number;
 }
 
+export interface TranscriptDraftAnchor {
+  readonly row: HTMLElement;
+  readonly viewportOffset: number;
+}
+
+export function captureTranscriptDraftAnchor(root: HTMLElement): TranscriptDraftAnchor[] | null {
+  const viewport = root.getBoundingClientRect();
+  const anchors: TranscriptDraftAnchor[] = [];
+  for (const row of root.querySelectorAll<HTMLElement>(".transcript-entry-draft")) {
+    const bounds = row.getBoundingClientRect();
+    if (bounds.bottom > viewport.top && bounds.top < viewport.bottom)
+      anchors.push({ row, viewportOffset: bounds.top - viewport.top });
+  }
+  return anchors.length ? anchors : null;
+}
+
+export function restoreTranscriptDraftAnchor(
+  root: HTMLElement,
+  anchors: readonly TranscriptDraftAnchor[],
+): number | null {
+  const anchor = anchors.find(({ row }) => root.contains(row));
+  if (!anchor) return null;
+  const viewportOffset = anchor.row.getBoundingClientRect().top - root.getBoundingClientRect().top;
+  const target = root.scrollTop + viewportOffset - anchor.viewportOffset;
+  if (target === root.scrollTop) return null;
+  root.scrollTop = target;
+  return root.scrollTop;
+}
+
 // Returns the actual scroll target after the browser clamps it, or null if untouched.
 export function alignTranscriptScrollport(
   node: HTMLElement,

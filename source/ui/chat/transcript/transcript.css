@@ -30,7 +30,6 @@
 .messages-virtual {
   position: relative;
   min-height: 0;
-  padding: 0;
 }
 
 .transcript-entry {
@@ -40,10 +39,18 @@
   padding-bottom: 24px;
 }
 
+.transcript-entry.transcript-entry-draft {
+  position: relative;
+  margin-bottom: 0;
+}
+
 .transcript-tail {
+  display: flow-root;
+}
+
+.messages-virtual > :is(.history-note, .inline-error) {
   position: absolute;
-  left: 0;
-  right: 0;
+  top: 16px;
 }
 
 .transcript-entry > .message {

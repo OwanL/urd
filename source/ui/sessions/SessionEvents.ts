@@ -2,6 +2,23 @@ import { SessionEventTimers, StreamTimeoutError } from "./SessionEventTimers.ts"
 import { postSessionEventRegistration } from "./SessionEventRegistration.ts";
 import { EventStreamParser, type SessionEventMessage } from "./EventStreamParser.ts";
 
+export interface ToolDraft {
+  session: string;
+  boot: string;
+  version: number;
+  executionId: string;
+  requestId: string;
+  callId: string;
+  entryId: string;
+  name: string;
+  order: number;
+  state: "drafting" | "drafted" | "promoted" | "discarded";
+  argumentBytes: number;
+  field?: string | null;
+  head: string;
+  tail: string;
+}
+
 export interface SessionEventCallbacks {
   connected(boot: string, streamId: string): void;
   change(session: string, notice: string): void;
@@ -13,6 +30,7 @@ export interface SessionEventCallbacks {
   ): void;
   created(session: string): void;
   browser?(session: string): void;
+  toolDraft?(draft: ToolDraft): void;
   disconnected(): void;
   error?(message: string): void;
   provisioning?(stage: BrowserProvisioningStage, detail: string | null): void;
@@ -248,6 +266,21 @@ export class SessionEvents {
     )
       return;
 
+    if (message.event === "tool-draft") {
+      const registration = this.registration;
+      if (
+        registration === null ||
+        registration.generation !== generation ||
+        registration.streamId !== this.streamId ||
+        !registration.watched.has(event.session) ||
+        !this.desiredWatched.includes(event.session) ||
+        !isToolDraft(event)
+      )
+        return;
+      this.call(() => this.callbacks.toolDraft?.(event));
+      return;
+    }
+
     if (message.event === "change") {
       const registration = this.registration;
       if (
@@ -432,6 +465,20 @@ export class SessionEvents {
       // Consumer callbacks must not interrupt transport parsing or cleanup.
     }
   }
+}
+
+function isToolDraft(event: Record<string, unknown>): event is Record<string, unknown> & ToolDraft {
+  return (
+    ["session", "boot", "executionId", "requestId", "callId", "entryId", "name"].every(
+      (key) => typeof event[key] === "string" && event[key] !== "",
+    ) &&
+    ["head", "tail"].every((key) => typeof event[key] === "string") &&
+    (event.field == null || typeof event.field === "string") &&
+    ["version", "order", "argumentBytes"].every(
+      (key) => Number.isSafeInteger(event[key]) && (event[key] as number) >= 0,
+    ) &&
+    ["drafting", "drafted", "promoted", "discarded"].includes(event.state as string)
+  );
 }
 
 function sameSet(left: readonly string[], right: readonly string[]): boolean {

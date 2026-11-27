@@ -117,6 +117,74 @@ void test("parses chunked SSE events and sends the browser registration", async 
   assert.ok(streamController);
 });
 
+void test("delivers valid tool drafts only for watched sessions", async (t) => {
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const drafts: unknown[] = [];
+  t.mock.method(globalThis, "fetch", async (input: RequestInfo | URL) => {
+    assert.ok(input instanceof URL);
+    if (input.pathname !== "/api/events") return new Response(null, { status: 204 });
+    return new Response(
+      new ReadableStream<Uint8Array>({
+        start(stream) {
+          controller = stream;
+          stream.enqueue(encoder.encode('event: connected\ndata: {"stream":"a","boot":"b"}\n\n'));
+        },
+      }),
+      { headers: { "Content-Type": "text/event-stream" } },
+    );
+  });
+  const events = new SessionEvents(new URL("https://server.example"), {
+    connected() {},
+    change() {},
+    status() {},
+    created() {},
+    disconnected() {},
+    toolDraft(draft) {
+      drafts.push(draft);
+    },
+  });
+  t.after(() => events.stop());
+  events.update(["s1", "s2"], ["s1"]);
+  events.start();
+  await waitFor(() => controller !== undefined);
+  const draft = {
+    session: "s1",
+    boot: "b",
+    version: 1,
+    executionId: "e",
+    requestId: "r",
+    callId: "c",
+    entryId: "i",
+    name: "read",
+    order: 0,
+    state: "drafting",
+    argumentBytes: 3,
+    head: "雪",
+    tail: "",
+  };
+  const send = (data: object) =>
+    controller!.enqueue(encoder.encode(`event: tool-draft\ndata: ${JSON.stringify(data)}\n\n`));
+  send({ ...draft, session: "s2" });
+  send({ ...draft, state: "unknown" });
+  send({ ...draft, order: -1 });
+  send({ ...draft, field: 42 });
+  send(draft);
+  send({ ...draft, field: null });
+  send({ ...draft, field: "newText" });
+  send({ ...draft, state: "promoted", head: "" });
+  await waitFor(() => drafts.length === 4);
+  assert.deepEqual(drafts, [
+    draft,
+    { ...draft, field: null },
+    { ...draft, field: "newText" },
+    { ...draft, state: "promoted", head: "" },
+  ]);
+  events.update(["s1", "s2"], ["s2"]);
+  send({ ...draft, state: "discarded" });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(drafts.length, 4);
+});
+
 void test("delivers per-session browser metadata notices with a session", async (t) => {
   let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
   const browser: string[] = [];

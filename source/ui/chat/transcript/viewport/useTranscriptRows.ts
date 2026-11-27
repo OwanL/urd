@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { RefObject } from "preact";
 import type { TranscriptPositionWindow } from "../../../sessions/transcript/Messages.ts";
 import type { TranscriptViewport } from "./TranscriptViewport.ts";
@@ -17,10 +17,12 @@ interface MountedRowsOptions {
 export function useTranscriptRows(
   scroll: RefObject<HTMLDivElement | null>,
   historyRevision: number | null,
+  positionWindow: TranscriptPositionWindow | null,
 ) {
   const retainedRows = useRef(new Map<string, PositionedRow>());
   const rowRecords = useRef(new Map<string, PositionedRow>());
   const retainedViewportRows = useRef<PositionedRow[]>([]);
+  const coverage = useRef<{ top: number; lower: number; upper: number } | null>(null);
   const retainedScrollport = useRef({ top: 0, width: 0 });
   const [retainedKeys, setRetainedKeys] = useState<ReadonlySet<string>>(new Set());
   const latestHistoryRevision = useRef(historyRevision);
@@ -69,6 +71,11 @@ export function useTranscriptRows(
     setRetainedKeys(new Set(next.keys()));
   }, [scroll]);
 
+  const windowRows = useMemo(
+    () => (positionWindow ? positionedRows(positionWindow) : []),
+    [positionWindow],
+  );
+
   function prepareMountedRows({
     window,
     model,
@@ -77,7 +84,6 @@ export function useTranscriptRows(
     scrollAdjustment,
     tailHeight,
   }: MountedRowsOptions): PositionedRow[] {
-    const windowRows = window ? positionedRows(window) : [];
     const allRows = new Map<string, PositionedRow>();
     for (const row of windowRows) allRows.set(entryKey(row.descriptor.entry), row);
     for (const [key, row] of retainedRows.current) if (!allRows.has(key)) allRows.set(key, row);
@@ -89,27 +95,36 @@ export function useTranscriptRows(
       if (suspended || node.clientHeight === 0) visibleEntries = retainedViewportRows.current;
       else {
         retainedScrollport.current = { top: node.scrollTop, width: node.clientWidth };
+        const height = node.clientHeight;
         const snapshot = model.snapshot();
         const maximum = Math.max(
           0,
-          snapshot.correctedTotalHeight +
-            topPadding +
-            bottomPadding +
-            tailHeight -
-            node.clientHeight,
+          snapshot.correctedTotalHeight + topPadding + bottomPadding + tailHeight - height,
         );
         // Account for height corrections before the browser clamps its scroll offset.
         const nextTop = snapshot.followsLatest
           ? maximum
           : Math.max(0, Math.min(maximum, node.scrollTop + scrollAdjustment));
+        let lower = -Infinity;
+        let upper = Infinity;
         visibleEntries = retainedViewportRows.current = visibleRows(
           windowRows,
           model,
           nextTop,
-          node.clientHeight,
+          height,
           retainedKeys,
           topPadding,
+          (top, bottom) => {
+            const start = top - height * 2;
+            const end = bottom + height;
+            if (nextTop > start) lower = Math.max(lower, start);
+            else upper = Math.min(upper, start);
+            if (bottom <= 0) return;
+            if (nextTop < end) upper = Math.min(upper, end);
+            else lower = Math.max(lower, end);
+          },
         );
+        coverage.current = { top: nextTop, lower, upper };
       }
     }
     const selectedRows = [...retainedRows.current.values()].filter(
@@ -121,7 +136,23 @@ export function useTranscriptRows(
     return [...visibleEntries, ...selectedRows].sort((left, right) => left.rank - right.rank);
   }
 
-  return { lookupRow, getRetainedRows, lastScrollport, updateSelection, prepareMountedRows };
+  const coversScrollTop = useCallback((node: HTMLElement, top: number) => {
+    const bounds = coverage.current;
+    if (!bounds || (top !== bounds.top && (top <= bounds.lower || top >= bounds.upper)))
+      return false;
+    // A programmatic scroll can skip rendering but must still survive tab suspension.
+    retainedScrollport.current = { top: node.scrollTop, width: node.clientWidth };
+    return true;
+  }, []);
+
+  return {
+    lookupRow,
+    getRetainedRows,
+    lastScrollport,
+    updateSelection,
+    prepareMountedRows,
+    coversScrollTop,
+  };
 }
 
 export function useTranscriptSelectionEvents(updateSelection: () => void) {

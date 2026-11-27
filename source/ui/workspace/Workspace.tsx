@@ -381,6 +381,7 @@ export function Workspace({
               sessionStatus={events.statuses[id]}
               canPersist={canPersist}
               notice={id === activeId ? events.notice : null}
+              draftStore={id === activeId && !inspected ? events.draftStore : undefined}
               provisioning={id === activeId ? events.provisioning : null}
               refresh={refresh}
               browserRefresh={events.browserRefresh[id] ?? 0}

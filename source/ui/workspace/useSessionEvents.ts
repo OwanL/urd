@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { SessionEvents } from "../sessions/SessionEvents.ts";
+import { ToolDraftStore } from "../sessions/ToolDrafts.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import { applySessionTitle, mergeWorkspaceSessions } from "./WorkspaceState.ts";
 import { enumerateSessionPages } from "../sessions/SessionPages.ts";
@@ -28,6 +29,7 @@ export function useSessionEvents(
   refreshSnoozed: () => void,
 ) {
   const [notices, setNotices] = useState<Record<string, string>>({});
+  const [draftStore] = useState(() => new ToolDraftStore());
   const [browserRefresh, setBrowserRefresh] = useState<Record<string, number>>({});
   const [activity, setActivity] = useState(emptySessionActivity);
   const [provisioning, setProvisioning] = useState<string | null>(null);
@@ -83,7 +85,8 @@ export function useSessionEvents(
       }
     }
     const events = new SessionEvents(new URL(window.location.href), {
-      connected(_boot, nextStreamId) {
+      connected(boot, nextStreamId) {
+        draftStore.boot(boot);
         const reconnected = connectedBefore;
         connectedBefore = true;
         streamConnected = true;
@@ -110,10 +113,12 @@ export function useSessionEvents(
       },
       status(session, status, title, hasPendingUserQuestion) {
         if (status === "unavailable") {
+          if (desired.current.active === session) draftStore.clear();
           forget([session]);
           return;
         }
         if (isClosed(session)) return;
+        draftStore.status(session, status);
         setActivity((previous) =>
           recordSessionStatus(
             previous,
@@ -135,8 +140,13 @@ export function useSessionEvents(
           [session]: (previous[session] ?? 0) + 1,
         }));
       },
+      toolDraft(draft) {
+        if (isClosed(draft.session) || desired.current.active !== draft.session) return;
+        draftStore.apply(draft);
+      },
       snoozeChanged: refreshSnoozed,
       disconnected() {
+        draftStore.disconnect();
         streamConnected = false;
         setStreamId(null);
         setConnectionState("disconnected");
@@ -185,6 +195,7 @@ export function useSessionEvents(
       discovery?.abort();
       streamStarted = false;
       events.stop();
+      draftStore.disconnect();
       setConnectionState("disconnected");
       setStreamId(null);
       transport.current = null;
@@ -195,20 +206,21 @@ export function useSessionEvents(
       window.removeEventListener("pageshow", activate);
       window.removeEventListener("focus", activate);
     };
-  }, [client, access, forget, isClosed, ready, refreshSnoozed]);
+  }, [client, access, forget, isClosed, ready, refreshSnoozed, draftStore]);
 
   useEffect(() => {
     if (watched !== active) {
       setNotices({});
       setWatched(active);
     }
+    draftStore.watch(active && open.includes(active) ? active : null);
     setActivity((previous) => retainOpenSessionActivity(previous, open, observed, active));
     transport.current?.update(observed, active ? [active] : []);
-  }, [observed, active, watched, open]);
-
+  }, [observed, active, watched, open, draftStore]);
   const connected = connectionState === "connected";
   const observedSessions = new Set(observed);
   return {
+    draftStore,
     connected,
     connectionState,
     streamId,

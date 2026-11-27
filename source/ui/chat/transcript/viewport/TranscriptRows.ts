@@ -73,6 +73,7 @@ export function visibleRows(
   viewportHeight: number,
   retainedKeys: ReadonlySet<string>,
   topPadding: number,
+  onBounds?: (top: number, bottom: number) => void,
 ): PositionedRow[] {
   const from = Math.max(0, scrollTop - viewportHeight);
   const to = scrollTop + viewportHeight * 2;
@@ -80,6 +81,7 @@ export function visibleRows(
     if (retainedKeys.has(entryKey(row.descriptor.entry))) return true;
     const top = topPadding + viewport.estimatedPrefixHeight(row.rank);
     const bottom = topPadding + viewport.estimatedPrefixHeight(row.rank + 1);
+    onBounds?.(top, bottom);
     return bottom > from && top < to;
   });
 }

@@ -1,18 +1,21 @@
 using System.ClientModel.Primitives;
+using System.Net;
 
 namespace Urd.Core.Providers;
 
 // Scoped to one SDK stream. Response headers and native updates count as progress,
 // even if neither produces visible assistant text.
 internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpan timeout, Guid? sessionId = null) : PipelinePolicy {
-  private bool receivedHeaders;
+  private int? httpStatus;
   private bool receivedUpdate;
 
   internal CancellationToken Token => stop.Token;
+  internal bool CanRetryRateLimit => httpStatus == (int)HttpStatusCode.TooManyRequests && !receivedUpdate
+      && Transport is "http" or "https";
   internal string Transport { get; set; } = "https";
   internal ProviderStreamTerminal? WireTerminal { get; set; }
   internal ProviderStreamTerminalKind? SdkTerminal { get; set; }
-  internal string Stage => (receivedHeaders, receivedUpdate) switch {
+  internal string Stage => (httpStatus is not null, receivedUpdate) switch {
     (_, true) => "stream",
     (true, false) => "first-stream-event",
     _ => "response-headers"
@@ -23,7 +26,7 @@ internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpa
   internal void RecordUpdate() => receivedUpdate = true;
 
   internal ProviderOperationException TimeoutFailure(bool cleanupFailed = false) {
-    string stage = (receivedHeaders, receivedUpdate) switch {
+    string stage = (httpStatus is not null, receivedUpdate) switch {
       (_, true) => "the next provider stream event",
       (true, false) => "the first provider stream event",
       _ => "provider response headers"
@@ -36,14 +39,14 @@ internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpa
   public override void Process(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline, int currentIndex) {
     AddSessionHeader(message);
     ProcessNext(message, pipeline, currentIndex);
-    RecordHeaders();
+    RecordHeaders(message.Response);
   }
 
   public override async ValueTask ProcessAsync(PipelineMessage message, IReadOnlyList<PipelinePolicy> pipeline,
       int currentIndex) {
     AddSessionHeader(message);
     await ProcessNextAsync(message, pipeline, currentIndex).ConfigureAwait(false);
-    RecordHeaders();
+    RecordHeaders(message.Response);
   }
 
   private void AddSessionHeader(PipelineMessage message) {
@@ -51,8 +54,8 @@ internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpa
       message.Request.Headers.Set("session-id", id.ToString("D"));
   }
 
-  private void RecordHeaders() {
-    receivedHeaders = true;
+  private void RecordHeaders(PipelineResponse? response) {
+    httpStatus = response?.Status;
     BeginRead();
   }
 }

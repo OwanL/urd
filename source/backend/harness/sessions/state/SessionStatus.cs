@@ -31,7 +31,11 @@ internal sealed class SessionStatus(long historyRevision) {
     bool fenced = !acceptingUserMessages || stored.HistoryRevision != historyRevision
         || (stored.UnsettledExecutionId is not null && !ownsExecution);
     bool stopping = stored.StopRequested || (ownsExecution && execution!.IsStopping);
-    return stored with { AdmissionFenced = fenced, StopRequested = stopping };
+    return stored with {
+      AdmissionFenced = fenced,
+      StopRequested = stopping,
+      RateLimitRetryAt = ownsExecution && !fenced && !stopping ? execution!.RateLimitRetryAt : null
+    };
   }
 
   internal string CurrentStatus(SessionSnapshot stored, bool acceptingUserMessages, bool needsAttention, SessionExecutionDriver? execution) {

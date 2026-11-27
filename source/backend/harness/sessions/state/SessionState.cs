@@ -24,7 +24,7 @@ public sealed record SessionSnapshot(
     string? Title = null, IReadOnlyList<StartingResourcePruningStatus>? Pruning = null,
     PendingResponse? PendingResponse = null, bool CanCompact = false, Guid? QueuedCompactionId = null,
     string? CompactionUnavailableReason = null, Guid? ManualCompactionId = null, bool RequiresRecovery = false,
-    bool CanCloseAfterFailure = false);
+    bool CanCloseAfterFailure = false, DateTimeOffset? RateLimitRetryAt = null);
 
 public sealed record StartingResourcePruningStatus(
     string Category, string State, int Total, int Retained, string? Error = null);

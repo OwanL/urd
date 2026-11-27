@@ -58,6 +58,18 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
     }
   }
 
+  internal async Task PublishRateLimitRetryAsync(DateTimeOffset? retryAt) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (!session.CanRecordExecution(Identity, allowStopping: retryAt is null))
+      return;
+
+    SessionExecutionDriver execution = session.CurrentExecution!;
+    if (execution.RateLimitRetryAt == retryAt)
+      return;
+    execution.RateLimitRetryAt = retryAt;
+    session.PublishChange();
+  }
+
   internal async Task RecordCompactionErrorAsync(string? error) {
     using var _ = await sessionLock.AcquireAsync();
     if (session.CanRecordExecution(Identity.ExecutionId, allowStopping: true))

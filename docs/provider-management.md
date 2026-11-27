@@ -159,9 +159,16 @@ event, or each next event (including the end of the stream). Non-text events cou
 progress; time spent processing updates locally does not. A timeout cancels and drains
 the read, then reports the phase that stalled. It does not prove the provider never
 received the request. Stop, disconnect and shutdown still cancel and drain owned work.
-Diagnostics retain their separate two-minute total limit. There are no automatic retries,
-fallback providers, provider-hosted conversations or tool execution inside the client. `GetResponseAsync`
-consumes the same guarded streaming path, not a second unvalidated implementation.
+Diagnostics retain their separate two-minute total limit. `GetResponseAsync` consumes the same
+guarded streaming path, not a second unvalidated implementation.
+
+A confirmed HTTP 429 before output retries the same model request, with jittered exponential
+backoff and no queue. Urd never retries earlier than `Retry-After` or starts another retry five
+minutes or more after the first rejection. The window does not cut off an active response. Known
+quota and billing failures, ambiguous stream errors and partial responses are not retried. Stop,
+credential or binding replacement, disconnect and shutdown cancel a retry wait. The active chat
+shows the countdown for its conversation request as live state; it is not saved or resumed after
+restart. Retries do not replay tool calls or switch providers.
 
 ChatGPT maps system instructions to `developer` messages at the request boundary; the plan
 Responses endpoint rejects `system` messages. Saved starting context and other routes keep

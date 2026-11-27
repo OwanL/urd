@@ -7,7 +7,7 @@ using Urd.Core.Usage;
 
 namespace Urd.Core.Execution;
 
-// One send attempt. Prompt accounting runs alongside the stream; output is counted in bounded batches.
+// One model exchange. Prompt accounting runs alongside the stream; output is counted in bounded batches.
 internal sealed class RequestContextEstimate(Func<RequestContextEstimate, CancellationToken, Task> publish) : IAsyncDisposable {
   internal const string PropertyName = "urd.request_context_estimate";
   internal const string ToolArgumentDeltaProperty = "urd.context_tool_arguments_delta";
@@ -30,7 +30,8 @@ internal sealed class RequestContextEstimate(Func<RequestContextEstimate, Cancel
       ? input + Volatile.Read(ref outputTokens) : null;
 
   internal void Prepare(IEnumerable<ChatMessage> messages, ChatOptions options) {
-    preparation = Task.Run(async () => {
+    // A rejected request retries the same prompt; keep its original counting task.
+    preparation ??= Task.Run(async () => {
       try {
         if (TryCountPrompt(messages, options, lifetime.Token) is not long tokens) return;
 

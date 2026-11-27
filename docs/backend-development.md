@@ -62,8 +62,9 @@ not called. After a committed attempt, failures retain the placed input and any 
 partial output; the input is not automatically requeued or resubmitted. Exact receipt
 retries return the original decision and do not start a replacement execution. Explicit
 resend of a positively known not-sent input is a separate operation with a new submission
-identity; the safe context-window overflow retry is a separate provider response path, not
-automatic recovery of an uncertain submission.
+identity. Context-window overflow recovery and backoff after a confirmed provider 429 can retry
+a rejected model exchange without redoing any tool effects. Neither replays an uncertain submission. See
+[shared model requests](provider-management.md#shared-model-requests) for the rate-limit policy.
 
 The current `SendAttemptPlacementTests` cover eager-provider visibility after preparation,
 pre-attempt and post-attempt failures, Stop during preparation, exact receipt idempotency,

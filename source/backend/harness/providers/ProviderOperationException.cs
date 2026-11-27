@@ -1,4 +1,6 @@
 using System.ClientModel;
+using System.Globalization;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 
@@ -8,6 +10,7 @@ namespace Urd.Core.Providers;
 public sealed class ProviderOperationException : Exception {
   private const int MaximumErrorBodyBytes = 16 * 1024;
   private const int MaximumMessageLength = 1024;
+  private static readonly string[] httpDateFormats = ["r", "dddd, dd-MMM-yy HH:mm:ss 'GMT'", "ddd MMM d HH:mm:ss yyyy"];
 
   public ProviderOperationException(ProviderFailure failure) : this(failure, failure.ToString(), null) { }
 
@@ -21,15 +24,20 @@ public sealed class ProviderOperationException : Exception {
 
   public ProviderFailure Failure { get; }
   public string? Reason { get; }
+  internal TimeSpan? RetryAfter { get; private init; }
+  internal bool IsRetryableRateLimit { get; private init; }
   internal ProviderDiagnostic.Cause? DiagnosticCause { get; private init; }
 
   internal static ProviderOperationException FromProviderError(Exception error,
       bool discovery = false, bool contextWindow = false, ProviderCredentials? credentials = null,
-      bool socketTransport = false) {
+      bool socketTransport = false, bool allowRateLimitRetry = false) {
     ProviderErrorDetails? details = error is ClientResultException clientError ? ReadErrorDetails(clientError) : null;
     ProviderFailure failure = error switch {
       ClientResultException { Status: 401 } => ProviderFailure.AuthenticationRequired,
       ClientResultException { Status: 403 } => ProviderFailure.PlanAccessDenied,
+      ClientResultException { Status: 429 } when !IsQuotaError(details?.Code) && !IsQuotaError(details?.Type) =>
+          ProviderFailure.RateLimited,
+      HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests } when !socketTransport => ProviderFailure.RateLimited,
       ClientResultException when contextWindow && IsContextWindowExceededCode(details?.Code) =>
           ProviderFailure.ContextWindowExceeded,
       ClientResultException { Status: 400 or 422 } when IsModelImageRejection(details?.Code, details?.Message) =>
@@ -54,7 +62,11 @@ public sealed class ProviderOperationException : Exception {
 
     if (details is not null)
       return new(failure, FormatMessage(failure, details.Message, details.Code, details.Param, details.RequestId,
-          status, null, credentials), null) { DiagnosticCause = cause };
+          status, null, credentials), null) {
+        DiagnosticCause = cause,
+        IsRetryableRateLimit = failure == ProviderFailure.RateLimited && allowRateLimitRetry && !socketTransport,
+        RetryAfter = failure == ProviderFailure.RateLimited ? ReadRetryAfter(((ClientResultException)error).GetRawResponse()?.Headers) : null
+      };
 
     if (error is ResponsesSocketStream.ReceiveException receiveError)
       return new(failure, receiveError.Message) { DiagnosticCause = cause };
@@ -71,7 +83,26 @@ public sealed class ProviderOperationException : Exception {
       failure = ProviderFailure.ContextWindowExceeded;
     else if (IsModelImageRejection(code, message))
       failure = ProviderFailure.ImageInputUnsupported;
+    else if (code == "rate_limit_exceeded")
+      failure = ProviderFailure.RateLimited;
     return Create(failure, message, code, param, null, null, credentials);
+  }
+
+  private static bool IsQuotaError(string? code) => code is
+      "insufficient_quota" or "quota_exceeded" or "billing_hard_limit_reached" or "billing_not_active" or "usage_limit_reached";
+
+  private static TimeSpan? ReadRetryAfter(System.ClientModel.Primitives.PipelineResponseHeaders? headers) {
+    if (headers is null || !headers.TryGetValue("retry-after", out string? header) || header is null) return null;
+    string value = header.Trim();
+    if (long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out long seconds))
+      return seconds < TimeSpan.MaxValue.TotalSeconds ? TimeSpan.FromSeconds(seconds) : TimeSpan.MaxValue;
+    if (value.Length > 0 && value.All(char.IsAsciiDigit))
+      return TimeSpan.MaxValue;
+    if (!DateTimeOffset.TryParseExact(value, httpDateFormats, CultureInfo.InvariantCulture,
+        DateTimeStyles.AssumeUniversal | DateTimeStyles.AllowWhiteSpaces, out var date))
+      return null;
+    TimeSpan delay = date - DateTimeOffset.UtcNow;
+    return delay > TimeSpan.Zero ? delay : TimeSpan.Zero;
   }
 
   // Do not treat malformed images, unsupported formats or generic invalid requests as model capability evidence.
@@ -145,16 +176,16 @@ public sealed class ProviderOperationException : Exception {
   private static ProviderErrorDetails ReadErrorDetails(ClientResultException error) {
     int status = error.Status;
     var response = error.GetRawResponse();
-    if (response is null) return new(status, null, null, null, null);
+    if (response is null) return new(status, null, null, null, null, null);
 
     string? requestId = response.Headers.TryGetValue("x-request-id", out var headerRequestId)
         ? headerRequestId : null;
     try {
       ReadOnlyMemory<byte> content = response.Content.ToMemory();
-      if (content.Length > MaximumErrorBodyBytes) return new(status, null, null, null, requestId);
+      if (content.Length > MaximumErrorBodyBytes) return new(status, null, null, null, requestId, null);
       using JsonDocument document = JsonDocument.Parse(content);
       JsonElement root = document.RootElement;
-      if (root.ValueKind != JsonValueKind.Object) return new(status, null, null, null, requestId);
+      if (root.ValueKind != JsonValueKind.Object) return new(status, null, null, null, requestId, null);
 
       JsonElement nested = root.TryGetProperty("error", out JsonElement providerError) &&
           providerError.ValueKind == JsonValueKind.Object ? providerError : default;
@@ -162,9 +193,10 @@ public sealed class ProviderOperationException : Exception {
       string? code = FirstNonBlank(ReadString(nested, "code"), ReadString(root, "code"));
       string? param = FirstNonBlank(ReadString(nested, "param"), ReadString(root, "param"));
       requestId ??= ReadString(nested, "request_id") ?? ReadString(root, "request_id");
-      return new(status, message, code, param, requestId);
+      string? type = FirstNonBlank(ReadString(nested, "type"), ReadString(root, "type"));
+      return new(status, message, code, param, requestId, type);
     } catch (Exception parseError) when (parseError is JsonException or InvalidOperationException or ArgumentException) {
-      return new(status, null, null, null, requestId);
+      return new(status, null, null, null, requestId, null);
     }
   }
 
@@ -175,7 +207,7 @@ public sealed class ProviderOperationException : Exception {
   private static string? FirstNonBlank(params string?[] values) =>
       values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
-  private sealed record ProviderErrorDetails(int Status, string? Message, string? Code, string? Param, string? RequestId);
+  private sealed record ProviderErrorDetails(int Status, string? Message, string? Code, string? Param, string? RequestId, string? Type);
 }
 
 public enum ProviderFailure {
@@ -190,5 +222,6 @@ public enum ProviderFailure {
   Disconnecting,
   DiscoveryUnsupported,
   ContextWindowExceeded,
-  ImageInputUnsupported
+  ImageInputUnsupported,
+  RateLimited
 }

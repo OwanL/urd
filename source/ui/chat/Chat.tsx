@@ -13,7 +13,7 @@ import { preferenceSaveBlocks } from "../preferences/usePreferences.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
 import { PendingInputQueue } from "./PendingInputQueue.tsx";
-import { deriveChatStatus } from "./ChatStatus.ts";
+import { deriveChatStatus, rateLimitRetryTime } from "./ChatStatus.ts";
 import { ChatStatusDisplay } from "./ChatStatusDisplay.tsx";
 import { EmptyChatOverview } from "./EmptyChatOverview.tsx";
 import { Transcript } from "./transcript/Transcript.tsx";
@@ -385,6 +385,11 @@ export function Chat({
             provisioning={provisioning}
             state={state}
             settlementError={snapshot?.lastSettlement?.error}
+            rateLimitRetryTime={
+              active && visible && notice !== null
+                ? rateLimitRetryTime(state.executionStatus, snapshot?.rateLimitRetryAt)
+                : null
+            }
             continuationStatus={chat.pendingContinuation?.status ?? null}
             editStatus={
               chat.messageEdit?.submission

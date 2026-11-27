@@ -45,6 +45,7 @@ export interface SessionSnapshot {
   readonly compactionUnavailableReason?: string | null;
   readonly unsettledExecutionId: string | null;
   readonly isCompacting?: boolean;
+  readonly rateLimitRetryAt?: string | null;
   readonly stopRequested: boolean;
   readonly lastSettlement: SessionExecutionResult | null;
   readonly latestLlmSelection: LlmSelection | null;

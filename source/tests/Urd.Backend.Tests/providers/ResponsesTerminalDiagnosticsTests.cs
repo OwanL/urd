@@ -46,6 +46,8 @@ public sealed class ResponsesTerminalDiagnosticsTests {
     var (error, diagnostic, _) = await SocketFailure(Created, terminal);
 
     Assert.Equal("ProviderUnavailable", error.Message);
+    Assert.False(error.IsRetryableRateLimit);
+    Assert.Null(error.RetryAfter);
     Assert.Equal(ProviderStreamTerminalKind.StandaloneError, diagnostic.SdkTerminal);
     Assert.Equal(ProviderStreamTerminalErrorShape.ErrorObject, diagnostic.WireTerminal?.ErrorShape);
     Assert.Equal(ProviderStreamTerminalErrorCode.RateLimitExceeded, diagnostic.WireTerminal?.ErrorCode);

@@ -421,7 +421,8 @@ internal sealed class SessionExecution : IDisposable {
         Tools = [.. offeredTools],
         AdditionalProperties = new() {
           [UsageContext.PropertyName] = new UsageContext(session.Id, ExecutionId, "conversation"),
-          [OpenAIInferenceClient.SessionIdProperty] = session.Id
+          [OpenAIInferenceClient.SessionIdProperty] = session.Id,
+          [RateLimitRetry.StatusProperty] = (Func<DateTimeOffset?, Task>)recorder.PublishRateLimitRetryAsync
         }
       };
       if (socketRun is not null)

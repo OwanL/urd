@@ -1,4 +1,6 @@
 using Microsoft.Extensions.AI;
+using Urd.Core.Providers;
+using Urd.Core.Storage;
 
 namespace Urd.Core.Usage;
 
@@ -6,6 +8,36 @@ namespace Urd.Core.Usage;
 internal sealed class UsageStream(
     Func<CancellationToken, (IAsyncEnumerator<ChatResponseUpdate> Updates, UsageObservation Observation)> start)
     : IAsyncEnumerable<ChatResponseUpdate> {
+  internal static UsageStream Observe(Func<CancellationToken, IAsyncEnumerator<ChatResponseUpdate>> stream,
+      UsageStorage storage, ProviderConnection connection, IReadOnlyList<ChatMessage> input, ChatOptions options,
+      UsageContext context, ModelPriceCatalog? prices = null) {
+    string model = options.ModelId ?? throw new ArgumentException("A model ID is required.", nameof(options));
+    return new(token => {
+      token.ThrowIfCancellationRequested();
+      var observation = new UsageObservation(storage, connection, model, context, input, options, prices);
+      try {
+        return (stream(token), observation);
+      } catch {
+        observation.Finish();
+        throw;
+      }
+    });
+  }
+
+  // Keep internal accounting metadata out of model options without mutating the caller's settings.
+  internal static ChatOptions PrepareOptions(ChatOptions? options, out UsageContext context) {
+    ChatOptions prepared = options?.Clone() ?? new();
+    if (options?.AdditionalProperties is { } properties)
+      prepared.AdditionalProperties = new(properties);
+    if (prepared.AdditionalProperties is { } copied && copied.TryGetValue(UsageContext.PropertyName, out object? value)) {
+      copied.Remove(UsageContext.PropertyName);
+      context = value as UsageContext ?? throw new ArgumentException("A usage context is required.", nameof(options));
+    } else {
+      context = new(null, null, UsageContext.DefaultPurpose);
+    }
+    return prepared;
+  }
+
   public IAsyncEnumerator<ChatResponseUpdate> GetAsyncEnumerator(CancellationToken cancellationToken = default) {
     var (updates, observation) = start(cancellationToken);
     return new Enumerator(updates, observation);

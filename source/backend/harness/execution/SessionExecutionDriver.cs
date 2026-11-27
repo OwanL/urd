@@ -21,6 +21,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
   internal void RetireContextEstimate() => execution.RetireContextEstimate();
   internal void SetCompacting(bool value) => execution.IsCompacting = value;
   internal bool IsWaitingForBackgroundTools { get; private set; }
+  internal DateTimeOffset? RateLimitRetryAt { get; set; }
   internal Task<SessionExecutionResult> Settlement => settlement.Task;
   internal bool CanCloseAfterFailure { get; private set; }
 

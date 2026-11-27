@@ -1,3 +1,5 @@
+import { useEffect, useState } from "preact/hooks";
+import { rateLimitLabel } from "./ChatStatus.ts";
 import type { ChatExecutionStatus, ChatStatus } from "./ChatStatus.ts";
 
 const executionLabels: Record<Exclude<ChatExecutionStatus, null>, string> = {
@@ -15,6 +17,22 @@ const executionLabels: Record<Exclude<ChatExecutionStatus, null>, string> = {
   cancelled: "Cancelled.",
 };
 
+function RateLimitStatus({ retryAt }: { retryAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (now >= retryAt) return;
+    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(1000, retryAt - now));
+    return () => window.clearTimeout(timer);
+  }, [now, retryAt]);
+
+  return (
+    <span>
+      <span class="chat-running-announcement">Rate limited · retrying</span>
+      <span aria-hidden="true">{rateLimitLabel(retryAt, now)}</span>{" "}
+    </span>
+  );
+}
+
 interface ChatStatusDisplayProps {
   error: string | null | undefined;
   workingDirectoryNotice: string | null;
@@ -25,6 +43,7 @@ interface ChatStatusDisplayProps {
   provisioning: string | null;
   state: Pick<ChatStatus, "executionStatus" | "pendingStatus" | "textError">;
   settlementError: string | null | undefined;
+  rateLimitRetryTime: number | null;
   continuationStatus: "sending" | "uncertain" | null;
   editStatus: {
     status: "loading" | "editing" | "saving" | "uncertain";
@@ -52,6 +71,7 @@ export function ChatStatusDisplay({
   provisioning,
   state,
   settlementError,
+  rateLimitRetryTime,
   continuationStatus,
   editStatus,
   checking,
@@ -83,12 +103,16 @@ export function ChatStatusDisplay({
       )}
       {readError && <button onClick={onRefresh}>Refresh</button>}
       {provisioning && <span>{provisioning} </span>}
-      {status && (
-        <span class={statusClass}>
-          {status === "failed"
-            ? settlementError || executionLabels.failed
-            : executionLabels[status]}{" "}
-        </span>
+      {rateLimitRetryTime !== null ? (
+        <RateLimitStatus key={rateLimitRetryTime} retryAt={rateLimitRetryTime} />
+      ) : (
+        status && (
+          <span class={statusClass}>
+            {status === "failed"
+              ? settlementError || executionLabels.failed
+              : executionLabels[status]}{" "}
+          </span>
+        )
       )}
       {canCheckStatus && !readError && <button onClick={onRefresh}>Check status</button>}
       {state.pendingStatus && (

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { deriveChatStatus } from "../../chat/ChatStatus.ts";
+import { deriveChatStatus, rateLimitLabel, rateLimitRetryTime } from "../../chat/ChatStatus.ts";
 import { composerSubmissionState } from "../../chat/composer/ComposerSubmission.ts";
 import type { ChatStopState } from "../../chat/ChatCommands.ts";
 import { newChat } from "../../chat/ChatState.ts";
@@ -67,6 +67,35 @@ function pendingChat(status: "sending" | "uncertain"): ChatState {
     },
   };
 }
+
+void test("rate limit status follows execution precedence and remains truthful after the deadline", () => {
+  const retryAt = "2026-11-27T04:00:12.000Z";
+  const time = Date.parse(retryAt);
+  const running = snapshot({ unsettledExecutionId: executionId, rateLimitRetryAt: retryAt });
+  const status = deriveChatStatus(chat, running, undefined, true, true).executionStatus;
+  assert.equal(rateLimitRetryTime(status, running.rateLimitRetryAt), time);
+  assert.equal(rateLimitLabel(time, time - 11_001), "Rate limited · retrying in 12s");
+  assert.equal(rateLimitLabel(time, time), "Rate limited · retrying…");
+  assert.equal(rateLimitLabel(time, time + 5_000), "Rate limited · retrying…");
+  assert.equal(rateLimitRetryTime("compacting", retryAt), time);
+  assert.equal(rateLimitRetryTime("running", "invalid"), null);
+  assert.equal(rateLimitRetryTime("running", null), null);
+  for (const overrides of [
+    { stopRequested: true },
+    { admissionFenced: true },
+    { requiresRecovery: true },
+    { unsettledExecutionId: null },
+  ]) {
+    const next = { ...running, ...overrides };
+    const nextStatus = deriveChatStatus(chat, next, undefined, true, true).executionStatus;
+    assert.equal(rateLimitRetryTime(nextStatus, next.rateLimitRetryAt), null);
+  }
+  const stop: ChatStopState = { executionId, pending: true, error: null };
+  assert.equal(
+    rateLimitRetryTime(deriveChatStatus(chat, running, stop, true, true).executionStatus, retryAt),
+    null,
+  );
+});
 
 void test("an empty composer submits Continue only when explicitly eligible", () => {
   assert.deepEqual(composerSubmissionState("", false, true, true), {

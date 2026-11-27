@@ -120,6 +120,20 @@ export function deriveChatStatus(
   };
 }
 
+export function rateLimitRetryTime(
+  status: ChatExecutionStatus,
+  retryAt: string | null | undefined,
+): number | null {
+  if ((status !== "running" && status !== "compacting") || !retryAt) return null;
+  const time = Date.parse(retryAt);
+  return Number.isFinite(time) ? time : null;
+}
+
+export function rateLimitLabel(retryAt: number, now: number): string {
+  const seconds = Math.ceil((retryAt - now) / 1000);
+  return seconds > 0 ? `Rate limited · retrying in ${seconds}s` : "Rate limited · retrying…";
+}
+
 function executionStatus(
   snapshot: SessionSnapshot | null,
   knownExecutionId: string | null,

@@ -205,16 +205,11 @@ function parseToolDraft(draft: ToolDraft): DraftPresentation {
   } else if (name === "bash" || name === "shell") {
     result.icon = "terminal";
     const text = get("command");
-    if (text) {
-      result.preview = { style: "code", text };
-      result.detail = oneLine(text, 240);
-    }
+    if (text && draft.state === "drafting") result.preview = { style: "code", text };
+    else if (text) result.detail = oneLine(text, 240);
   } else if (name === "subagent" || name === "ask_user") {
     const text = get(name === "subagent" ? "task" : "question");
-    if (text) {
-      result.preview = { style: "prose", text };
-      result.detail = oneLine(text, 240);
-    }
+    if (text) result.preview = { style: "prose", text };
   } else {
     const text = unescapeText(head).text + (tail ? `\n…\n${unescapeText(tail).text}` : "");
     if (text) result.preview = { style: "code", text };

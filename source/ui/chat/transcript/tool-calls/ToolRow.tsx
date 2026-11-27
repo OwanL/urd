@@ -191,7 +191,7 @@ export function ToolRow({
 
   const presentation = draftRow?.presentation ?? label;
   const kind = presentation?.icon;
-  const isAskUser = tool?.name === "ask_user";
+  const isAskUser = (tool?.name ?? draftRow?.draft.name) === "ask_user";
   const iconName = completion ? "return" : isAskUser ? "ask" : kind ? iconNames[kind] : "tool";
   const iconLabel = completion
     ? "Returned tool output"

@@ -59,14 +59,13 @@ Missing models/resources remain visibly unavailable rather than rebinding. Prote
 discover resources for the default directory; built-in instructions always remain. Response headers
 freeze the model, effort (`medium` shown as a bare label) and start time. Boundary-anchored
 preparation rows cover tools, skills, instructions and title, with truthful
-running/completed/fallback/cancelled/interrupted outcomes. Rows stay visible while preparation runs, then collapse beneath the response header.
+running/completed/fallback/cancelled/interrupted outcomes. Live rows stay open when preparation settles so the transcript does not jump. Previously settled rows start collapsed.
 All four purposes default to Small and resolve through saved bucket mappings or an exact
 provider/model override. Runtime uses saved choices only; unavailable choices are not rebound. If
 neither resolves, skip the call with a warning, never use chat; selection failures retain only
 protected skills/instructions and all tools. Missing or failed
 title generation uses the first-prompt fallback when it yields a title. The disclosure flags
-settled issues and restores the rows on demand; rows being inspected stay open until pointer
-and keyboard focus leave. Read-only tooltips load detail and resource pages
+settled issues and lets the reader expand or collapse the rows. Read-only tooltips load detail and resource pages
 on demand, including model, elapsed
 time, cost (unknown or estimated where applicable), and bounded provider-emitted reasoning and
 output previews; reasoning is never inferred. Open tabs receive backend title metadata via

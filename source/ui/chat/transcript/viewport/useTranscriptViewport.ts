@@ -16,6 +16,7 @@ import {
   bottomPadding,
   captureTranscriptDraftAnchor,
   layoutProfile,
+  pinTranscriptLatest,
   recordTranscriptUserScroll,
   restoreTranscriptDraftAnchor,
   topPadding,
@@ -226,7 +227,12 @@ export function useTranscriptViewport({
       setScrollVersion((value) => value + 1);
       const width = node.clientWidth;
       const model = viewport.current;
-      if (width <= 0 || !model || model.snapshot().width === width) return;
+      if (!model || !visible || documentInactive || node.clientHeight === 0) return;
+      // ResizeObserver runs before paint; a height-only resize does not necessarily
+      // resize the content or trigger the model layout effect.
+      const target = pinTranscriptLatest(node, model);
+      if (target !== null) onProgrammaticScroll(target);
+      if (width <= 0 || model.snapshot().width === width) return;
       const adjustment = resizeViewport(model, width);
       scrollAdjustment.current = adjustment === 0 ? null : adjustment;
       setModelVersion((value) => value + 1);
@@ -234,7 +240,7 @@ export function useTranscriptViewport({
     });
     observer.observe(node);
     return () => observer.disconnect();
-  }, [resizeViewport, root, saveCurrentState]);
+  }, [documentInactive, onProgrammaticScroll, resizeViewport, root, saveCurrentState, visible]);
 
   const mountedRowsCoverScroll = useCallback(
     (node: HTMLElement) => {
@@ -266,15 +272,22 @@ export function useTranscriptViewport({
       tailHeight.current = Math.max(0, Math.round(content.offsetHeight - prefix - bottomPadding));
       // Drafts are in flow, so their current animated height is already in scrollHeight.
       // Pin in the observer, before paint, rather than waiting for another render.
-      if (viewport.current?.snapshot().followsLatest) {
-        root.scrollTop = root.scrollHeight;
-        programmaticScroll.current = root.scrollTop;
-      } else keepDraftAnchorInPlace(root);
+      const model = viewport.current;
+      const target = model ? pinTranscriptLatest(root, model) : null;
+      if (target !== null) onProgrammaticScroll(target);
+      else keepDraftAnchorInPlace(root);
       if (!mountedRowsCoverScroll(root)) setScrollVersion((value) => value + 1);
     });
     observer.observe(content, { box: "border-box" });
     return () => observer.disconnect();
-  }, [documentInactive, keepDraftAnchorInPlace, mountedRowsCoverScroll, root, visible]);
+  }, [
+    documentInactive,
+    keepDraftAnchorInPlace,
+    mountedRowsCoverScroll,
+    onProgrammaticScroll,
+    root,
+    visible,
+  ]);
 
   const reading = usePositionWindow({
     client,

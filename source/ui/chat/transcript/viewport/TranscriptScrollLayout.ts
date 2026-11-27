@@ -39,6 +39,13 @@ export function restoreTranscriptDraftAnchor(
   return root.scrollTop;
 }
 
+// A resize can move the bottom without changing the content's own dimensions.
+export function pinTranscriptLatest(node: HTMLElement, model: TranscriptViewport): number | null {
+  if (!model.snapshot().followsLatest) return null;
+  node.scrollTop = node.scrollHeight;
+  return node.scrollTop;
+}
+
 // Returns the actual scroll target after the browser clamps it, or null if untouched.
 export function alignTranscriptScrollport(
   node: HTMLElement,

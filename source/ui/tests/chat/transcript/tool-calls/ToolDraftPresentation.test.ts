@@ -66,6 +66,24 @@ void test("formats edit text and counts lines", () => {
   });
 });
 
+void test("does not repeat command or prose in the header as arguments stream", () => {
+  for (const [name, field, text] of [
+    ["bash", "command", "echo hello"],
+    ["shell", "command", "pwd"],
+    ["subagent", "task", "Investigate this"],
+    ["ask_user", "question", "Which one?"],
+  ] as const) {
+    for (let length = 1; length <= text.length; length++) {
+      const result = presentToolDraft(draft(name, `{"${field}":"${text.slice(0, length)}`));
+      assert.equal(result.detail, null, `${name} at ${length}`);
+      assert.deepEqual(result.preview, {
+        style: name === "bash" || name === "shell" ? "code" : "prose",
+        text: text.slice(0, length),
+      });
+    }
+  }
+});
+
 void test("extracts command and prose from incomplete arguments", () => {
   assert.deepEqual(presentToolDraft(draft("bash", '{"command":"echo hello')).preview, {
     style: "code",

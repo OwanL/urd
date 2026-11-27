@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useLayoutEffect, useRef, useState } from "preact/hooks";
 import type { RefObject } from "preact";
 import { RequestError } from "../../http/RequestError.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
@@ -144,64 +144,85 @@ export function UserQuestions({
     }
   }
 
-  if (!question && !readFailed && !answerError) return null;
+  const open = !!(question || readFailed || answerError);
+  const tray = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const host = tray.current!;
+    const body = panel.current;
+    if (!open || !body) {
+      host.style.height = "0px";
+      return;
+    }
+    const measure = () => {
+      host.style.height = `${body.offsetHeight}px`;
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [open]);
+
   return (
-    <section
-      ref={(element) => {
-        panel.current = element;
-        if (panelRef) panelRef.current = element;
-      }}
-      class="user-questions"
-      aria-label="Pending questions"
-      tabIndex={-1}
-    >
-      {question && (
-        <div class="user-question-current" aria-busy={sending}>
-          <QuestionPrompt
-            key={question.id}
-            question={question}
-            draft={draft}
-            disabled={!connected || sending}
-            onDraft={(text) => {
-              updateDraft(draftKey, text);
-              setDraftVersion((version) => version + 1);
-            }}
-            onAnswer={(text) => void answer(text)}
-          />
-          {onOpenBrowser && browserOwners?.includes(question.askingSessionId) && (
-            <button type="button" onClick={() => onOpenBrowser(question.askingSessionId)}>
-              Open browser
-            </button>
+    <div ref={tray} class="user-question-tray" data-open={open} inert={!open}>
+      {open && (
+        <section
+          ref={(element) => {
+            panel.current = element;
+            if (panelRef) panelRef.current = element;
+          }}
+          class="user-questions"
+          aria-label="Pending questions"
+          tabIndex={-1}
+        >
+          {question && (
+            <div class="user-question-current" aria-busy={sending}>
+              <QuestionPrompt
+                key={question.id}
+                question={question}
+                draft={draft}
+                disabled={!connected || sending}
+                onDraft={(text) => {
+                  updateDraft(draftKey, text);
+                  setDraftVersion((version) => version + 1);
+                }}
+                onAnswer={(text) => void answer(text)}
+              />
+              {onOpenBrowser && browserOwners?.includes(question.askingSessionId) && (
+                <button type="button" onClick={() => onOpenBrowser(question.askingSessionId)}>
+                  Open browser
+                </button>
+              )}
+              {questions.length > 1 && (
+                <div class="user-question-pages">
+                  <button type="button" aria-label="Previous question" onClick={() => move(-1)}>
+                    ‹
+                  </button>
+                  {selectedIndex + 1} / {questions.length}
+                  <button type="button" aria-label="Next question" onClick={() => move(1)}>
+                    ›
+                  </button>
+                </div>
+              )}
+            </div>
           )}
-          {questions.length > 1 && (
-            <div class="user-question-pages">
-              <button type="button" aria-label="Previous question" onClick={() => move(-1)}>
-                ‹
-              </button>
-              {selectedIndex + 1} / {questions.length}
-              <button type="button" aria-label="Next question" onClick={() => move(1)}>
-                ›
+          {readFailed && (
+            <div class="user-question-feedback" role="alert">
+              Couldn’t load questions.{" "}
+              <button type="button" onClick={() => refresh.current()}>
+                Retry
               </button>
             </div>
           )}
-        </div>
+          {answerError && (
+            <div class="user-question-feedback" role="alert">
+              {answerError}{" "}
+              <button type="button" onClick={() => setAnswerError(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
+        </section>
       )}
-      {readFailed && (
-        <div class="user-question-feedback" role="alert">
-          Couldn’t load questions.{" "}
-          <button type="button" onClick={() => refresh.current()}>
-            Retry
-          </button>
-        </div>
-      )}
-      {answerError && (
-        <div class="user-question-feedback" role="alert">
-          {answerError}{" "}
-          <button type="button" onClick={() => setAnswerError(null)}>
-            Dismiss
-          </button>
-        </div>
-      )}
-    </section>
+    </div>
   );
 }

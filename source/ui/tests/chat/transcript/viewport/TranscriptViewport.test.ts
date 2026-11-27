@@ -10,6 +10,7 @@ import {
 } from "../../../../chat/transcript/viewport/TranscriptViewport.ts";
 import {
   captureTranscriptDraftAnchor,
+  pinTranscriptLatest,
   restoreTranscriptDraftAnchor,
   type TranscriptDraftAnchor,
 } from "../../../../chat/transcript/viewport/TranscriptScrollLayout.ts";
@@ -68,6 +69,38 @@ function measurement(
     generation,
   };
 }
+
+void test("height changes pin the latest without moving a scrolled-up reader", () => {
+  const model = new TranscriptViewport(geometry(20));
+  let height = 400;
+  let top = 1600;
+  const node = {
+    scrollHeight: 2000,
+    get clientHeight() {
+      return height;
+    },
+    get scrollTop() {
+      return top;
+    },
+    set scrollTop(value: number) {
+      top = Math.max(0, Math.min(value, this.scrollHeight - height));
+    },
+  } as HTMLElement;
+
+  height = 250;
+  assert.equal(pinTranscriptLatest(node, model), 1750);
+  height = 400;
+  assert.equal(pinTranscriptLatest(node, model), 1600);
+
+  model.recordUserScroll(null, false);
+  top = 700;
+  height = 250;
+  assert.equal(pinTranscriptLatest(node, model), null);
+  assert.equal(top, 700);
+  height = 400;
+  assert.equal(pinTranscriptLatest(node, model), null);
+  assert.equal(top, 700);
+});
 
 function fakeElement(top: number, bottom: number): HTMLElement {
   return { getBoundingClientRect: () => ({ top, bottom }) } as unknown as HTMLElement;

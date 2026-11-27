@@ -1,10 +1,5 @@
-import type {
-  ComponentChildren,
-  TargetedFocusEvent,
-  TargetedKeyboardEvent,
-  TargetedPointerEvent,
-} from "preact";
-import { useEffect, useId, useRef, useState } from "preact/hooks";
+import type { ComponentChildren, TargetedKeyboardEvent } from "preact";
+import { useId, useState } from "preact/hooks";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
 import type { PrepassSummary, ResponseHeaderInfo } from "../../sessions/transcript/Prepass.ts";
 import type { TranscriptEntryKind } from "../../sessions/transcript/Messages.ts";
@@ -119,79 +114,26 @@ export function PrepassRows({
   const rows = orderedPrepass(preparation);
   const outcome = prepassOutcome(preparation);
   const listId = useId();
-  const groupRef = useRef<HTMLDivElement>(null);
-  const [expanded, setExpanded] = useState(false);
-  const [pointerHold, setPointerHold] = useState(false);
-  const [focusHold, setFocusHold] = useState(false);
-
-  // A fresh run always settles back to the collapsed default; manual state never survives it.
-  useEffect(() => {
-    if (outcome === null) setExpanded(false);
-  }, [outcome]);
-
-  // Hidden groups cannot be inspected; orphaned holds would pin rows open invisibly.
-  useEffect(() => {
-    if (!context.visible) {
-      setPointerHold(false);
-      setFocusHold(false);
-    }
-  }, [context.visible]);
+  // Keep the initial disclosure through completion; only the user changes it afterwards.
+  const [open, setOpen] = useState(() => outcome === null);
 
   if (rows.length === 0) return null;
-  const open = outcome === null || expanded || pointerHold || focusHold;
-  // Do not shift inspected rows (and their open tooltip) by inserting the summary above them.
-  const toggleVisible = outcome !== null && (expanded || (!pointerHold && !focusHold));
   const usedSessionModel = prepassUsedSessionModel(preparation);
-  const leftGroup = (
-    event: TargetedPointerEvent<HTMLDivElement> | TargetedFocusEvent<HTMLDivElement>,
-  ) => {
-    const next = event.relatedTarget as Node | null;
-    return !next || !groupRef.current?.contains(next);
-  };
   return (
-    <div
-      ref={groupRef}
-      class="response-status-rows"
-      aria-label="Session preparation"
-      onPointerEnter={() => {
-        // Inspection of an open group survives a new run; collapsed hover never reopens it.
-        if (open) setPointerHold(true);
-      }}
-      onPointerLeave={(event) => {
-        if (leftGroup(event)) setPointerHold(false);
-      }}
-      onFocusIn={() => {
-        if (open) setFocusHold(true);
-      }}
-      onFocusOut={(event) => {
-        if (leftGroup(event)) setFocusHold(false);
-      }}
-    >
+    <div class="response-status-rows" aria-label="Session preparation">
       <button
         type="button"
         class={`response-status-toggle${open ? " is-open" : ""}${outcome === "Finished with issues" ? " is-warned" : ""}`}
-        hidden={!toggleVisible}
-        aria-expanded={toggleVisible ? open : undefined}
+        aria-expanded={open}
         aria-controls={listId}
-        onClick={() => {
-          // A manual collapse overrides any inspection hold still pinning rows open.
-          if (open) {
-            setExpanded(false);
-            setPointerHold(false);
-            setFocusHold(false);
-          } else {
-            setExpanded(true);
-            setPointerHold(groupRef.current?.matches(":hover") ?? false);
-            setFocusHold(groupRef.current?.contains(document.activeElement) ?? false);
-          }
-        }}
+        onClick={() => setOpen(!open)}
       >
         <Icon name="chevron" />
         <span class="response-status-kind">Preparation</span>
         <span aria-hidden="true" class="response-status-separator">
           ·
         </span>
-        <span class="response-status-value">{outcome}</span>
+        <span class="response-status-value">{outcome ?? "In progress"}</span>
       </button>
       {usedSessionModel && (
         <p class="response-status-session-model">

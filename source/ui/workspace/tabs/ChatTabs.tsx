@@ -3,7 +3,7 @@ import { useLayoutEffect, useState } from "preact/hooks";
 import type { SubagentLink } from "../../chat/subagents/SubagentNavigation.ts";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
-import { isBusySessionStatus } from "../SessionActivity.ts";
+import { isBusySessionStatus, type PendingQuestionStatus } from "../SessionActivity.ts";
 import { SubagentMenu, useSubagentMenu } from "./SubagentMenu.tsx";
 import { TabContextMenu } from "./TabContextMenu.tsx";
 import { moveTab } from "./TabOrder.ts";
@@ -29,6 +29,7 @@ export interface ChatTabsProps {
     title: string;
     status?: string | undefined;
     knownStatus?: string | undefined;
+    questionStatus?: PendingQuestionStatus | undefined;
     closeAvailable: boolean;
     snoozeAvailable: boolean;
     closing: boolean;
@@ -188,14 +189,22 @@ export function ChatTabs({
         focusTab(id);
       }}
     >
-      {tabs.map(({ id, title, status, knownStatus, closeAvailable, closing }) => {
+      {tabs.map(({ id, title, status, knownStatus, questionStatus, closeAvailable, closing }) => {
         const busy = isBusySessionStatus(status);
         const canShowAgents = busy && !!loadSubagents && !!onOpenSubagent;
+        const questionLabel =
+          closing || !questionStatus
+            ? null
+            : questionStatus === "last-known"
+              ? "Updates paused; last observed answer needed"
+              : "Answer needed";
+        const canClose = closeAvailable && !questionLabel;
         const shortcuts = ["Alt+Shift+ArrowLeft Alt+Shift+ArrowRight"]; // gitleaks:allow -- public keyboard shortcuts, not a credential
-        if (closeAvailable) shortcuts.push("Delete");
+        if (canClose) shortcuts.push("Delete");
         shortcuts.push("Shift+F10");
         const pausedBusy = status === "updates-paused" && isBusySessionStatus(knownStatus);
-        const completed = unread.has(id) && id !== activeId && status === "idle";
+        const hasActivitySlot = !!questionLabel || busy || pausedBusy;
+        const completed = !questionLabel && unread.has(id) && id !== activeId && status === "idle";
         const lastKnownLabel = knownStatus ? (statusLabels[knownStatus] ?? knownStatus) : null;
         const statusLabel = closing
           ? "Closing…"
@@ -224,27 +233,31 @@ export function ChatTabs({
                     indicatorStatus !== "updates-paused"
                   ? "?"
                   : null;
+        const tabLabel = [title, questionLabel, !questionLabel || indicator ? statusLabel : null]
+          .filter(Boolean)
+          .join(", ");
+        const hoverAgents =
+          canShowAgents && !dragging
+            ? (event: PointerEvent) => {
+                const tab = (event.currentTarget as Element)
+                  .closest(".chat-tab")
+                  ?.querySelector<HTMLButtonElement>('[role="tab"]');
+                if (tab) subagents.hover(id, tab, event);
+              }
+            : undefined;
         return (
           <div
             key={id}
             data-tab-id={id}
             class={`chat-tab ${id === activeId ? "is-active" : ""} ${drag.draggedId === id ? "is-dragging" : ""} ${completed ? "has-unread" : ""} ${context?.id === id ? "is-context-target" : ""}`}
-            onPointerEnter={
-              canShowAgents && !dragging
-                ? (event) => {
-                    const tab =
-                      event.currentTarget.querySelector<HTMLButtonElement>('[role="tab"]');
-                    if (tab) subagents.hover(id, tab, event);
-                  }
-                : undefined
-            }
-            onPointerLeave={canShowAgents ? subagents.leave : undefined}
+            onPointerEnter={!questionLabel ? hoverAgents : undefined}
+            onPointerLeave={hoverAgents && !questionLabel ? subagents.leave : undefined}
           >
             <button
               type="button"
               id={`tab-${id}`}
               role="tab"
-              aria-label={`${title}${statusLabel ? `, ${statusLabel}` : ""}`}
+              aria-label={tabLabel}
               aria-selected={id === activeId}
               aria-busy={closing}
               aria-controls="chat-view"
@@ -269,59 +282,68 @@ export function ChatTabs({
                   if (!event.repeat) openTabMenu(id, event.currentTarget, canShowAgents);
                 } else if (event.key === "Delete" && !event.repeat) {
                   event.preventDefault();
-                  if (closeAvailable) void closeTab(id);
+                  if (canClose) void closeTab(id);
                 }
               }}
             >
-              <span class="tab-title">{title}</span>
-              {indicator && (
-                <span
-                  class={`tab-status status-${indicatorStatus}`}
-                  role="img"
-                  aria-label={statusLabel ?? status}
-                >
-                  {indicator}
+              <span
+                class="tab-label"
+                onPointerEnter={questionLabel ? hoverAgents : undefined}
+                onPointerLeave={hoverAgents && questionLabel ? subagents.leave : undefined}
+              >
+                <span class="tab-title">{title}</span>
+                {indicator && (
+                  <span class={`tab-status status-${indicatorStatus}`} aria-hidden="true">
+                    {indicator}
+                  </span>
+                )}
+              </span>
+              {hasActivitySlot && (
+                <span class="tab-end-slot" aria-hidden="true" title={questionLabel ?? undefined}>
+                  {questionLabel ? (
+                    <span
+                      class={`tab-question-marker ${questionStatus === "last-known" ? "is-last-known" : ""}`}
+                    >
+                      ?
+                    </span>
+                  ) : busy ? (
+                    <span class="tab-activity-dot" />
+                  ) : null}
                 </span>
               )}
             </button>
-            <div class="tab-end-slot">
-              {busy ? (
-                <span class="tab-activity-slot" role="img" aria-label={statusLabel ?? status}>
-                  <span class="tab-activity-dot" />
-                </span>
-              ) : pausedBusy ? null : (
-                <>
-                  {completed && (
-                    <span
-                      class="tab-activity-slot tab-completion-marker"
-                      role="img"
-                      aria-label="Completed"
-                    >
-                      <Icon name="check" />
-                    </span>
-                  )}
-                  <IconButton
-                    icon="close"
-                    class="close-tab"
-                    label={closing ? "Closing chat…" : `Close ${title}`}
-                    disabled={!closeAvailable}
-                    hint={
-                      closing ? (
-                        "Closing chat…"
-                      ) : closeAvailable ? (
-                        <>
-                          Close chat permanently <kbd>Delete</kbd>
-                        </>
-                      ) : (
-                        "Close unavailable"
-                      )
-                    }
-                    placement="below"
-                    onClick={() => void closeTab(id)}
-                  />
-                </>
-              )}
-            </div>
+            {!hasActivitySlot && (
+              <div class="tab-end-slot">
+                {completed && (
+                  <span
+                    class="tab-activity-slot tab-completion-marker"
+                    role="img"
+                    aria-label="Completed"
+                  >
+                    <Icon name="check" />
+                  </span>
+                )}
+                <IconButton
+                  icon="close"
+                  class="close-tab"
+                  label={closing ? "Closing chat…" : `Close ${title}`}
+                  disabled={!closeAvailable}
+                  hint={
+                    closing ? (
+                      "Closing chat…"
+                    ) : closeAvailable ? (
+                      <>
+                        Close chat permanently <kbd>Delete</kbd>
+                      </>
+                    ) : (
+                      "Close unavailable"
+                    )
+                  }
+                  placement="below"
+                  onClick={() => void closeTab(id)}
+                />
+              </div>
+            )}
           </div>
         );
       })}
@@ -331,7 +353,7 @@ export function ChatTabs({
           anchor={context.anchor}
           title={contextTab.title}
           canSnooze={contextTab.snoozeAvailable}
-          canClose={contextTab.closeAvailable}
+          canClose={contextTab.closeAvailable && !contextTab.questionStatus}
           close={() => {
             setContext(null);
             void closeTab(context.id);

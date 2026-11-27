@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
@@ -21,6 +22,9 @@ public sealed class UserQuestionTests {
     using UrdStore store = UrdStore.Open(database.Path);
     await using var manager = new SessionManager(store, _ => throw new InvalidOperationException("No model request."));
     PrimarySession primary = await manager.CreatePrimaryAsync();
+    var tabChanges = new ConcurrentQueue<SessionChange>();
+    using IDisposable subscription = await primary.SubscribeAsync(tabChanges.Enqueue, watched: false);
+    Assert.False(Assert.Single(tabChanges).HasPendingUserQuestion);
     using var firstCancellation = new CancellationTokenSource();
     using var secondCancellation = new CancellationTokenSource();
     Task<string> firstAsk = primary.AskUserAsync("First?", null, [], false, firstCancellation.Token);
@@ -30,18 +34,25 @@ public sealed class UserQuestionTests {
       PendingUserQuestion first = Assert.Single(published, item => item.Question == "First?");
       PendingUserQuestion second = Assert.Single(published, item => item.Question == "Second?");
       Assert.All(published, item => Assert.Equal(primary.Id, item.AskingSessionId));
+      Assert.Equal(new[] { false, true }, tabChanges.Select(change => change.HasPendingUserQuestion));
+      SessionChange? initial = null;
+      using IDisposable reopened = await primary.SubscribeAsync(change => initial = change, watched: false);
+      Assert.True(initial?.HasPendingUserQuestion);
       Assert.True(await primary.HasPendingUserQuestionAsync(CancellationToken.None));
 
       Assert.False(await primary.AnswerUserQuestionAsync(Guid.NewGuid(), "not an answer"));
       Assert.True(await primary.AnswerUserQuestionAsync(first.Id, "first answer"));
       Assert.Equal("first answer", await firstAsk.WaitAsync(TestTimeout));
       Assert.False(await primary.AnswerUserQuestionAsync(first.Id, "too late"));
+      Assert.Equal(new[] { false, true }, tabChanges.Select(change => change.HasPendingUserQuestion));
       Assert.True(await primary.HasPendingUserQuestionAsync(CancellationToken.None));
 
       await secondCancellation.CancelAsync();
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => secondAsk.WaitAsync(TestTimeout));
       Assert.False(await primary.HasPendingUserQuestionAsync(CancellationToken.None));
       Assert.False(await primary.AnswerUserQuestionAsync(second.Id, "too late"));
+      Assert.Equal(new[] { false, true, false }, tabChanges.Select(change => change.HasPendingUserQuestion));
+      Assert.All(tabChanges, change => Assert.Equal("idle", change.Status));
       Assert.Empty(await primary.ReadUserQuestionsAsync());
     } finally {
       await firstCancellation.CancelAsync();

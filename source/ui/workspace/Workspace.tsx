@@ -222,6 +222,7 @@ export function Workspace({
             title: chats[id]?.title ?? "Chat",
             status: events.statuses[id],
             knownStatus: events.knownStatuses[id],
+            questionStatus: events.questionStatuses[id],
             closeAvailable: connected && commands.canClose(id, events.statuses[id]),
             snoozeAvailable:
               connected &&

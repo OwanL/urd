@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   emptySessionActivity,
   isBusySessionStatus,
+  pendingQuestionStatus,
   recordSessionStatus,
   resetSessionTransitionStatuses,
   retainOpenSessionActivity,
@@ -47,6 +48,28 @@ void test("opening or closing a session clears its unread marker", () => {
   activity = retainOpenSessionActivity(activity, ["opened"], ["opened"], "opened");
   assert.equal(activity.unread.has("closed"), false);
   assert.equal("closed" in activity.statuses, false);
+});
+
+void test("question indicators follow backend presence, not selection or reconnect", () => {
+  let activity = recordSessionStatus(emptySessionActivity, "asking", "waiting", "other", true);
+  assert.equal(pendingQuestionStatus(activity, "asking", true), "pending");
+  assert.equal(pendingQuestionStatus(activity, "other", true), undefined);
+  activity = retainOpenSessionActivity(activity, ["asking"], ["asking"], "asking");
+  assert.equal(pendingQuestionStatus(activity, "asking", true), "pending");
+
+  activity = resetSessionTransitionStatuses(activity);
+  assert.equal(pendingQuestionStatus(activity, "asking", false), "last-known");
+  assert.equal(pendingQuestionStatus(activity, "asking", true), "last-known");
+  activity = recordSessionStatus(activity, "asking", "waiting", "asking", true);
+  assert.equal(pendingQuestionStatus(activity, "asking", true), "pending");
+  activity = recordSessionStatus(activity, "asking", "waiting", "asking", false);
+  assert.equal(pendingQuestionStatus(activity, "asking", true), undefined);
+
+  activity = recordSessionStatus(activity, "asking", "waiting", "other", true);
+  activity = retainOpenSessionActivity(activity, ["asking"], [], null);
+  assert.equal(pendingQuestionStatus(activity, "asking", true), "last-known");
+  activity = retainOpenSessionActivity(activity, [], [], null);
+  assert.equal(pendingQuestionStatus(activity, "asking", true), undefined);
 });
 
 void test("active completions are not marked unread and existing markers survive other updates", () => {

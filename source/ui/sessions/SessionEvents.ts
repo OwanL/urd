@@ -5,7 +5,12 @@ import { EventStreamParser, type SessionEventMessage } from "./EventStreamParser
 export interface SessionEventCallbacks {
   connected(boot: string, streamId: string): void;
   change(session: string, notice: string): void;
-  status(session: string, status: string, title: string | null): void;
+  status(
+    session: string,
+    status: string,
+    title: string | null,
+    hasPendingUserQuestion: boolean,
+  ): void;
   created(session: string): void;
   browser?(session: string): void;
   disconnected(): void;
@@ -275,7 +280,12 @@ export class SessionEvents {
       if (!this.desiredOpen.includes(event.session)) return;
       const title = typeof event.title === "string" && event.title ? event.title : null;
       this.call(() =>
-        this.callbacks.status(event.session as string, event.status as string, title),
+        this.callbacks.status(
+          event.session as string,
+          event.status as string,
+          title,
+          event.hasPendingUserQuestion === true,
+        ),
       );
       if (registration !== null) this.releasePendingChange(registration, event.session);
     }

@@ -6,6 +6,8 @@ public sealed partial class PrimarySession {
   // The session lock owns publication and read/answer admission. Each waiter belongs to its invoking execution.
   private readonly Dictionary<Guid, (PendingUserQuestion Question, TaskCompletionSource<string> Reply)> userQuestions = new();
 
+  protected override bool HasPendingUserQuestion => userQuestions.Count != 0;
+
   public Task<PendingUserQuestion[]> ReadUserQuestionsAsync(CancellationToken cancellation = default) =>
       ReadUnderLockAsync(() => userQuestions.Values.Where(pending => !pending.Reply.Task.IsCompleted)
           .Select(pending => pending.Question).ToArray(), cancellation);

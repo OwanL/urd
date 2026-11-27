@@ -270,7 +270,8 @@ public abstract partial class SessionBase {
     SessionSnapshot stored = store.Snapshots.ReadPersisted(Id);
     status.Update(stored, CurrentExecution);
     return notifications.Subscribe(observer, watched,
-        status.CurrentStatus(stored, IsAcceptingWork, needsAttention, CurrentExecution), stored.Title);
+        status.CurrentStatus(stored, IsAcceptingWork, needsAttention, CurrentExecution), stored.Title,
+        HasPendingUserQuestion);
   }
 
   private protected Task<ContinuationReceipt?> AdmitContinuationAsync(ContinuationSubmission submission) =>
@@ -383,9 +384,13 @@ public abstract partial class SessionBase {
   // Caller holds the session lock. Accepted decisions never become eligible again.
   private bool HasAcceptedInput() => hasAcceptedInput ??= store.Sessions.HasAcceptedInput(Id);
 
+  // Read under the session lock alongside the rest of the tab metadata.
+  protected virtual bool HasPendingUserQuestion => false;
+
   // Caller holds the session lock.
   internal void PublishChange(string? publishedTitle = null) =>
-      notifications.Publish(status.ReadCurrent(IsAcceptingWork, needsAttention, CurrentExecution), publishedTitle);
+      notifications.Publish(status.ReadCurrent(IsAcceptingWork, needsAttention, CurrentExecution), publishedTitle,
+          HasPendingUserQuestion);
 
   // Caller holds the session lock.
   internal void MarkNeedsAttention() {

@@ -9,7 +9,7 @@ void test("parses chunked SSE events and sends the browser registration", async 
   const connected: string[] = [];
   const streamIds: string[] = [];
   const changes: Array<[string, string]> = [];
-  const statuses: Array<[string, string, string | null]> = [];
+  const statuses: Array<[string, string, string | null, boolean]> = [];
   const created: string[] = [];
   const errors: string[] = [];
   let disconnected = 0;
@@ -27,7 +27,8 @@ void test("parses chunked SSE events and sends the browser registration", async 
             const wire = [
               '\uFEFFevent: connected\r\ndata: {"stream":"stream-a","boot":"boot-a"}\r\n\r\n',
               'event: status\ndata: {"session":"s1","boot":"boot-a","version":4,\ndata: "status":"running","title":null}\n\n',
-              'event: status\ndata: {"session":"s2","boot":"boot-a","version":1,"status":"idle","title":"Saved 雪"}\n\n',
+              'event: status\ndata: {"session":"s2","boot":"boot-a","version":1,"status":"waiting","title":"Saved 雪","hasPendingUserQuestion":true}\n\n',
+              'event: status\ndata: {"session":"s2","boot":"boot-a","version":2,"status":"waiting","title":"Saved 雪","hasPendingUserQuestion":false}\n\n',
               'event: change\ndata: {"session":"s1","boot":"boot-a","version":3}\n\n',
               'event: session-created\ndata: {"session":"session-雪"}\n\n',
             ].join("");
@@ -55,8 +56,8 @@ void test("parses chunked SSE events and sends the browser registration", async 
       changes.push([session, notice]);
       throw new Error("consumer failed");
     },
-    status(session, status, title) {
-      statuses.push([session, status, title]);
+    status(session, status, title, hasPendingUserQuestion) {
+      statuses.push([session, status, title, hasPendingUserQuestion]);
     },
     created(session) {
       created.push(session);
@@ -82,8 +83,9 @@ void test("parses chunked SSE events and sends the browser registration", async 
   assert.deepEqual(streamIds, ["stream-a"]);
   assert.deepEqual(changes, [["s1", "1:boot-a:3:1"]]);
   assert.deepEqual(statuses, [
-    ["s1", "running", null],
-    ["s2", "idle", "Saved 雪"],
+    ["s1", "running", null, false],
+    ["s2", "waiting", "Saved 雪", true],
+    ["s2", "waiting", "Saved 雪", false],
   ]);
   assert.deepEqual(created, ["session-雪"]);
   assert.ok(errors.some((message) => message === "consumer failed"));

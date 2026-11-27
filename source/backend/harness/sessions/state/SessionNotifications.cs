@@ -10,14 +10,17 @@ internal sealed class SessionNotifications(Guid sessionId) {
   private long nextObserverId;
   private string? currentStatus;
   private string? currentTitle;
+  private bool hasPendingUserQuestion;
 
-  internal IDisposable Subscribe(Action<SessionChange> observer, bool watched, string status, string? title) {
+  internal IDisposable Subscribe(Action<SessionChange> observer, bool watched, string status, string? title,
+      bool pendingUserQuestion) {
     currentStatus = status;
     currentTitle = title;
+    hasPendingUserQuestion = pendingUserQuestion;
     long observerId = Interlocked.Increment(ref nextObserverId);
     var subscription = new SessionObserver(observer, watched, () => observers.TryRemove(observerId, out _));
     observers.TryAdd(observerId, subscription);
-    subscription.Notify(new SessionChange(sessionId, version, status, currentTitle));
+    subscription.Notify(new SessionChange(sessionId, version, status, title, HasPendingUserQuestion: pendingUserQuestion));
     if (watched)
       subscription.Notify(new SessionChange(sessionId, version));
     return subscription;
@@ -39,17 +42,19 @@ internal sealed class SessionNotifications(Guid sessionId) {
     }
   }
 
-  internal void Publish(string status, string? publishedTitle) {
+  internal void Publish(string status, string? publishedTitle, bool pendingUserQuestion) {
     version = checked(version + 1);
     if (observers.IsEmpty)
       return;
 
-    bool metadataChanged = currentStatus != status || publishedTitle is not null;
+    bool metadataChanged = currentStatus != status || publishedTitle is not null
+        || hasPendingUserQuestion != pendingUserQuestion;
     currentStatus = status;
     currentTitle = publishedTitle ?? currentTitle;
+    hasPendingUserQuestion = pendingUserQuestion;
     foreach (SessionObserver observer in observers.Values) {
       if (metadataChanged)
-        observer.Notify(new SessionChange(sessionId, version, status, currentTitle));
+        observer.Notify(new SessionChange(sessionId, version, status, currentTitle, HasPendingUserQuestion: pendingUserQuestion));
       if (observer.Watched)
         observer.Notify(new SessionChange(sessionId, version));
     }

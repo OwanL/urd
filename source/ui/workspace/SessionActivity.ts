@@ -2,16 +2,29 @@ export interface SessionActivityState {
   readonly statuses: Readonly<Record<string, string>>;
   readonly transitionStatuses: Readonly<Record<string, string>>;
   readonly unread: ReadonlySet<string>;
+  readonly pendingQuestions: ReadonlySet<string>;
 }
 
 export const emptySessionActivity: SessionActivityState = {
   statuses: {},
   transitionStatuses: {},
   unread: new Set(),
+  pendingQuestions: new Set(),
 };
 
 export function isBusySessionStatus(status: string | undefined): boolean {
   return status === "running" || status === "waiting" || status === "compacting";
+}
+
+export type PendingQuestionStatus = "pending" | "last-known";
+
+export function pendingQuestionStatus(
+  activity: SessionActivityState,
+  session: string,
+  connected: boolean,
+): PendingQuestionStatus | undefined {
+  if (!activity.pendingQuestions.has(session)) return;
+  return connected && activity.transitionStatuses[session] !== undefined ? "pending" : "last-known";
 }
 
 export function recordSessionStatus(
@@ -19,16 +32,22 @@ export function recordSessionStatus(
   session: string,
   status: string,
   active: string | null,
+  hasPendingUserQuestion = false,
 ): SessionActivityState {
   const unread = new Set(previous.unread);
   if (session === active || isBusySessionStatus(status)) unread.delete(session);
   else if (status === "idle" && isBusySessionStatus(previous.transitionStatuses[session]))
     unread.add(session);
 
+  const pendingQuestions = new Set(previous.pendingQuestions);
+  if (hasPendingUserQuestion) pendingQuestions.add(session);
+  else pendingQuestions.delete(session);
+
   return {
     statuses: { ...previous.statuses, [session]: status },
     transitionStatuses: { ...previous.transitionStatuses, [session]: status },
     unread,
+    pendingQuestions,
   };
 }
 
@@ -61,6 +80,9 @@ export function retainOpenSessionActivity(
     ),
     unread: new Set(
       [...previous.unread].filter((session) => openSessions.has(session) && session !== active),
+    ),
+    pendingQuestions: new Set(
+      [...previous.pendingQuestions].filter((session) => openSessions.has(session)),
     ),
   };
 }

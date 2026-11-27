@@ -231,15 +231,16 @@ on Windows. It starts Explorer directly without a shell; missing paths return 40
 stream and process-boot IDs. Register a page's open and watched session IDs with
 `POST /api/events/{streamId}` using `{open, watched}`. For each registration the server
 subscribes before returning success and sends an initial `status` for every registered open
-session, including its published `title` (or null). An unknown ID gets `unavailable` without
-blocking other registrations. A watched session
-that exists also gets an initial `change` hint. The browser waits for both the registration
+session, including its published `title` (or null) and `hasPendingUserQuestion`. An unknown ID
+gets `unavailable` without blocking other registrations. A watched session that exists also gets
+an initial `change` hint. The browser waits for both the registration
 response and that initial status before releasing a racing change, then reads
 a bounded snapshot/history. This subscribe-before-read handshake avoids a gap between
 initial state and live updates. Changes coalesce per session; if more arrive during a
 snapshot/history read, the client performs a trailing read rather than overlapping reads.
-Later `status` events update tabs when execution status or the published title changes, even
-for unwatched tabs. `change` notices prompt bounded reads, and
+Later `status` events update tabs when execution status, the published title, or the presence of
+pending user questions changes, even for unwatched tabs. Question text is not included.
+`change` notices prompt bounded reads, and
 `session-created` events are discovery hints. Heartbeats keep the stream active; an unacknowledged
 registration independently times out and reconnects with the latest open/watched set. Events are
 not durable history or message payloads. Reconnect performs saved-ID discovery again. The

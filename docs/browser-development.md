@@ -183,8 +183,10 @@ tab's agent menu exposes live descendants by hover or its explicit control. Chil
 composer or message editing. Live child views refresh while visible; completed transcripts remain
 available through their parent call.
 
-`ask_user` keeps one pending question visible below the scrollable transcript and above the
-composer. When multiple questions are pending, use the arrows to switch between them. Suggested
+A pending `ask_user` replaces the tab’s working dot with a steady amber `?` without selecting
+or moving the tab. It stays until the last pending question is answered or withdrawn; a muted
+`?` shows the last known state while updates are paused. The question panel shows one question
+below the transcript and above the composer. Use its arrows to switch between pending questions. Suggested
 answers submit on click; custom answers are always available without touching the composer draft.
 Only the primary agent can ask the user. Reload and reconnect read pending questions from the
 running server; they do not resubmit an answer.

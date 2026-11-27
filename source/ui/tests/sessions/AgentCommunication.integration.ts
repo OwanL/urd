@@ -9,6 +9,7 @@ import { RequestError } from "../../http/RequestError.ts";
 import { requestJson } from "../../http/Requests.ts";
 import { PreferencesClient } from "../../preferences/PreferencesClient.ts";
 import { SessionClient } from "../../sessions/SessionClient.ts";
+import { SessionEvents } from "../../sessions/SessionEvents.ts";
 import { ServerProcess } from "../support/ServerProcess.ts";
 import { startLocalModelServer, type ModelRequest } from "../support/LocalModelServer.ts";
 
@@ -144,6 +145,7 @@ async function setup(t: TestContext) {
     titles,
     firstConnection,
     secondConnection,
+    origin: server.origin,
     client,
     questions,
     answer,
@@ -343,10 +345,32 @@ void test("ask_user returns the verbatim custom answer", { timeout: 90_000 }, as
     background: false,
   });
   assert.ok(question.id);
+  let hasPendingUserQuestion: boolean | undefined;
+  const events = new SessionEvents(f.origin, {
+    connected() {},
+    change() {},
+    status(session, _status, _title, pending) {
+      if (session === id) hasPendingUserQuestion = pending;
+    },
+    created() {},
+    disconnected() {},
+  });
+  t.after(() => events.stop());
+  events.update([id], []);
+  events.start();
+  await f.poll(
+    () => Promise.resolve(hasPendingUserQuestion),
+    (pending) => pending === true,
+  );
   await rejectsStatus(f.answer(id, question.id, "  \n "), 400);
   await rejectsStatus(f.answer(id, question.id, 42), 400);
   assert.equal((await f.questions(id)).length, 1);
   assert.deepEqual(await f.answer(id, question.id, answer), { answer });
+  await f.poll(
+    () => Promise.resolve(hasPendingUserQuestion),
+    (pending) => pending === false,
+  );
+  events.stop();
   await rejectsStatus(f.answer(id, question.id, answer), 409);
   await f.settle(id, execution);
   assert.deepEqual(await f.questions(id), []);

@@ -40,9 +40,8 @@
   display: flex;
   align-items: center;
   flex: 1 1 auto;
-  gap: 5px;
   min-width: 0;
-  padding: 5px 4px 5px 10px;
+  padding: 0 4px 0 10px;
   border: 0;
   border-radius: 6px;
   background: transparent;
@@ -51,6 +50,19 @@
   font-size: 12px;
   touch-action: pan-y;
   user-select: none;
+}
+
+.chat-tab [role="tab"]:has(> .tab-end-slot) {
+  padding-right: 0;
+}
+
+.tab-label {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding-block: 5px;
 }
 
 .tab-title {
@@ -85,6 +97,23 @@
   width: 27px;
   height: 28px;
   margin-right: 2px;
+}
+
+.chat-tab [role="tab"] > .tab-end-slot {
+  display: grid;
+  place-items: center;
+  margin-left: 4px;
+}
+
+.tab-question-marker {
+  color: #f2c57b;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.tab-question-marker.is-last-known {
+  color: var(--text-secondary);
 }
 
 .tab-end-slot > .tooltip-anchor,

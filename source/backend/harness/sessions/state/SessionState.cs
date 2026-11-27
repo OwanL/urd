@@ -4,9 +4,9 @@ using Urd.Core.Providers;
 
 namespace Urd.Core.Sessions;
 
-// Status and title describe tab metadata. A null status marks a watched content change.
+// Status, title and question availability describe tab metadata. A null status marks a watched update.
 public sealed record SessionChange([property: JsonPropertyName("session")] Guid SessionId, long Version,
-    string? Status = null, string? Title = null);
+    string? Status = null, string? Title = null, bool HasPendingUserQuestion = false);
 
 // Bounded committed facts combined with live admission and Stop state by SessionBase.
 public sealed record SessionSnapshot(

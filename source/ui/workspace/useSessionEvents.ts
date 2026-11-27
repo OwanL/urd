@@ -6,6 +6,7 @@ import { applySessionTitle, mergeWorkspaceSessions } from "./WorkspaceState.ts";
 import { enumerateSessionPages } from "../sessions/SessionPages.ts";
 import {
   emptySessionActivity,
+  pendingQuestionStatus,
   recordSessionStatus,
   resetSessionTransitionStatuses,
   retainOpenSessionActivity,
@@ -107,14 +108,20 @@ export function useSessionEvents(
         if (isClosed(session)) return;
         setNotices((previous) => ({ ...previous, [session]: notice }));
       },
-      status(session, status, title) {
+      status(session, status, title, hasPendingUserQuestion) {
         if (status === "unavailable") {
           forget([session]);
           return;
         }
         if (isClosed(session)) return;
         setActivity((previous) =>
-          recordSessionStatus(previous, session, status, desired.current.active),
+          recordSessionStatus(
+            previous,
+            session,
+            status,
+            desired.current.active,
+            hasPendingUserQuestion,
+          ),
         );
         const state = access.read();
         const titled = applySessionTitle(state, session, title);
@@ -200,6 +207,7 @@ export function useSessionEvents(
   }, [observed, active, watched, open]);
 
   const connected = connectionState === "connected";
+  const observedSessions = new Set(observed);
   return {
     connected,
     connectionState,
@@ -208,11 +216,17 @@ export function useSessionEvents(
     browserRefresh,
     provisioning,
     unread: activity.unread,
+    questionStatuses: Object.fromEntries(
+      open.map((session) => [
+        session,
+        pendingQuestionStatus(activity, session, connected && observedSessions.has(session)),
+      ]),
+    ),
     knownStatuses: Object.fromEntries(open.map((session) => [session, activity.statuses[session]])),
     statuses: Object.fromEntries(
       open.map((session) => [
         session,
-        !observed.includes(session) || (hasConnected && !connected)
+        !observedSessions.has(session) || (hasConnected && !connected)
           ? "updates-paused"
           : activity.statuses[session],
       ]),

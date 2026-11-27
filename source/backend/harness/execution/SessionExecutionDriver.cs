@@ -143,6 +143,9 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
         stopCallbacks = outcome != ExecutionOutcome.Completed || IsStopping
             ? StopAsync() : execution.StopCallbacks;
       }
+      // A parked execution can outlast the provider connection, even if it still looks open.
+      if (wake is not null)
+        execution.RetireSocket();
       await WaitOrJoinAsync(wake, stopCallbacks);
       // Notifications are hints; always recheck durable request readiness.
       if (wake is null) {

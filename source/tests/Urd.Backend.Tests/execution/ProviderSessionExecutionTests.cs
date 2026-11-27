@@ -500,6 +500,88 @@ public sealed class ProviderSessionExecutionTests {
   [Theory]
   [InlineData(false)]
   [InlineData(true)]
+  public async Task ChatGptBackgroundCompletionWakesWithoutReusingTheIdleSocket(bool handshakeFails) {
+    using var database = new TemporaryDatabase();
+    using var identity = new FakeOpenAIIdentity();
+    using var store = UrdStore.Open(database.Path);
+    string call = ProviderModelStreams.Call.Replace("\"name\":\"lookup\"", "\"namespace\":\"urd\",\"name\":\"lookup\"")
+        .Replace("\\\"abc\\\"}", "\\\"abc\\\",\\\"background\\\":true}");
+    string initialStream = ProviderModelStreams.Responses([call], text: "");
+    string waitingStream = ProviderModelStreams.Responses().Replace("resp_fixture", "resp_waiting").Replace("hello", "waiting");
+    string finalStream = ProviderModelStreams.Responses().Replace("resp_fixture", "resp_wake").Replace("hello", "done");
+    using var fallback = new ScriptedOpenAIHandler(finalStream);
+    using var transport = new ChatGptLoopTransport(identity, fallback, fallback);
+    // Even after the peer closes, State remains Open until the next read observes the close.
+    using var oldSocket = new LoopSocket([initialStream, waitingStream], closeWhenExhausted: true);
+    using var freshSocket = new LoopSocket([finalStream]);
+    int handshakes = 0;
+    bool retiredBeforeHandshake = false;
+    Task<WebSocket> Connect(string token, Guid sessionId, CancellationToken cancellation) {
+      cancellation.ThrowIfCancellationRequested();
+      if (++handshakes == 1)
+        return Task.FromResult<WebSocket>(oldSocket);
+      retiredBeforeHandshake = oldSocket.Disposed;
+      return handshakeFails ? Task.FromException<WebSocket>(new WebSocketException()) : Task.FromResult<WebSocket>(freshSocket);
+    }
+    using var manager = new ProviderManager(store, () => FakeOpenAIIdentity.Callback, transport, FakeOpenAIIdentity.Issuer,
+        connectSocket: Connect);
+    ProviderConnection connection = await manager.AddChatGptAsync("Synthetic ChatGPT");
+    ProviderSignIn signIn = await manager.BeginSignInAsync(connection.Id);
+    Uri callback = new(await identity.AuthorizeAsync(signIn.AuthorizationUrl!));
+    await manager.CompleteSignInAsync(FakeOpenAIIdentity.Parse(callback.Query)["state"], callback.AbsoluteUri).WaitAsync(TestTimeout);
+    using IChatClient client = manager.CreateChatClient(connection);
+    TaskCompletionSource releaseTool = Signal();
+    TaskCompletionSource waiting = Signal();
+    int effects = 0;
+    var tools = new ToolCatalog([new TestAgentTool("lookup", async (_, _, cancellation) => {
+      Interlocked.Increment(ref effects);
+      await releaseTool.Task.WaitAsync(cancellation);
+      return new ToolOutput(ToolOutputText, []);
+    })]);
+    var session = new PrimarySession(store.Sessions.CreatePrimary(Guid.NewGuid(), Path.GetDirectoryName(database.Path)!),
+        store, _ => client, tools);
+    using IDisposable subscription = await session.SubscribeAsync(change => {
+      if (change.Status == "waiting")
+        waiting.TrySetResult();
+    }, watched: true);
+    try {
+      var selection = new LlmSelection(connection, "fixture-model", null, ModelFamily.Other, false);
+      UserMessageReceipt receipt = await session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", selection));
+      Guid execution = Assert.IsType<Guid>(receipt.ExecutionId);
+      await waiting.Task.WaitAsync(TestTimeout);
+      releaseTool.SetResult();
+      SessionExecutionResult result = await session.WaitForExecutionFinishAsync(execution).WaitAsync(TestTimeout);
+
+      Assert.True(result.Outcome == ExecutionOutcome.Completed, (await session.ReadSnapshotAsync()).LastSettlement?.Error);
+      Assert.Equal(2, handshakes);
+      Assert.True(retiredBeforeHandshake);
+      Assert.Equal(2, oldSocket.Requests.Count);
+      Assert.Equal(1, effects);
+      Assert.Equal(ExecutionOutcome.Completed, Assert.Single(StoredTools.Read(database)).Outcome);
+      JsonObject wake;
+      if (handshakeFails) {
+        Assert.Empty(freshSocket.Requests);
+        wake = JsonNode.Parse(Assert.Single(transport.Requests).Body)!.AsObject();
+      } else {
+        Assert.Empty(transport.Requests);
+        wake = Assert.Single(freshSocket.Requests);
+      }
+      Assert.Null(wake["previous_response_id"]);
+      Assert.Contains(wake["input"]!.AsArray(), item => (string?)item!["type"] == "function_call" &&
+          (string?)item["call_id"] == "call_fixture");
+      Assert.Contains("Results from background lookup call, ID: call_fixture", wake["input"]!.ToJsonString(), StringComparison.Ordinal);
+      Assert.Contains(ToolOutputText, wake["input"]!.ToJsonString(), StringComparison.Ordinal);
+    } finally {
+      releaseTool.TrySetResult();
+      await session.StopAcceptingUserMessagesAsync();
+      await session.StopExecutionAsync().WaitAsync(TestTimeout);
+      await manager.ShutdownAsync().WaitAsync(TestTimeout);
+    }
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
   public async Task ChatGptCompactionRetiresTheOldSocketBeforeSendingCompactedHistory(bool handshakeFails) {
     using var database = new TemporaryDatabase();
     using var identity = new FakeOpenAIIdentity();

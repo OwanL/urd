@@ -102,6 +102,7 @@ internal sealed class SessionExecution : IDisposable {
   }
 
   internal void CloseSocket() => socketRun?.Dispose();
+  internal void RetireSocket() => socketRun?.RetireConnection();
 
   // Called sequentially outside the session lock. Foreground calls join here;
   // registered background calls remain owned until the session drains them.
@@ -181,7 +182,7 @@ internal sealed class SessionExecution : IDisposable {
       }
       if (!saved)
         throw new OperationCanceledException("The compaction boundary was rejected.");
-      socketRun?.RetireConnection();
+      RetireSocket();
       ModelHistory compactedHistory = await recorder.ReadModelHistoryAsync(requestId);
       if (reason != CompactionReason.Manual)
         automaticBoundary = compactedHistory.PreviousCompaction?.Id;

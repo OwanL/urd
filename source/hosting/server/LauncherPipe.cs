@@ -35,7 +35,7 @@ internal sealed class LauncherPipe : IAsyncDisposable {
       CancellationToken stopping) {
     NamedPipeServerStream listener = first;
     try {
-      while (true) {
+      while (!stopping.IsCancellationRequested) {
         await using (listener) {
           await listener.WaitForConnectionAsync(stopping);
           try {
@@ -45,9 +45,10 @@ internal sealed class LauncherPipe : IAsyncDisposable {
             // A client may disconnect before reading the response.
           }
         }
-        stopping.ThrowIfCancellationRequested();
         listener = CreateListener(name);
       }
+      // The stop can win between connections; dispose the idle listener.
+      await listener.DisposeAsync();
     } catch (OperationCanceledException) when (stopping.IsCancellationRequested) {
       await listener.DisposeAsync();
     }

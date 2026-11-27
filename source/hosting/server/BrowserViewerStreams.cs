@@ -106,38 +106,48 @@ internal sealed class BrowserViewerStreams {
 
   private async Task<PageStream?> JoinAsync(BrowserPage<IPage> page, Viewer viewer, PageInput pageInput,
       CancellationToken cancellation) {
-    while (true) {
-      cancellation.ThrowIfCancellationRequested();
-      Task ready;
-      lock (gate) {
-        if (page.Page.IsClosed) {
-          viewer.End(PageClosed);
-          return null;
-        }
-        if (!pageInput.RestoringViewport.IsCompleted) {
-          ready = pageInput.RestoringViewport;
-        } else if (streams.TryGetValue(page.Id, out PageStream? stream) && stream.Retiring is { } retiring) {
-          ready = retiring.Task;
-        } else {
-          stream ??= CreateStream(page, pageInput);
-          if (stream is null) {
-            viewer.End(PageClosed);
-            return null;
-          }
-          if (stream.Viewers.Count >= MaxViewersPerPage) {
-            viewer.End(new(WebSocketCloseStatus.PolicyViolation, "This page has too many viewers."));
-            return null;
-          }
-          stream.Viewers.Add(viewer);
-          if (stream.Latest is { } latest)
-            viewer.Outgoing.Writer.TryWrite(latest);
-          return stream;
-        }
-      }
+    cancellation.ThrowIfCancellationRequested();
+    // A claimed viewport restore or in-flight retirement can block admission; wait for that
+    // specific blocker and check the page again before joining.
+    PageStream? stream;
+    Task? blocker;
+    lock (gate)
+      (stream, blocker) = TryAdmit(page, viewer, pageInput);
+    while (blocker is not null) {
       // A restore only blocks admission once it claims the viewport. An unclaimed restore
       // can wait for the next last viewer to leave instead.
-      await ready.WaitAsync(PlaywrightTimeout, cancellation);
+      await blocker.WaitAsync(PlaywrightTimeout, cancellation);
+      lock (gate)
+        (stream, blocker) = TryAdmit(page, viewer, pageInput);
     }
+    return stream;
+  }
+
+  // Caller holds the gate. Returns the joined stream, or the admission blocker to await;
+  // both null means the viewer ended without joining.
+  private (PageStream? Stream, Task? Blocker) TryAdmit(BrowserPage<IPage> page, Viewer viewer, PageInput pageInput) {
+    if (page.Page.IsClosed) {
+      viewer.End(PageClosed);
+      return (null, null);
+    }
+    if (!pageInput.RestoringViewport.IsCompleted)
+      return (null, pageInput.RestoringViewport);
+    if (!streams.TryGetValue(page.Id, out PageStream? stream))
+      stream = CreateStream(page, pageInput);
+    else if (stream.Retiring is { } retiring)
+      return (null, retiring.Task);
+    if (stream is null) {
+      viewer.End(PageClosed);
+      return (null, null);
+    }
+    if (stream.Viewers.Count >= MaxViewersPerPage) {
+      viewer.End(new(WebSocketCloseStatus.PolicyViolation, "This page has too many viewers."));
+      return (null, null);
+    }
+    stream.Viewers.Add(viewer);
+    if (stream.Latest is { } latest)
+      viewer.Outgoing.Writer.TryWrite(latest);
+    return (stream, null);
   }
 
   // Caller holds the gate. Subscribe before checking again so a concurrent close isn't lost.
@@ -367,27 +377,35 @@ internal sealed class BrowserViewerStreams {
 
   private async Task RestoreWhenUnblockedAsync(BrowserPage<IPage> page, PageInput input) {
     await Task.Yield();
+    // Keep rechecking the block until the restore has begun or the need has ended. A dialog
+    // can have come from outside the viewer's input lane, with no pending command to await:
+    // recheck it and page closure without issuing work to a blocked browser.
     while (true) {
-      Task command;
-      lock (gate) {
-        if (!input.NeedsViewportRestore || page.Page.IsClosed || streams.ContainsKey(page.Id)) {
-          input.WaitingToRestore = false;
-          return;
-        }
-        if (!IsInputBlocked(input)) {
-          input.WaitingToRestore = false;
-          BeginRestore(page.Page, input);
-          return;
-        }
-        command = input.Command;
-      }
-      // A dialog can have come from outside the viewer's input lane, with no pending command
-      // to await. Recheck it and page closure without issuing work to a blocked browser.
-      if (command.IsCompleted)
+      (bool Blocked, Task Command) pending;
+      lock (gate)
+        pending = PendingRestoreCommand(page, input);
+      if (!pending.Blocked)
+        return;
+      if (pending.Command.IsCompleted)
         await Task.Delay(ActivityInterval);
       else
-        await command.WaitAsync(ActivityInterval).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        await pending.Command.WaitAsync(ActivityInterval).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
     }
+  }
+
+  // Caller holds the gate. Returns the command currently blocking the input lane; not
+  // blocked means the restore need has ended or the restore has begun.
+  private (bool Blocked, Task Command) PendingRestoreCommand(BrowserPage<IPage> page, PageInput input) {
+    if (!input.NeedsViewportRestore || page.Page.IsClosed || streams.ContainsKey(page.Id)) {
+      input.WaitingToRestore = false;
+      return (false, Task.CompletedTask);
+    }
+    if (!IsInputBlocked(input)) {
+      input.WaitingToRestore = false;
+      BeginRestore(page.Page, input);
+      return (false, Task.CompletedTask);
+    }
+    return (true, input.Command);
   }
 
   // Caller holds the same gate as JoinAsync: once claimed, the restore must finish before
@@ -459,12 +477,13 @@ internal sealed class BrowserViewerStreams {
 
   private static async Task<int?> ReceiveMessageAsync(WebSocket socket, Viewer viewer, byte[] buffer, CancellationToken cancellation) {
     int length = 0;
-    while (true) {
+    ValueWebSocketReceiveResult received;
+    do {
       if (length == buffer.Length) {
         viewer.End(new(WebSocketCloseStatus.MessageTooBig, "Viewer messages are limited to 16 KiB."));
         return null;
       }
-      ValueWebSocketReceiveResult received = await socket.ReceiveAsync(buffer.AsMemory(length), cancellation);
+      received = await socket.ReceiveAsync(buffer.AsMemory(length), cancellation);
       if (received.MessageType == WebSocketMessageType.Close)
         return null;
       if (received.MessageType != WebSocketMessageType.Text) {
@@ -472,9 +491,8 @@ internal sealed class BrowserViewerStreams {
         return null;
       }
       length += received.Count;
-      if (received.EndOfMessage)
-        return length;
-    }
+    } while (!received.EndOfMessage);
+    return length;
   }
 
   private async Task ApplyAsync(BrowserHost host, Guid ownerId, BrowserPage<IPage> page, Viewer viewer,
@@ -512,10 +530,11 @@ internal sealed class BrowserViewerStreams {
     BrowserInteraction interaction = stream.Input.Interaction;
     using var waitEnd = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
     Task deadline = Task.Delay(PlaywrightTimeout, waitEnd.Token);
+    Task command;
+    bool issued;
     try {
-      while (true) {
-        Task command;
-        bool issued;
+      // Another input can own the lane; keep waiting for its command before issuing ours.
+      do {
         lock (gate) {
           cancellation.ThrowIfCancellationRequested();
           if (stream.Closed || interaction.PendingDialog is not null || dialog != stream.Input.DialogOpened)
@@ -539,11 +558,8 @@ internal sealed class BrowserViewerStreams {
           return;
         if (finished == deadline)
           throw new TimeoutException();
-        if (issued) {
-          await command;
-          return;
-        }
-      }
+      } while (!issued);
+      await command;
     } finally {
       await waitEnd.CancelAsync();
     }

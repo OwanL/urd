@@ -25,6 +25,8 @@ public abstract partial class SessionBase {
   private readonly AsyncLock sessionLock = new();
   private readonly SessionNotifications notifications;
   private readonly SessionStatus status;
+  private readonly SessionManager? manager;
+  private bool completionPending;
   private bool acceptingUserMessages = true;
   private volatile bool closed;
   private TaskCompletionSource? closeCleanup;
@@ -47,9 +49,10 @@ public abstract partial class SessionBase {
     this.store = store;
     this.preferences = preferences ?? new PreferenceManager(store);
     this.modelSelector = modelSelector;
+    manager = subagents as SessionManager;
     inputs = new SessionInputs(this, store, sessionLock);
     manualCompaction = new ManualCompaction(this, store, sessionLock);
-    Questions = new QuestionDelivery(this, store, sessionLock, (subagents as SessionManager)?.Questions);
+    Questions = new QuestionDelivery(this, store, sessionLock, manager?.Questions);
     activeExecution = new ActiveExecution(this, store, sessionLock, createChatClient,
         tools ?? new ToolCatalog([]), pending ?? new PendingToolCalls(), subagents);
     messageEditing = new MessageEditing(this, store, sessionLock, activeExecution);
@@ -339,7 +342,7 @@ public abstract partial class SessionBase {
 
   // Caller holds the session lock. A completed run may admit a queued waking ask.
   internal TaskCompletionSource? FinishExecution(SessionExecutionDriver execution, SessionExecutionResult saved,
-      QueuedInputStart? next) {
+      QueuedInputStart? next, out bool notifyCompletion) {
     Questions.FinishExecution(failedConversation: saved.Outcome == ExecutionOutcome.Failed && !execution.IsManualCompaction);
     execution.Release();
     activeExecution.Clear();
@@ -347,12 +350,22 @@ public abstract partial class SessionBase {
     status.Settled(saved);
     TaskCompletionSource? inputStart = next is null ? null : StartExecutionAfterUnlock(next.ExecutionId, next.Selection);
     PublishChange();
-    if (inputStart is not null)
-      return inputStart;
-    TaskCompletionSource? wakeStart = saved.Outcome == ExecutionOutcome.Completed ? Questions.StartPendingQuestionRun() : null;
+    TaskCompletionSource? wakeStart = inputStart is null && saved.Outcome == ExecutionOutcome.Completed
+        ? Questions.StartPendingQuestionRun() : null;
     // Stop cancels the current execution, not an independently accepted queued compaction.
-    return wakeStart ?? manualCompaction.StartQueued();
+    TaskCompletionSource? nextStart = inputStart ?? wakeStart ?? manualCompaction.StartQueued();
+    if (saved.Outcome != ExecutionOutcome.Completed)
+      completionPending = false;
+    else if (!execution.IsManualCompaction)
+      completionPending = true;
+    notifyCompletion = completionPending && Kind == SessionKind.Primary && nextStart is null
+        && !HasPendingUserQuestion && CanStartWork;
+    if (notifyCompletion)
+      completionPending = false;
+    return nextStart;
   }
+
+  internal void NotifyCompletion() => manager?.NotifyAttention(AttentionKind.Completion);
 
   private bool IsCurrentExecution(Guid executionId) => activeExecution.IsCurrent(executionId);
 

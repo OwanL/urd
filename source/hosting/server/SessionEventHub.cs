@@ -14,6 +14,7 @@ internal sealed class SessionEventHub : IDisposable {
 
   internal SessionEventHub(SessionManager sessions) {
     this.sessions = sessions;
+    sessions.Attention += OnAttention;
     sessions.SessionCreated += OnSessionCreated;
     sessions.SessionSnoozeChanged += OnSessionSnoozeChanged;
     sessions.BrowserProvisioningChanged += OnBrowserProvisioningChanged;
@@ -50,6 +51,15 @@ internal sealed class SessionEventHub : IDisposable {
     }
     foreach (SessionEventPage page in current)
       page.EnqueueBrowserChange(sessionId);
+  }
+
+  private void OnAttention(AttentionKind attention) {
+    string kind = attention switch {
+      AttentionKind.Question => "question",
+      AttentionKind.Completion => "completion",
+      _ => throw new ArgumentOutOfRangeException(nameof(attention))
+    };
+    Broadcast(new SessionSseEvent("attention", null, new { kind }, kind));
   }
 
   private void OnSessionCreated(Guid sessionId) =>
@@ -107,6 +117,7 @@ internal sealed class SessionEventHub : IDisposable {
       pages.Clear();
     }
 
+    sessions.Attention -= OnAttention;
     sessions.SessionCreated -= OnSessionCreated;
     sessions.SessionSnoozeChanged -= OnSessionSnoozeChanged;
     sessions.BrowserProvisioningChanged -= OnBrowserProvisioningChanged;

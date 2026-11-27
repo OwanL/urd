@@ -26,6 +26,7 @@ import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { defaultModelSelection } from "./DefaultModelSelection.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
 import { useSessionEvents } from "./useSessionEvents.ts";
+import { useAttentionSounds } from "./useAttentionSounds.ts";
 import { useWorkspaceRetention } from "./useWorkspaceRetention.ts";
 import { SnoozeClient } from "./snooze/SnoozeClient.ts";
 import { SnoozedChatsButton } from "./snooze/SnoozedChatsButton.tsx";
@@ -162,6 +163,7 @@ export function Workspace({
       navigation.ready,
     ],
   );
+  const sounds = useAttentionSounds();
   const events = useSessionEvents(
     sessions,
     workspace.access,
@@ -171,6 +173,7 @@ export function Workspace({
     tabs,
     activeId,
     requestSnoozeRefresh,
+    sounds.play,
   );
   const [inspection, setInspection] = useState<{
     rootId: string;
@@ -298,6 +301,8 @@ export function Workspace({
         onTabChange={setSettingsTab}
         onClose={() => setSettingsOpen(false)}
         onChanged={models.providersChanged}
+        attentionSounds={sounds.enabled}
+        onAttentionSoundsChange={sounds.setEnabled}
         onProviderReady={models.providerReady}
       />
       <div

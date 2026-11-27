@@ -14,7 +14,8 @@ public sealed partial class SessionManager {
     PrimarySession primary = await registry.RunOpenAsync(() => FindOpenPrimary(caller.SessionId)
         ?? throw new InvalidOperationException("Only an open primary session can use ask_user. Subagents must use ask_agent."),
         cancellation);
-    return await primary.AskUserAsync(question, context, answers, caller.Background, cancellation);
+    return await primary.AskUserAsync(question, context, answers, caller.Background, cancellation,
+        () => NotifyAttention(AttentionKind.Question));
   }
 
   // Caller holds the registry lock.

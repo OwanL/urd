@@ -247,7 +247,12 @@ snapshot/history read, the client performs a trailing read rather than overlappi
 Later `status` events update tabs when execution status, the published title, or the presence of
 pending user questions changes, even for unwatched tabs. Question text is not included.
 `change` notices prompt bounded reads, and
-`session-created` events are discovery hints. Heartbeats keep the stream active; an unacknowledged
+`session-created` events are discovery hints. Host-wide `attention` events carry only
+`{kind: "question"}` when a primary question becomes pending or `{kind: "completion"}` when
+a primary conversation run completes successfully without more work starting immediately.
+They are live-only, not replayed on registration or reconnect, and pending events of the same kind
+may coalesce. A hidden page drops its session subscriptions but keeps the host-wide stream for
+chimes until the browser freezes or closes it. Heartbeats keep the stream active; an unacknowledged
 registration independently times out and reconnects with the latest open/watched set. Events are
 not durable history or message payloads. Reconnect performs saved-ID discovery again. The
 existing local API marker and gates apply.

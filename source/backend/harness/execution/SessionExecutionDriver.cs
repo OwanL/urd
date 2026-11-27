@@ -117,6 +117,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
 
   private async Task<LlmRequest?> AdvanceAsync(ExecutionOutcome outcome) {
     bool settled = false;
+    bool notifyCompletion = false;
     TaskCompletionSource? wakeStart = null;
     while (!settled) {
       Task? wake = null;
@@ -164,7 +165,7 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
             var (saved, nextInput) = session.SaveSettlement(ExecutionId, outcome == ExecutionOutcome.Completed && IsStopping
                 ? ExecutionOutcome.Cancelled : outcome);
             savingSettlement = false;
-            wakeStart = session.FinishExecution(this, saved, nextInput);
+            wakeStart = session.FinishExecution(this, saved, nextInput, out notifyCompletion);
             settlement.TrySetResult(saved);
           }
         }
@@ -172,6 +173,8 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
     }
     // The waking run gates on this start signal, so release it only outside the settlement lock.
     wakeStart?.SetResult();
+    if (notifyCompletion)
+      session.NotifyCompletion();
     return null;
   }
 

@@ -27,7 +27,7 @@ public sealed partial class PrimarySession {
   }
 
   internal async Task<string> AskUserAsync(string question, string? context, IReadOnlyList<string> answers,
-      bool background, CancellationToken cancellation) {
+      bool background, CancellationToken cancellation, Action? onPending = null) {
     var pending = new PendingUserQuestion(Guid.NewGuid(), Id, question, context, answers, SourceTitle: null, Background: background);
     var reply = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
     using var subscribed = cancellation.Register(() => reply.TrySetCanceled(cancellation));
@@ -38,6 +38,7 @@ public sealed partial class PrimarySession {
       return true;
     }, cancellation);
     try {
+      onPending?.Invoke();
       return await reply.Task;
     } finally {
       await ReadUnderLockAsync(() => RemoveUserQuestion(pending.Id), CancellationToken.None);

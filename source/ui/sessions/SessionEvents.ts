@@ -19,6 +19,8 @@ export interface ToolDraft {
   tail: string;
 }
 
+export type AttentionKind = "question" | "completion";
+
 export interface SessionEventCallbacks {
   connected(boot: string, streamId: string): void;
   change(session: string, notice: string): void;
@@ -29,6 +31,7 @@ export interface SessionEventCallbacks {
     hasPendingUserQuestion: boolean,
   ): void;
   created(session: string): void;
+  attention?(kind: AttentionKind): void;
   browser?(session: string): void;
   toolDraft?(draft: ToolDraft): void;
   disconnected(): void;
@@ -226,6 +229,13 @@ export class SessionEvents {
     }
 
     if (!this.connected) return;
+
+    if (message.event === "attention") {
+      const { kind } = event;
+      if (kind === "question" || kind === "completion")
+        this.call(() => this.callbacks.attention?.(kind));
+      return;
+    }
 
     // Browser provisioning is a host-wide notice; it carries no session identity.
     if (message.event === "browser-provisioning") {

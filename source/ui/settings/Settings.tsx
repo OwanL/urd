@@ -35,6 +35,8 @@ interface SettingsProps {
   onTabChange: (tab: SettingsTab) => void;
   onClose: (returnFocus: boolean) => void;
   onChanged: () => void;
+  attentionSounds: boolean;
+  onAttentionSoundsChange: (enabled: boolean) => void;
   onProviderReady?: (connectionId: string) => Promise<boolean>;
 }
 
@@ -48,6 +50,8 @@ export function Settings({
   onTabChange,
   onClose,
   onChanged,
+  attentionSounds,
+  onAttentionSoundsChange,
   onProviderReady,
 }: SettingsProps) {
   const mcp = useMcpSettings(open && tab === "mcp");
@@ -254,6 +258,14 @@ export function Settings({
             setCompactionTriggerDraft({ value: compactionTriggerInput(value), edited: false })
           }
         />
+        <label class="attention-sounds-setting">
+          <input
+            type="checkbox"
+            checked={attentionSounds}
+            onChange={(event) => onAttentionSoundsChange(event.currentTarget.checked)}
+          />
+          Play question and completion sounds
+        </label>
         <MaxSubagentDepth state={preferences} />
         {tab === "general" && (
           <section class="general-settings" aria-label="Source selection">

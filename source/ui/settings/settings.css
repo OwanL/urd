@@ -99,6 +99,14 @@
   color: var(--text-primary);
   font-size: 13px;
 }
+.attention-sounds-setting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  font-size: 13px;
+  cursor: pointer;
+}
 .general-settings-field {
   display: grid;
   gap: 6px;

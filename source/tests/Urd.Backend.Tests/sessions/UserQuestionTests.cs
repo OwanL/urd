@@ -77,6 +77,42 @@ public sealed class UserQuestionTests {
   }
 
   [Fact]
+  public async Task ManagerNotifiesForEachCommittedQuestionDespiteObserverFailure() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    await using var manager = new SessionManager(store, _ => throw new InvalidOperationException("No model request."));
+    PrimarySession primary = await manager.CreatePrimaryAsync();
+    var notices = new ConcurrentQueue<AttentionKind>();
+    var bothNotified = Signal();
+    manager.Attention += _ => throw new InvalidOperationException("Observer failed.");
+    manager.Attention += kind => {
+      notices.Enqueue(kind);
+      if (notices.Count == 2)
+        bothNotified.TrySetResult();
+    };
+    using var cancellation = new CancellationTokenSource(TestTimeout);
+    HarnessToolContext caller = Caller(store, manager, primary.Id, "ask");
+    Task<string> first = manager.AskUserAsync(caller, "First?", null, [], cancellation.Token);
+    Task<string> second = manager.AskUserAsync(caller with { Background = true }, "Second?", null, [], cancellation.Token);
+    try {
+      PendingUserQuestion[] questions = await WaitForQuestionsAsync(primary, 2);
+      await bothNotified.Task.WaitAsync(TestTimeout);
+      Assert.Equal(new[] { AttentionKind.Question, AttentionKind.Question }, notices);
+      foreach (PendingUserQuestion question in questions)
+        Assert.True(await primary.AnswerUserQuestionAsync(question.Id, "answer"));
+      await Task.WhenAll(first, second).WaitAsync(TestTimeout);
+      using var alreadyCancelled = new CancellationTokenSource();
+      await alreadyCancelled.CancelAsync();
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+          manager.AskUserAsync(caller, "Cancelled?", null, [], alreadyCancelled.Token));
+      Assert.Equal(2, notices.Count);
+    } finally {
+      await cancellation.CancelAsync();
+      await DrainAsync(first, second);
+    }
+  }
+
+  [Fact]
   public async Task ManagerChecksOnlyTheExactOpenAskingSession() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

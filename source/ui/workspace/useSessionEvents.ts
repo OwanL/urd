@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
-import { SessionEvents } from "../sessions/SessionEvents.ts";
+import { SessionEvents, type AttentionKind } from "../sessions/SessionEvents.ts";
 import { ToolDraftStore } from "../sessions/ToolDrafts.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
 import { applySessionTitle, mergeWorkspaceSessions } from "./WorkspaceState.ts";
@@ -27,6 +27,7 @@ export function useSessionEvents(
   open: readonly string[],
   active: string | null,
   refreshSnoozed: () => void,
+  playAttention: (kind: AttentionKind) => void,
 ) {
   const [notices, setNotices] = useState<Record<string, string>>({});
   const [draftStore] = useState(() => new ToolDraftStore());
@@ -37,7 +38,7 @@ export function useSessionEvents(
   const [hasConnected, setHasConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
-  const transport = useRef<SessionEvents | null>(null);
+  const refreshRegistration = useRef<() => void>(() => {});
   // Match the server's per-page bound without dropping tabs, drafts or the active view.
   const observed = useMemo(
     () =>
@@ -54,8 +55,9 @@ export function useSessionEvents(
     if (!ready) return;
     let disposed = false;
     let streamStarted = false;
-    let streamConnected = false;
-    let connectedBefore = false;
+    let visible = false;
+    let connectedStream: string | null = null;
+    let viewedBefore = false;
     let discovery: AbortController | null = null;
     function addSessions(sessions: Iterable<string>) {
       if (disposed) return;
@@ -84,29 +86,38 @@ export function useSessionEvents(
           setError(cause instanceof Error ? cause.message : "Session discovery failed.");
       }
     }
+    function reconnectView() {
+      if (!visible || connectedStream === null) return;
+      setStreamId(connectedStream);
+      setConnectionState("connected");
+      setHasConnected(true);
+      refreshSnoozed();
+      setError(null);
+      // Browser pages may have changed while the view wasn't registered.
+      if (viewedBefore)
+        setBrowserRefresh((previous) => {
+          const next: Record<string, number> = {};
+          for (const session of desired.current.open) next[session] = (previous[session] ?? 0) + 1;
+          return next;
+        });
+      viewedBefore = true;
+      discovery?.abort();
+      discovery = new AbortController();
+      void discover(discovery.signal);
+    }
+    function resetView() {
+      discovery?.abort();
+      setStreamId(null);
+      setActivity(resetSessionTransitionStatuses);
+      setNotices({});
+    }
     const events = new SessionEvents(new URL(window.location.href), {
       connected(boot, nextStreamId) {
         draftStore.boot(boot);
-        const reconnected = connectedBefore;
-        connectedBefore = true;
-        streamConnected = true;
-        setStreamId(nextStreamId);
-        setConnectionState("connected");
-        setHasConnected(true);
-        refreshSnoozed();
-        setError(null);
-        // Browser pages may have changed during the gap; refresh every observed session.
-        if (reconnected)
-          setBrowserRefresh((previous) => {
-            const keep = new Set(desired.current.open);
-            const next: Record<string, number> = {};
-            for (const session of keep) next[session] = (previous[session] ?? 0) + 1;
-            return next;
-          });
-        discovery?.abort();
-        discovery = new AbortController();
-        void discover(discovery.signal);
+        connectedStream = nextStreamId;
+        reconnectView();
       },
+      attention: playAttention,
       change(session, notice) {
         if (isClosed(session)) return;
         setNotices((previous) => ({ ...previous, [session]: notice }));
@@ -132,9 +143,11 @@ export function useSessionEvents(
         const titled = applySessionTitle(state, session, title);
         if (titled !== state) access.save(titled);
       },
-      created: (session) => addSessions([session]),
+      created(session) {
+        if (visible) addSessions([session]);
+      },
       browser(session) {
-        if (isClosed(session)) return;
+        if (!visible || isClosed(session)) return;
         setBrowserRefresh((previous) => ({
           ...previous,
           [session]: (previous[session] ?? 0) + 1,
@@ -144,14 +157,14 @@ export function useSessionEvents(
         if (isClosed(draft.session) || desired.current.active !== draft.session) return;
         draftStore.apply(draft);
       },
-      snoozeChanged: refreshSnoozed,
+      snoozeChanged() {
+        if (visible) refreshSnoozed();
+      },
       disconnected() {
+        connectedStream = null;
+        resetView();
         draftStore.disconnect();
-        streamConnected = false;
-        setStreamId(null);
-        setConnectionState("disconnected");
-        setActivity(resetSessionTransitionStatuses);
-        setNotices({});
+        setConnectionState(visible ? "disconnected" : "paused");
         // Reconnection replay restores an in-flight download; stale notices are dropped.
         setProvisioning(null);
       },
@@ -159,28 +172,37 @@ export function useSessionEvents(
         setProvisioning(stage === "downloading" && detail ? detail : null);
       },
       error(message) {
+        if (!visible) return;
         setError(message);
-        if (!streamConnected) setConnectionState("disconnected");
+        if (connectedStream === null) setConnectionState("disconnected");
       },
     });
-    transport.current = events;
-    events.update(desired.current.open, desired.current.active ? [desired.current.active] : []);
+    function updateRegistration() {
+      const { open, active } = desired.current;
+      // Keep only the host-wide stream when hidden. No tab or transcript subscriptions.
+      events.update(visible ? open : [], visible && active ? [active] : []);
+    }
+    refreshRegistration.current = updateRegistration;
     function activate() {
-      if (document.hidden) {
-        suspend();
-        return;
+      const nextVisible = !document.hidden;
+      if (visible !== nextVisible || !streamStarted) {
+        visible = nextVisible;
+        updateRegistration();
+        if (!visible) {
+          resetView();
+          draftStore.clear();
+          setConnectionState("paused");
+        } else if (connectedStream === null) setConnectionState("connecting");
+        else reconnectView();
       }
       if (streamStarted) return;
       streamStarted = true;
-      setConnectionState("connecting");
       events.start();
     }
     function suspend() {
-      if (streamStarted) {
-        streamStarted = false;
-        events.stop();
-      }
-      discovery?.abort();
+      visible = false;
+      streamStarted = false;
+      events.stop();
       setConnectionState("paused");
     }
     document.addEventListener("visibilitychange", activate);
@@ -198,7 +220,7 @@ export function useSessionEvents(
       draftStore.disconnect();
       setConnectionState("disconnected");
       setStreamId(null);
-      transport.current = null;
+      refreshRegistration.current = () => {};
       document.removeEventListener("visibilitychange", activate);
       document.removeEventListener("freeze", suspend);
       document.removeEventListener("resume", activate);
@@ -206,7 +228,7 @@ export function useSessionEvents(
       window.removeEventListener("pageshow", activate);
       window.removeEventListener("focus", activate);
     };
-  }, [client, access, forget, isClosed, ready, refreshSnoozed, draftStore]);
+  }, [client, access, forget, isClosed, ready, refreshSnoozed, draftStore, playAttention]);
 
   useEffect(() => {
     if (watched !== active) {
@@ -215,7 +237,7 @@ export function useSessionEvents(
     }
     draftStore.watch(active && open.includes(active) ? active : null);
     setActivity((previous) => retainOpenSessionActivity(previous, open, observed, active));
-    transport.current?.update(observed, active ? [active] : []);
+    refreshRegistration.current();
   }, [observed, active, watched, open, draftStore]);
   const connected = connectionState === "connected";
   const observedSessions = new Set(observed);

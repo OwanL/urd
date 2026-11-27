@@ -26,6 +26,8 @@ and starts a new response. Editing does not undo tool effects. Schema 36 is the 
 version supported for automatic upgrades in future builds. Older experimental schemas are
 not supported; see [backend development](docs/backend-development.md).
 History metadata, not-sent inputs and one shared event stream support transcript updates.
+An open Urd page plays different chimes for new questions and completed responses after you
+interact with it. Background tabs can play them too. Mute them in Settings → General.
 Closing an idle chat from its tab permanently deletes its conversation and tool history.
 Closing the browser or quitting Urd does not delete open chats. Right-click an idle tab to snooze
 it until later without losing history or drafts. The header moon shows snoozed chats and can

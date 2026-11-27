@@ -13,6 +13,9 @@ public sealed class UsageTokenCounter {
     "gpt-5.2", "gpt-5.1", "gpt-5", "gpt-5-mini", "gpt-5-nano",
     "gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o3"
   };
+  private static readonly HashSet<string> contextEstimateModels = new(StringComparer.Ordinal) {
+    "gpt-6.2-sol"
+  };
   private readonly TiktokenTokenizer? tokenizer;
   private readonly object outputGate = new();
   private readonly StringBuilder output = new();
@@ -27,6 +30,9 @@ public sealed class UsageTokenCounter {
   }
 
   internal static bool UsesO200k(string model) => O200kModels.Contains(model);
+
+  internal static bool SupportsContextEstimate(string model) =>
+      UsesO200k(model) || contextEstimateModels.Contains(model);
 
   public long? CountInput(IReadOnlyList<ChatMessage> messages, ChatOptions options) {
     ArgumentNullException.ThrowIfNull(messages);

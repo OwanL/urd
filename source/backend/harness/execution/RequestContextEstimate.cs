@@ -22,7 +22,7 @@ internal sealed class RequestContextEstimate(Func<RequestContextEstimate, Cancel
   private long outputLength;
   private long lastOutputCount;
 
-  internal static bool SupportsModel(string model) => model == "gpt-6.2-sol" || UsageTokenCounter.UsesO200k(model);
+  internal static bool SupportsModel(string model) => UsageTokenCounter.SupportsContextEstimate(model);
 
   internal Task? FlushDelay { get; private set; }
 

@@ -45,8 +45,9 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
     AuxiliaryConversationRecorder recorder = await CreateConversationAsync(purpose, model, messages, offered, cancellation);
     IChatClient client = createChatClient(selection.Connection); // Borrowed; disposal stays with its owner.
     int answers = 0;
+    string? answer = null;
 
-    while (true) {
+    while (answer is null) {
       cancellation.ThrowIfCancellationRequested();
       Guid requestId = Guid.NewGuid();
       var text = new StringBuilder();
@@ -64,10 +65,12 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
           messages.Add(assistant);
 
         if (response.ToolCalls.Count == 0) {
-          string answer = text.ToString();
-          string? correction = validateResult?.Invoke(answer);
-          if (correction is null)
-            return answer;
+          string candidate = text.ToString();
+          string? correction = validateResult?.Invoke(candidate);
+          if (correction is null) {
+            answer = candidate;
+            continue;
+          }
           if (answers++ != 0)
             throw new InvalidDataException("The auxiliary response failed validation after its one correction.");
           messages.Add(new(ChatRole.User, correction));
@@ -101,6 +104,8 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
       cancellation.ThrowIfCancellationRequested();
       ExceptionDispatchInfo.Throw(failure); // Ordinary failures throw normally after safe closing.
     }
+
+    return answer;
   }
 
   // A scoped durable conversation freezes this run's purpose, selection, input and definitions.

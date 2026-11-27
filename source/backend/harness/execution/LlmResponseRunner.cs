@@ -76,13 +76,10 @@ internal static class LlmResponseRunner {
   private static async Task<bool> WaitForUpdateAndFlushAsync(LlmResponseWriter writer,
       LlmResponseWriter? reasoningWriter, Task<bool> pendingRead, RequestContextEstimate? contextEstimate,
       CancellationToken cancellation) {
-    while (true) {
-      Task? outputDelay = Earliest(writer.FlushDelay, reasoningWriter?.FlushDelay);
-      Task? contextDelay = contextEstimate?.FlushDelay;
-      Task? delay = Earliest(outputDelay, contextDelay);
-      if (delay is null || (!delay.IsCompleted && await Task.WhenAny(pendingRead, delay) == pendingRead))
-        return await pendingRead;
-
+    Task? outputDelay = Earliest(writer.FlushDelay, reasoningWriter?.FlushDelay);
+    Task? contextDelay = contextEstimate?.FlushDelay;
+    Task? delay = Earliest(outputDelay, contextDelay);
+    while (delay is not null && (delay.IsCompleted || await Task.WhenAny(pendingRead, delay) != pendingRead)) {
       cancellation.ThrowIfCancellationRequested();
       // Flushing clears the deadline; only another update can start a new one.
       if (outputDelay?.IsCompleted == true) {
@@ -91,7 +88,13 @@ internal static class LlmResponseRunner {
       }
       if (contextDelay?.IsCompleted == true)
         await contextEstimate!.FlushAsync();
+
+      outputDelay = Earliest(writer.FlushDelay, reasoningWriter?.FlushDelay);
+      contextDelay = contextEstimate?.FlushDelay;
+      delay = Earliest(outputDelay, contextDelay);
     }
+
+    return await pendingRead;
   }
 
   private static Task? Earliest(Task? first, Task? second) {

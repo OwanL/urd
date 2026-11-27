@@ -62,8 +62,10 @@ internal sealed class LlmResponseAccumulator(LlmResponseWriter writer, LlmRespon
     if ((reason == ChatFinishReason.ToolCalls) != (calls.Count != 0))
       throw new InvalidDataException("The finish reason did not match the response's tool calls.");
 
-    if (providerResponse is not null)
+    if (providerResponse is not null) {
+      // Validate the payload and ensure it projects to a supported assistant message.
       _ = LlmProviderContext.Restore(providerResponse);
+    }
     finishReason = reason;
     ProviderResponse = providerResponse;
   }

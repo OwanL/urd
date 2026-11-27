@@ -31,6 +31,9 @@ internal sealed class AskAgentTool : HarnessTool {
   public override async Task<ToolOutput> RunAsync(JsonElement arguments, HarnessToolContext context, CancellationToken cancellation) {
     string recipient = ToolArguments.RequireString(arguments, "recipient");
     string prompt = ToolArguments.RequireString(arguments, "prompt");
+    // Unlike omission, an explicit null is rejected: the default wakes, and waking starts the recipient.
+    if (arguments.TryGetProperty("wake", out JsonElement wakeValue) && wakeValue.ValueKind is JsonValueKind.Null)
+      throw new ArgumentException("wake must be a boolean.");
     bool wake = ToolArguments.OptionalBool(arguments, "wake", true);
     AgentQuestionResult result = await context.Sessions.AskAgentAsync(context, recipient, prompt, wake, cancellation);
     return result.Error is { } error

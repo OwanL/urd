@@ -1,4 +1,3 @@
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Urd.Core.Execution;
 using Urd.Core.Compaction;
@@ -14,7 +13,9 @@ internal static class SessionRoutes {
     ArgumentNullException.ThrowIfNull(sessions);
     RouteGroupBuilder routes = app.MapGroup("/api/sessions");
     routes.AddEndpointFilter<JsonRequestFilter>();
-    routes.AddEndpointFilter(HandleRequestAsync);
+    routes.AddRouteExceptionFilter(RouteExceptionPolicy.MissingKey | RouteExceptionPolicy.StorageAndShutdown,
+        (_, failure) => failure is UserMessageConflictException or HistoryRevisionConflictException
+            ? Results.Conflict() : null);
     routes.MapGet("", (Delegate)((HttpContext http) => ListAsync(http, sessions)));
     routes.MapPost("", (Delegate)((HttpContext http) => CreateAsync(http, sessions)));
     routes.MapPost("/{sessionId}/close", (HttpContext http, Guid sessionId) => CloseAsync(http, sessions, sessionId));
@@ -73,30 +74,6 @@ internal static class SessionRoutes {
     routes.MapSessionUserQuestionRoutes(sessions);
     routes.MapSubagentRoutes(sessions);
     return routes;
-  }
-
-  private static async ValueTask<object?> HandleRequestAsync(
-      EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
-    HttpContext http = invocation.HttpContext;
-    try {
-      return await next(invocation);
-    } catch (UserMessageConflictException) {
-      return Results.Conflict();
-    } catch (HistoryRevisionConflictException) {
-      return Results.Conflict();
-    } catch (KeyNotFoundException) {
-      return Results.NotFound();
-    } catch (JsonException) {
-      return Results.BadRequest();
-    } catch (BadHttpRequestException failure) {
-      return Results.StatusCode(failure.StatusCode);
-    } catch (ArgumentException) {
-      return Results.BadRequest();
-    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    } catch (Exception failure) when (IsStorageFailure(failure)) {
-      return HttpStorageFailure.Unavailable(http, failure);
-    }
   }
 
   private static async Task<IResult> ListAsync(HttpContext http, SessionManager sessions) {

@@ -1,5 +1,4 @@
 using System.Net;
-using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 
 namespace Urd.Server;
@@ -13,7 +12,8 @@ internal static class McpRoutes {
     RouteGroupBuilder routes = app.MapGroup("/api");
     routes.AddEndpointFilter(RequireLocalAsync);
     routes.AddEndpointFilter<JsonRequestFilter>();
-    routes.AddEndpointFilter(HandleRequestAsync);
+    routes.AddRouteExceptionFilter(RouteExceptionPolicy.MissingKey, (_, failure) => failure is InvalidOperationException
+        ? Results.StatusCode(StatusCodes.Status503ServiceUnavailable) : null);
 
     routes.MapGet("/mcp-servers", () => Results.Ok(connections.List()));
     routes.MapPost("/mcp-servers", async (HttpContext http) => {
@@ -50,23 +50,6 @@ internal static class McpRoutes {
       peer = peer.MapToIPv4();
     return peer is not null && IPAddress.IsLoopback(peer)
         && string.Equals(http.Request.Host.Host, "127.0.0.1", StringComparison.Ordinal);
-  }
-
-  private static async ValueTask<object?> HandleRequestAsync(
-      EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
-    try {
-      return await next(invocation);
-    } catch (KeyNotFoundException) {
-      return Results.NotFound();
-    } catch (JsonException) {
-      return Results.BadRequest();
-    } catch (BadHttpRequestException failure) {
-      return Results.StatusCode(failure.StatusCode);
-    } catch (ArgumentException) {
-      return Results.BadRequest();
-    } catch (InvalidOperationException) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    }
   }
 
   private static IResult CompleteCallback(HttpContext http, McpConnections connections) {

@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
 using Urd.Core.Sessions;
-using static Urd.Server.HttpRouteHelpers;
 
 namespace Urd.Server;
 
@@ -13,30 +12,10 @@ internal static class EventRoutes {
       SessionManager sessions, SessionEventHub hub) {
     RouteGroupBuilder routes = app.MapGroup("/api/events");
     routes.AddEndpointFilter<JsonRequestFilter>();
-    routes.AddEndpointFilter(HandleRequestAsync);
+    routes.AddRouteExceptionFilter(RouteExceptionPolicy.MissingKey | RouteExceptionPolicy.StorageAndShutdown);
     routes.MapGet("", (Delegate)((HttpContext http) => StreamAsync(http, hub)));
     routes.MapPost("/{streamId:guid}", (HttpContext http, Guid streamId) => UpdateAsync(http, sessions, hub, streamId));
     return routes;
-  }
-
-  private static async ValueTask<object?> HandleRequestAsync(
-      EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
-    HttpContext http = invocation.HttpContext;
-    try {
-      return await next(invocation);
-    } catch (KeyNotFoundException) {
-      return Results.NotFound();
-    } catch (JsonException) {
-      return Results.BadRequest();
-    } catch (BadHttpRequestException failure) {
-      return Results.StatusCode(failure.StatusCode);
-    } catch (ArgumentException) {
-      return Results.BadRequest();
-    } catch (Exception failure) when (IsStorageFailure(failure)) {
-      return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    }
   }
 
   private static async Task<IResult> StreamAsync(HttpContext http, SessionEventHub hub) {

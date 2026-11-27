@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.Http.Features;
 using Urd.Core.Providers;
@@ -12,7 +11,9 @@ internal static class ProviderRoutes {
   internal static void MapProviders(this IEndpointRouteBuilder app, ProviderManager providers, PreferenceManager preferences) {
     RouteGroupBuilder routes = app.MapGroup("/api/providers");
     routes.AddEndpointFilter<JsonRequestFilter>();
-    routes.AddEndpointFilter(HandleRequestAsync);
+    routes.AddRouteExceptionFilter(RouteExceptionPolicy.MissingKey | RouteExceptionPolicy.StorageAndShutdown
+        | RouteExceptionPolicy.CancellationStatus,
+        (_, failure) => failure is ProviderOperationException providerFailure ? MapProviderFailure(providerFailure) : null);
     routes.MapGet("", (Delegate)(async (HttpContext http) => Results.Ok(await providers.ListAsync(http.RequestAborted))));
     routes.MapPost("/openai", (Delegate)((HttpContext http) => AddAsync(http, providers.AddOpenAIAsync)));
     routes.MapPost("/chatgpt", (Delegate)((HttpContext http) => AddAsync(http, providers.AddChatGptAsync)));
@@ -94,36 +95,15 @@ internal static class ProviderRoutes {
       await http.Request.ReadFromJsonAsync<T>(http.RequestAborted)
           ?? throw new ArgumentException("A JSON object is required.");
 
-  private static async ValueTask<object?> HandleRequestAsync(
-      EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
-    HttpContext http = invocation.HttpContext;
-    try {
-      return await next(invocation);
-    } catch (ProviderOperationException failure) {
-      int status = failure.Failure switch {
-        ProviderFailure.ConnectionChanged or ProviderFailure.Disconnecting or
-            ProviderFailure.AuthenticationRequired or ProviderFailure.PlanAccessDenied => StatusCodes.Status409Conflict,
-        ProviderFailure.SignInRejected => StatusCodes.Status400BadRequest,
-        ProviderFailure.DiscoveryUnsupported => StatusCodes.Status422UnprocessableEntity,
-        _ => StatusCodes.Status502BadGateway
-      };
-      return Results.Json(new { error = failure.Failure }, statusCode: status);
-    } catch (KeyNotFoundException) {
-      return Results.NotFound();
-    } catch (JsonException) {
-      return Results.BadRequest();
-    } catch (BadHttpRequestException failure) {
-      return Results.StatusCode(failure.StatusCode);
-    } catch (ArgumentException) {
-      return Results.BadRequest();
-    } catch (Exception failure) when (IsStorageFailure(failure)) {
-      return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    } catch (OperationCanceledException) {
-      return Results.StatusCode(http.RequestAborted.IsCancellationRequested
-          ? StatusCodes.Status499ClientClosedRequest : StatusCodes.Status504GatewayTimeout);
-    }
+  private static IResult MapProviderFailure(ProviderOperationException failure) {
+    int status = failure.Failure switch {
+      ProviderFailure.ConnectionChanged or ProviderFailure.Disconnecting or
+          ProviderFailure.AuthenticationRequired or ProviderFailure.PlanAccessDenied => StatusCodes.Status409Conflict,
+      ProviderFailure.SignInRejected => StatusCodes.Status400BadRequest,
+      ProviderFailure.DiscoveryUnsupported => StatusCodes.Status422UnprocessableEntity,
+      _ => StatusCodes.Status502BadGateway
+    };
+    return Results.Json(new { error = failure.Failure }, statusCode: status);
   }
 
   private static async Task<IResult> CompleteSignInAsync(HttpContext http, ProviderManager providers) {

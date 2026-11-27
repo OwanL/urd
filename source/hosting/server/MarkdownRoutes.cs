@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Urd.Core.MarkdownRendering;
 using Urd.Core.Sessions;
 using static Urd.Server.HttpRouteHelpers;
@@ -41,44 +40,23 @@ internal static class MarkdownRoutes {
     return routes;
   }
 
-  internal static async ValueTask<object?> HandleRequestAsync(
-      EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
-    HttpContext http = invocation.HttpContext;
-    try {
-      return await next(invocation);
-    } catch (OperationCanceledException) when (!http.RequestAborted.IsCancellationRequested) {
-      return Results.StatusCode(IsApplicationStopping(http)
-          ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status410Gone);
-    } catch (MarkdownPageLeases.DuplicateLeaseIdException) {
-      return Results.Conflict();
-    } catch (HistoryRevisionConflictException) {
-      return Results.Conflict();
-    } catch (MarkdownSupersededException) {
-      return Results.Conflict();
-    } catch (MarkdownUnavailableException) when (IsApplicationStopping(http)) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    } catch (MarkdownUnavailableException) {
-      return Results.StatusCode(StatusCodes.Status410Gone);
-    } catch (MarkdownCacheFullException) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    } catch (MarkdownQueueFullException) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    } catch (MarkdownTooLargeException) {
-      return Results.StatusCode(StatusCodes.Status422UnprocessableEntity);
-    } catch (KeyNotFoundException) {
-      return Results.NotFound();
-    } catch (JsonException) {
-      return Results.BadRequest();
-    } catch (BadHttpRequestException failure) {
-      return Results.StatusCode(failure.StatusCode);
-    } catch (ArgumentException) {
-      return Results.BadRequest();
-    } catch (Exception failure) when (IsStorageFailure(failure)) {
-      return HttpStorageFailure.Unavailable(http, failure);
-    } catch (InvalidOperationException) when (IsApplicationStopping(http)) {
-      return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
-    }
-  }
+  internal static ValueTask<object?> HandleRequestAsync(
+      EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) =>
+      RouteExceptionFilter.HandleAsync(invocation, next,
+          RouteExceptionPolicy.MissingKey | RouteExceptionPolicy.StorageAndShutdown, MapMarkdownFailure);
+
+  private static IResult? MapMarkdownFailure(HttpContext http, Exception failure) => failure switch {
+    OperationCanceledException when !http.RequestAborted.IsCancellationRequested => GoneOrStopping(http),
+    MarkdownPageLeases.DuplicateLeaseIdException or HistoryRevisionConflictException or MarkdownSupersededException =>
+        Results.Conflict(),
+    MarkdownUnavailableException => GoneOrStopping(http),
+    MarkdownCacheFullException or MarkdownQueueFullException => Results.StatusCode(StatusCodes.Status503ServiceUnavailable),
+    MarkdownTooLargeException => Results.StatusCode(StatusCodes.Status422UnprocessableEntity),
+    _ => null
+  };
+
+  private static IResult GoneOrStopping(HttpContext http) => Results.StatusCode(IsApplicationStopping(http)
+      ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status410Gone);
 
   private static async Task<IResult> OpenAsync(HttpContext http, SessionManager sessions,
       SessionEventHub hub, MessageMarkdownService markdown, Guid streamId, Guid leaseId) {

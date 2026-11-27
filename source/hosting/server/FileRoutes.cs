@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Security;
-using System.Text.Json;
 using Microsoft.Extensions.Primitives;
 
 namespace Urd.Server;
@@ -9,23 +8,10 @@ internal static class FileRoutes {
   internal static RouteGroupBuilder MapFiles(this IEndpointRouteBuilder app) {
     RouteGroupBuilder routes = app.MapGroup("/api/files");
     routes.AddEndpointFilter<JsonRequestFilter>();
-    routes.AddEndpointFilter(HandleRequestAsync);
+    routes.AddRouteExceptionFilter();
     routes.MapGet("/directories", (Delegate)ListDirectories);
     routes.MapPost("/reveal", (Delegate)RevealAsync);
     return routes;
-  }
-
-  private static async ValueTask<object?> HandleRequestAsync(
-      EndpointFilterInvocationContext invocation, EndpointFilterDelegate next) {
-    try {
-      return await next(invocation);
-    } catch (JsonException) {
-      return Results.BadRequest();
-    } catch (BadHttpRequestException failure) {
-      return Results.StatusCode(failure.StatusCode);
-    } catch (ArgumentException) {
-      return Results.BadRequest();
-    }
   }
 
   private static IResult ListDirectories(HttpContext http) {

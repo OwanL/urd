@@ -148,13 +148,11 @@
 
 .tool-row-draft-preview {
   --draft-preview-limit: 148px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
   height: 0;
   margin-left: 26px;
   padding-left: 10px;
-  overflow: clip;
+  overflow: hidden;
+  overflow-anchor: none;
   color: var(--text-secondary);
   border-left: 1px solid var(--border, #2c2c2c);
   opacity: 0;
@@ -285,7 +283,6 @@
 }
 
 .tool-row-draft-preview-content {
-  flex-shrink: 0;
   padding-bottom: 4px;
   font:
     12px/18px ui-monospace,

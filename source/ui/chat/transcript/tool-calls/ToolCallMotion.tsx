@@ -47,29 +47,34 @@ export function ToolCallMotion({
     return () => window.clearTimeout(timer);
   }, [preview, outgoing]);
 
+  const displayed = preview ?? outgoing;
   const open = preview !== null;
+  const hasPanel = displayed !== null;
   useLayoutEffect(() => {
     const node = panel.current;
     const body = content.current;
-    if (!open || !node || !body) return;
+    if (!hasPanel || !node || !body) return;
     const limit = Number.parseFloat(
       getComputedStyle(node).getPropertyValue("--draft-preview-limit"),
     );
     let measuredHeight = -1;
     const measure = () => {
       const height = body.offsetHeight;
-      if (height === measuredHeight) return;
-      measuredHeight = height;
-      node.style.setProperty("--draft-preview-size", `${height}px`);
-      node.dataset.overflow = String(height > limit);
+      if (open && height !== measuredHeight) {
+        measuredHeight = height;
+        node.style.setProperty("--draft-preview-size", `${height}px`);
+        node.dataset.overflow = String(height > limit);
+      }
+      // Scroll the clipped tail, including during height transitions, rather than
+      // moving the full text block in layout.
+      node.scrollTop = node.scrollHeight;
     };
     const observer = new ResizeObserver(measure);
     observer.observe(body);
+    observer.observe(node);
     measure();
     return () => observer.disconnect();
-  }, [open]);
-
-  const displayed = preview ?? outgoing;
+  }, [hasPanel, open]);
 
   return (
     <div class="tool-call-motion" data-tool-motion={motion}>

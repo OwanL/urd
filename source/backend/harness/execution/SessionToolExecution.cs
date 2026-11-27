@@ -134,12 +134,24 @@ internal sealed class SessionToolExecution {
       IReadOnlyList<AIFunctionDeclaration> offeredDefinitions, bool runInBackground, ContextStamp? contextStamp,
       CancellationToken cancellation) {
     try {
-      LlmToolResult result = await ToolInvoker.InvokeAsync(requestId, call, tools, offeredDefinitions,
-          session.WorkingDirectory, supportsImages, runInBackground, cancellation, contextStamp,
-          recorder.CreateHarnessToolContext);
-      // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
-      if (!await recorder.CompleteToolAsync(requestId, result))
-        throw new InvalidOperationException("The tool result could not be saved.");
+      int reportedProgress = 0;
+      Action<ToolOutput> reportProgress = output => {
+        if (cancellation.IsCancellationRequested)
+          return;
+        Interlocked.Exchange(ref reportedProgress, 1);
+        recorder.ReportToolProgress(requestId, call.CallId, output);
+      };
+      try {
+        LlmToolResult result = await ToolInvoker.InvokeAsync(requestId, call, tools, offeredDefinitions,
+            session.WorkingDirectory, supportsImages, runInBackground, cancellation, contextStamp,
+            recorder.CreateHarnessToolContext, reportProgress);
+        // A rejected or failed save leaves effects uncertain, never an ordinary tool error.
+        if (!await recorder.CompleteToolAsync(requestId, result))
+          throw new InvalidOperationException("The tool result could not be saved.");
+      } finally {
+        if (Volatile.Read(ref reportedProgress) != 0)
+          recorder.ClearToolProgress(requestId, call.CallId);
+      }
     } catch (Exception failure) {
       await session.ReportToolOutcomeAsync(ExecutionId, failure);
       throw;

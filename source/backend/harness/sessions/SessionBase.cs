@@ -312,6 +312,9 @@ public abstract partial class SessionBase {
       identity.SessionId == Id && identity.HistoryRevision == HistoryRevision
       && CanRecordExecution(identity.ExecutionId, allowStopping);
 
+  // Live tool output is transient and only useful to currently watched sessions.
+  internal void PublishToolProgress(ToolProgressUpdate progress) => notifications.PublishToolProgress(progress);
+
   // Completion and cancellation-failure notifications never start another driver or join themselves.
   internal async Task ReportToolOutcomeAsync(Guid executionId, Exception? failure = null) {
     using var _ = await sessionLock.AcquireAsync();

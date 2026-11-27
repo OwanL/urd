@@ -183,7 +183,6 @@ public sealed class ToolExecutionTests {
       Assert.Equal(requestId, context.RequestId);
       Assert.NotEqual(Guid.Empty, context.RequestId);
       Assert.False(context.ModelAcceptsImages);
-      context.ReportProgress(new ToolOutput("progress", []));
       admissions.Add(context.CallId);
       string path = Path.Combine(context.WorkingDirectory, "same-file");
       if (context.CallId == "read") {

@@ -132,7 +132,15 @@ internal sealed class SessionEventPage : IDisposable {
           || !ReferenceEquals(current, registration))
         return;
 
-      if (change.Status is { } status) {
+      if (change.ToolProgress is { } progress && registration.Watched) {
+        string key = $"{progress.ExecutionId:N}/{progress.RequestId:N}/{progress.CallId}";
+        queue.Enqueue(new SessionSseEvent("tool-progress", change.SessionId,
+            new {
+              session = change.SessionId, boot, version = change.Version,
+              executionId = progress.ExecutionId, requestId = progress.RequestId,
+              callId = progress.CallId, text = progress.Text
+            }, key));
+      } else if (change.Status is { } status) {
         queue.Enqueue(new SessionSseEvent("status", change.SessionId,
             new {
               session = change.SessionId, boot, version = change.Version, status, title = change.Title,

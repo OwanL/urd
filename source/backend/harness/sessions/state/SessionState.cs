@@ -6,7 +6,12 @@ namespace Urd.Core.Sessions;
 
 // Status, title and question availability describe tab metadata. A null status marks a watched update.
 public sealed record SessionChange([property: JsonPropertyName("session")] Guid SessionId, long Version,
-    string? Status = null, string? Title = null, bool HasPendingUserQuestion = false);
+    string? Status = null, string? Title = null,
+    [property: JsonPropertyName("toolProgress")] ToolProgressUpdate? ToolProgress = null,
+    bool HasPendingUserQuestion = false);
+
+// Transient output for one running tool call. A null Text clears its displayed progress.
+public sealed record ToolProgressUpdate(Guid ExecutionId, Guid RequestId, string CallId, string? Text);
 
 // Bounded committed facts combined with live admission and Stop state by SessionBase.
 public sealed record SessionSnapshot(

@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
+using System.Text;
+using Urd.Core.Tools;
 
 namespace Urd.Core.Sessions;
 
-// Subscribe and Publish run under the session gate; subscriptions may be disposed anywhere.
-// Observers are expected to enqueue into bounded server queues, not block delivery.
+// Subscription and committed change publication run under the session gate; progress is transient.
+// Subscriptions may be disposed anywhere. Observers enqueue into bounded server queues, not block delivery.
 internal sealed class SessionNotifications(Guid sessionId) {
   private readonly ConcurrentDictionary<long, SessionObserver> observers = new();
   private long version;
@@ -33,6 +35,17 @@ internal sealed class SessionNotifications(Guid sessionId) {
     return subscription;
   }
 
+  internal void PublishToolProgress(ToolProgressUpdate progress) {
+    SessionChange? change = null;
+    foreach (SessionObserver observer in observers.Values) {
+      if (!observer.Watched)
+        continue;
+      change ??= new SessionChange(sessionId, Volatile.Read(ref version), ToolProgress:
+          progress with { Text = BoundedProgressText(progress.Text) });
+      observer.Notify(change);
+    }
+  }
+
   internal void Close() {
     version = checked(version + 1);
     var unavailable = new SessionChange(sessionId, version, "unavailable");
@@ -40,6 +53,26 @@ internal sealed class SessionNotifications(Guid sessionId) {
       observer.Notify(unavailable);
       observer.Dispose();
     }
+  }
+
+  private static string? BoundedProgressText(string? text) {
+    if (text is null)
+      return null;
+
+    const string omitted = "[Earlier output omitted. Latest output follows.]\n";
+    int remainingBytes = ToolOutputLimits.MaxBytes - Encoding.UTF8.GetByteCount(omitted);
+    int start = text.Length;
+    int suffixBytes = 0;
+    while (start > 0) {
+      int characterCount = char.IsLowSurrogate(text[start - 1]) && start > 1
+          && char.IsHighSurrogate(text[start - 2]) ? 2 : 1;
+      int characterBytes = Encoding.UTF8.GetByteCount(text.AsSpan(start - characterCount, characterCount));
+      if (suffixBytes + characterBytes > remainingBytes)
+        break;
+      start -= characterCount;
+      suffixBytes += characterBytes;
+    }
+    return start == 0 ? text : omitted + text[start..];
   }
 
   internal void Publish(string status, string? publishedTitle, bool pendingUserQuestion) {

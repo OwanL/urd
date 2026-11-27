@@ -12,7 +12,8 @@ internal static class ToolInvoker {
   internal static async Task<LlmToolResult> InvokeAsync(Guid requestId, LlmToolCall call,
       IReadOnlyList<AgentTool> allowedTools, IReadOnlyList<AIFunctionDeclaration> offeredDefinitions,
       string? workingDirectory, bool supportsImages, bool background, CancellationToken cancellation,
-      ContextStamp? contextStamp = null, Func<string, bool, HarnessToolContext>? createHarnessContext = null) {
+      ContextStamp? contextStamp = null, Func<string, bool, HarnessToolContext>? createHarnessContext = null,
+      Action<ToolOutput>? reportProgress = null) {
     ToolOutput output;
     ExecutionOutcome? failure = null;
     try {
@@ -35,8 +36,7 @@ internal static class ToolInvoker {
       } else {
         string directory = workingDirectory ?? (tool.RequiresWorkingDirectory
             ? throw new InvalidOperationException("The chat has no saved working folder.") : string.Empty);
-        // Progress is intentionally inert until transcript progress integration is available.
-        var context = new ToolContext(directory, requestId, call.CallId, supportsImages, static _ => { });
+        var context = new ToolContext(directory, requestId, call.CallId, supportsImages, reportProgress ?? (static _ => { }));
         output = await tool.RunAsync(arguments, context, cancellation);
       }
     } catch (OperationCanceledException) when (cancellation.IsCancellationRequested) {

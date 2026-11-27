@@ -2,9 +2,15 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Sessions;
+using Urd.Core.Storage;
+using Urd.Core.Tools;
 using Urd.Server;
 using Xunit;
+using static Urd.Backend.Tests.Support.ScriptedResponses;
+using static Urd.Backend.Tests.Support.TestAsync;
 using static Urd.Backend.Tests.Support.HttpTest;
 
 namespace Urd.Backend.Tests.Hosting;
@@ -70,6 +76,48 @@ public sealed class SessionEventRoutesTests {
   }
 
   [Fact]
+  public async Task WatchedSessionEventPageStreamsTransientToolProgressAndItsClear() {
+    var entered = Signal();
+    var release = Signal();
+    var tool = new TestAgentTool("progress", async (_, context, cancellation) => {
+      context.ReportProgress(new ToolOutput("partial output", []));
+      entered.TrySetResult();
+      await release.Task.WaitAsync(cancellation);
+      return new ToolOutput("final output", []);
+    });
+    using var database = new TemporaryDatabase();
+    using var store = UrdStore.Open(database.Path);
+    int requests = 0;
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref requests) == 1
+        ? ToolBatch(token, new FunctionCallContent("progress-call", "progress", new Dictionary<string, object?>()))
+        : Complete(token));
+    await using var sessions = new SessionManager(store, _ => client, [tool], Path.GetDirectoryName(database.Path)!);
+    PrimarySession session = await sessions.CreatePrimaryAsync();
+    using var page = new SessionEventPage(sessions.BootId, _ => { });
+    await page.UpdateAsync(sessions, [session.Id], [session.Id], CancellationToken.None);
+    using var deadline = new CancellationTokenSource(TestTimeout);
+    Assert.Equal("browser", (await page.ReadNextAsync(deadline.Token)).Event?.Name);
+    Assert.Equal("status", (await page.ReadNextAsync(deadline.Token)).Event?.Name);
+    Assert.Equal("change", (await page.ReadNextAsync(deadline.Token)).Event?.Name);
+
+    UserMessageReceipt receipt = await session.SubmitUserMessageAsync(
+        new(Guid.NewGuid(), 0, "start", TestLlmSelection.Default));
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      JsonElement progress = await ReadProgressAsync(page, text: "partial output");
+      Assert.Equal(session.Id, progress.GetProperty("session").GetGuid());
+      Assert.Equal(receipt.ExecutionId!.Value, progress.GetProperty("executionId").GetGuid());
+      Assert.Equal("progress-call", progress.GetProperty("callId").GetString());
+    } finally {
+      release.TrySetResult();
+    }
+
+    await session.WaitForExecutionFinishAsync(receipt.ExecutionId.Value).WaitAsync(TestTimeout);
+    JsonElement cleared = await ReadProgressAsync(page, text: null);
+    Assert.Equal("progress-call", cleared.GetProperty("callId").GetString());
+  }
+
+  [Fact]
   public async Task EventRoutesKeepTheBrowserGateAndBoundRegistrationSets() {
     using var database = new TemporaryDatabase();
     await using var server = new RunningServer(RunningServer.OptionsFor(database));
@@ -95,6 +143,23 @@ public sealed class SessionEventRoutesTests {
     using HttpResponseMessage rejected = await UpdateAsync(server.Client, streamId, tooMany);
     Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
     AssertPrivateResponse(rejected);
+  }
+
+  private static async Task<JsonElement> ReadProgressAsync(SessionEventPage page, string? text) {
+    using var deadline = new CancellationTokenSource(TestTimeout);
+    while (true) {
+      SessionSseRead next = await page.ReadNextAsync(deadline.Token);
+      if (next.Event?.Name != "tool-progress")
+        continue;
+      using JsonDocument document = JsonDocument.Parse(JsonSerializer.Serialize(next.Event.Data));
+      JsonElement data = document.RootElement.Clone();
+      JsonElement actualText = data.GetProperty("text");
+      if (text is null)
+        Assert.Equal(JsonValueKind.Null, actualText.ValueKind);
+      else
+        Assert.Equal(text, actualText.GetString());
+      return data;
+    }
   }
 
   private static Task<HttpResponseMessage> OpenStreamAsync(HttpClient client) =>

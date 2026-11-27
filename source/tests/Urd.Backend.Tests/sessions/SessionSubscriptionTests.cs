@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
+using Urd.Core.Tools;
 using Xunit;
 using static Urd.Backend.Tests.Support.ScriptedResponses;
 using static Urd.Backend.Tests.Support.TestAsync;
@@ -189,6 +191,48 @@ public sealed class SessionSubscriptionTests {
     Assert.Equal(settledVersion, watchedChanges[^1].Version);
     Assert.Equal(new[] { "idle", "running", "idle" }, StatusTransitions(unwatched));
     Assert.All(unwatched, change => Assert.NotNull(change.Status));
+  }
+
+  [Fact]
+  public async Task ToolProgressIsTransientBoundedAndDeliveredOnlyToWatchedObservers() {
+    var entered = Signal();
+    var release = Signal();
+    string largeOutput = new('x', 60 * 1024);
+    var tool = new TestAgentTool("progress", async (_, context, cancellation) => {
+      context.ReportProgress(new ToolOutput("partial", []));
+      context.ReportProgress(new ToolOutput(largeOutput, []));
+      entered.TrySetResult();
+      await release.Task.WaitAsync(cancellation);
+      return new ToolOutput("finished", []);
+    });
+    int requests = 0;
+    var client = new ScriptedChatClient(token => Interlocked.Increment(ref requests) == 1
+        ? ToolBatch(token, new FunctionCallContent("progress-call", "progress", new Dictionary<string, object?>()))
+        : Complete(token));
+    await using var fixture = new ExecutionFixture(client, tools: [tool]);
+    var watched = new ConcurrentQueue<SessionChange>();
+    var unwatched = new ConcurrentQueue<SessionChange>();
+    using IDisposable watchedSubscription = await fixture.Session.SubscribeAsync(watched.Enqueue, watched: true);
+    using IDisposable unwatchedSubscription = await fixture.Session.SubscribeAsync(unwatched.Enqueue, watched: false);
+    Guid executionId = await fixture.StartExecutionAsync("start");
+
+    try {
+      await entered.Task.WaitAsync(TestTimeout);
+      ToolProgressUpdate[] updates = watched.Select(change => change.ToolProgress).OfType<ToolProgressUpdate>().ToArray();
+      Assert.Equal(2, updates.Length);
+      Assert.Equal("partial", updates[0].Text);
+      Assert.Contains("Earlier output omitted", updates[1].Text, StringComparison.Ordinal);
+      Assert.InRange(Encoding.UTF8.GetByteCount(updates[1].Text!), 1, 50 * 1024);
+      Assert.DoesNotContain(unwatched, change => change.ToolProgress is not null);
+      Assert.Equal(watched.Where(change => change.ToolProgress is not null).Take(2).First().Version,
+          watched.Where(change => change.ToolProgress is not null).Take(2).Last().Version);
+    } finally {
+      release.TrySetResult();
+    }
+
+    Assert.Equal(ExecutionOutcome.Completed,
+        (await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout)).Outcome);
+    Assert.Null(watched.Last(change => change.ToolProgress is not null).ToolProgress!.Text);
   }
 
   [Fact]

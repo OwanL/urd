@@ -109,6 +109,12 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
   internal Task<bool> CompleteToolAsync(Guid requestId, LlmToolResult result) =>
     RecordChangeAsync(() => store.Tools.Complete(Identity, requestId, result), allowStopping: true);
 
+  internal void ReportToolProgress(Guid requestId, string callId, ToolOutput output) =>
+      session.PublishToolProgress(new(Identity.ExecutionId, requestId, callId, output.Text));
+
+  internal void ClearToolProgress(Guid requestId, string callId) =>
+      session.PublishToolProgress(new(Identity.ExecutionId, requestId, callId, null));
+
   internal Task<bool> TryClaimTitleAsync() => RecordChangeAsync(() => store.Prepass.TryClaimTitle(Identity));
 
   internal Task<bool> PublishTitleAsync(string title) => RecordTitleAsync(() => store.Prepass.PublishTitle(Identity, title));

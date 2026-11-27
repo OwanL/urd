@@ -58,6 +58,41 @@ public sealed class SessionEventQueueTests {
   }
 
   [Fact]
+  public async Task ProgressCoalescesPerToolCallAndIsDiscardedWhenTheSessionIsUnwatched() {
+    var queue = new SessionEventQueue();
+    Guid session = Guid.NewGuid();
+    queue.Enqueue(Progress(session, "first", "old"));
+    queue.Enqueue(Progress(session, "second", "other"));
+    queue.Enqueue(Progress(session, "first", "latest"));
+
+    SessionSseRead first = await queue.ReadNextAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+    SessionSseRead second = await queue.ReadNextAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+    Assert.Equal("latest", ReadText(first.Event!.Data));
+    Assert.Equal("other", ReadText(second.Event!.Data));
+
+    queue.Enqueue(Progress(session, "first", "stale"));
+    queue.RemoveSessionUpdates(session);
+    Assert.True((await queue.ReadNextAsync(TimeSpan.FromMilliseconds(20), CancellationToken.None)).Heartbeat);
+  }
+
+  [Fact]
+  public async Task ProgressOverflowDropsOldTransientEventsWithoutClosingThePage() {
+    var queue = new SessionEventQueue();
+    Guid session = Guid.NewGuid();
+    for (int index = 0; index <= SessionEventQueue.MaxProgressEvents; index++) {
+      string key = index.ToString(System.Globalization.CultureInfo.InvariantCulture);
+      Assert.True(queue.Enqueue(Progress(session, key, key)));
+    }
+
+    Assert.False(queue.IsClosed);
+    var received = new List<SessionSseEvent>();
+    for (int index = 0; index < SessionEventQueue.MaxProgressEvents; index++)
+      received.Add(Assert.IsType<SessionSseEvent>((await queue.ReadNextAsync(TimeSpan.FromSeconds(1), CancellationToken.None)).Event));
+    Assert.DoesNotContain(received, message => ReadText(message.Data) == "0");
+    Assert.Equal(SessionEventQueue.MaxProgressEvents, received.Count);
+  }
+
+  [Fact]
   public async Task RemovingQueuedUpdatesLeavesHeartbeatWaitsUsable() {
     var queue = new SessionEventQueue();
     Guid session = Guid.NewGuid();
@@ -87,6 +122,12 @@ public sealed class SessionEventQueueTests {
 
   private static SessionSseEvent Message(string name, Guid session, long version) =>
       new(name, session, new { session, version });
+
+  private static SessionSseEvent Progress(Guid session, string key, string text) =>
+      new("tool-progress", session, new { text }, key);
+
+  private static string ReadText(object data) =>
+      JsonDocument.Parse(JsonSerializer.Serialize(data)).RootElement.GetProperty("text").GetString()!;
 
   private static long ReadVersion(object data) =>
       JsonDocument.Parse(JsonSerializer.Serialize(data)).RootElement.GetProperty("version").GetInt64();

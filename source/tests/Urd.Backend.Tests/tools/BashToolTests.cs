@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
@@ -36,6 +37,32 @@ public sealed class BashToolTests {
       Assert.True(details.GetProperty("durationMs").GetInt64() >= 0);
       Assert.Equal(JsonValueKind.Null, details.GetProperty("fullOutputPath").ValueKind);
       Assert.False(tool.ParametersSchema.GetProperty("properties").TryGetProperty("background", out _));
+    } finally {
+      Directory.Delete(directory, recursive: true);
+    }
+  }
+
+  [Fact]
+  public async Task CommandReportsBoundedLiveOutputBeforeReturningItsFinalResult() {
+    if (!OperatingSystem.IsWindows())
+      return;
+    string directory = Directory.CreateTempSubdirectory("urd-bash-progress-").FullName;
+    try {
+      var bash = new GitBash();
+      await using var processes = new ChatProcesses(bash);
+      var tool = new BashTool(processes, bash, ShellEnvironment());
+      var progress = new ConcurrentQueue<ToolOutput>();
+      ToolOutput result = await tool.RunAsync(
+          Arguments("for ((i=1; i<=5; i++)); do printf 'line-%d\\n' \"$i\"; sleep 0.11; done"),
+          Context(directory, progress.Enqueue), CancellationToken.None).WaitAsync(Deadline);
+
+      Assert.False(result.IsError);
+      Assert.True(progress.Count >= 2);
+      Assert.All(progress, update => {
+        Assert.Contains("line-", update.Text, StringComparison.Ordinal);
+        Assert.True(update.Details!.Value.GetProperty("running").GetBoolean());
+        Assert.True(Encoding.UTF8.GetByteCount(update.Text) <= 50 * 1024);
+      });
     } finally {
       Directory.Delete(directory, recursive: true);
     }

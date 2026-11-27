@@ -16,6 +16,38 @@ all valid outcomes when explicitly justified.
 Only decisions recorded as agreed are settled. Review topics, observations
 about Pie and recommendations do not select an implementation by themselves.
 
+## Current module map
+
+`source/backend/` is one `Urd.Core` assembly. Its `harness/` groups:
+
+- `compaction/`: history compaction and context token budgets.
+- `context/`: starting resources, discovery and pruning.
+- `execution/`: model/tool execution and recording.
+- `mcp/`: MCP connections and tool integration.
+- `preferences/`: user preferences and defaults.
+- `providers/`: provider connections, models and clients.
+- `sessions/`: session lifetimes, state and transcript access.
+- `storage/`: domain-aware SQLite operations and durable reads.
+- `tools/`: agent tools and their runtime support.
+- `usage/`: usage capture, token counting and pricing.
+
+Core siblings `concurrency/`, `markdown-rendering/` and `tool-call-display/` provide
+async locking, transcript Markdown processing and tool-call labels respectively.
+These folders are not separate assemblies or strictly layered dependencies: storage
+intentionally uses session, execution, provider and context types. `UrdStore` composes
+focused storage classes around a `Database` with one SQLite connection and lock; this
+is domain-typed persistence, not a generic persistence layer.
+
+`source/hosting/server/` is `Urd.Server`, with minimal-API routes and the SSE
+`SessionEventHub`; its project depends on Core. Server `Program.cs` is the host
+composition root: it creates the store, providers, preferences, MCP connections,
+`SessionManager`, event hub and Markdown service. `SessionManager` composes session
+collaborators including `SessionToolCatalog` and `BrowserViewerAncestry`.
+`source/ui/` is the Preact/TypeScript client, organized by features such as sessions,
+providers, preferences and usage, and talks to the server over HTTP. The packaging-only
+`source/hosting/launcher/` builds the `Start` executable via `scripts/portable.ps1`;
+it is not in `source/Urd.slnx`.
+
 ## Terms used in the design records
 
 - **Admission:** deciding durably whether to accept input; acceptance is not completion.
@@ -150,13 +182,17 @@ preserves provenance. Shared assets remain conditional. New application/settings
 areas can remain unfinished rather than being hidden in a generic bucket.
 
 **Backend responsibility split (2026-11-11):** `source/backend/harness/` groups agent
-machinery; `source/backend/markdown-rendering/` owns transcript formatting outside it.
-The earlier harness-to-core folder rename aligned with an assembly name but did not
-establish that all backend responsibilities belong to the harness. Keep one `Urd.Core`
-assembly and the existing namespaces/public APIs. Markdown consumes guarded transcript
-content reads; the harness must not depend on Markdown types or assemble display source.
-Content capture and revalidation retain session/history guards, with source assembly
-outside those guards. Folder placement alone is not a dependency boundary.
+machinery; `source/backend/markdown-rendering/` owns transcript formatting outside it,
+and `source/backend/tool-call-display/` owns tool-call labels. The earlier harness-to-core
+folder rename aligned with an assembly name but did not establish that all backend
+responsibilities belong to the harness. Keep one `Urd.Core` assembly and the existing
+namespaces/public APIs. Markdown consumes guarded transcript content reads; content
+capture and revalidation retain session/history guards, with source assembly outside
+those guards. Folder placement alone is not a dependency boundary.
+
+**Clarification:** The original prohibition on harness dependencies on Markdown types was
+too broad. The harness uses Markdown types for image imports and owns their storage and
+lifetimes; it must not assemble display Markdown source.
 
 The initial Core/Server/browser implementation now exists. The [session sketch](session-design.md)
 retains proposed wider APIs; its scoped decisions and the selected Core-without-ASP.NET /

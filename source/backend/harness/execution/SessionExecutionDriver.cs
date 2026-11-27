@@ -158,10 +158,10 @@ internal sealed class SessionExecutionDriver(SessionBase session, AsyncLock sess
             }
             // Only a failure after successfully joining this run can permit explicit close.
             savingSettlement = true;
-            SessionExecutionResult saved = session.SaveSettlement(ExecutionId, outcome == ExecutionOutcome.Completed && IsStopping
+            var (saved, nextInput) = session.SaveSettlement(ExecutionId, outcome == ExecutionOutcome.Completed && IsStopping
                 ? ExecutionOutcome.Cancelled : outcome);
             savingSettlement = false;
-            wakeStart = session.FinishExecution(this, saved);
+            wakeStart = session.FinishExecution(this, saved, nextInput);
             settlement.TrySetResult(saved);
           }
         }

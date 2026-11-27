@@ -28,16 +28,15 @@ internal sealed class SnapshotReader {
     FROM execution_inputs i
     JOIN input_decisions d ON d.session_id = i.session_id AND d.input_id = i.input_id
     JOIN execution_runs r ON r.run_id = i.run_id
-    WHERE i.run_id = (
-        SELECT run_id FROM execution_runs WHERE session_id = $session AND outcome IS NULL
-    ) AND i.outcome IS NULL AND (i.request_id IS NULL OR EXISTS (
+    WHERE i.run_id = $run AND i.outcome IS NULL AND (i.request_id IS NULL OR EXISTS (
         SELECT 1 FROM execution_requests q WHERE q.request_id = i.request_id AND q.attempt = 1))
     ORDER BY i.ordinal LIMIT $limit;
     """;
 
   internal const string SnapshotUnsettledSql = """
-    SELECT run_id, stopping, working_started_at FROM execution_runs
-    WHERE session_id = $session AND outcome IS NULL;
+    SELECT r.run_id, r.stopping, r.working_started_at, q.run_id AS queued_run
+    FROM execution_runs r LEFT JOIN execution_runs q ON q.queued_after_compaction = r.run_id AND q.outcome IS NULL
+    WHERE r.session_id = $session AND r.outcome IS NULL AND r.queued_after_compaction IS NULL;
     """;
 
   private const string PrepassTitleSql = """
@@ -145,13 +144,13 @@ internal sealed class SnapshotReader {
 
   private SessionSnapshot Read(SqliteTransaction transaction, Guid sessionId) {
     long historyRevision = ReadHistoryRevision(transaction, sessionId);
-    (Guid? unsettledExecution, bool stopRequested, DateTimeOffset? startedAt) =
-        ReadUnsettledExecution(transaction, sessionId);
+    var (unsettledExecution, stopRequested, startedAt, queuedInputExecution) = ReadUnsettledExecution(transaction, sessionId);
     SessionExecutionResult? lastSettlement = ReadLastSettlement(transaction, sessionId);
     Guid? latestExecution = unsettledExecution ?? lastSettlement?.ExecutionId;
     LlmSelection? latestSelection = ReadLatestSelection(transaction, sessionId, latestExecution);
     string? firstUserPreview = ReadFirstUserPreview(transaction, sessionId, historyRevision);
-    PendingInputPreview[] pendingInputs = ReadPendingInputs(transaction, sessionId);
+    PendingInputPreview[] pendingInputs = (queuedInputExecution ?? unsettledExecution) is { } pendingRun
+        ? ReadPendingInputs(transaction, pendingRun) : [];
     PendingResponse? pendingResponse = ReadPendingResponse(transaction, sessionId, historyRevision,
         unsettledExecution, latestSelection);
 
@@ -162,7 +161,8 @@ internal sealed class SnapshotReader {
         ContextUsage: ReadContextUsage(transaction, sessionId, historyRevision, latestExecution, latestSelection),
         CanContinue: ReadCanContinue(transaction, sessionId, historyRevision),
         Title: database.Scalar<string?>(transaction, PrepassTitleSql, ("$session", sessionId)),
-        Pruning: ReadPruningStatuses(transaction, sessionId), PendingResponse: pendingResponse);
+        Pruning: ReadPruningStatuses(transaction, sessionId), PendingResponse: pendingResponse,
+        QueuedInputExecutionId: queuedInputExecution);
   }
 
   private long ReadHistoryRevision(SqliteTransaction transaction, Guid sessionId) =>
@@ -170,10 +170,11 @@ internal sealed class SnapshotReader {
           "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
           ?? throw new KeyNotFoundException($"Session {sessionId} does not exist.");
 
-  private (Guid? ExecutionId, bool StopRequested, DateTimeOffset? StartedAt) ReadUnsettledExecution(
-      SqliteTransaction transaction, Guid sessionId) =>
+  private (Guid? ExecutionId, bool StopRequested, DateTimeOffset? StartedAt, Guid? QueuedInputExecutionId)
+      ReadUnsettledExecution(SqliteTransaction transaction, Guid sessionId) =>
       database.QuerySingleOrDefault(transaction, SnapshotUnsettledSql,
-          row => ((Guid?)row.Guid("run_id"), row.Bool("stopping"), row.NullableTimestamp("working_started_at")),
+          row => ((Guid?)row.Guid("run_id"), row.Bool("stopping"), row.NullableTimestamp("working_started_at"),
+              row.NullableGuid("queued_run")),
           ("$session", sessionId));
 
   private PendingResponse? ReadPendingResponse(SqliteTransaction transaction, Guid sessionId, long historyRevision,
@@ -280,12 +281,12 @@ internal sealed class SnapshotReader {
     return message is null ? null : content.ReadPreview(transaction, sessionId, message, StorageText.PreviewUtf16Limit).Text;
   }
 
-  private PendingInputPreview[] ReadPendingInputs(SqliteTransaction transaction, Guid sessionId) =>
+  private PendingInputPreview[] ReadPendingInputs(SqliteTransaction transaction, Guid runId) =>
       database.Query(transaction, PendingInputsSql,
           row => new PendingInputPreview(row.Guid("input_id"),
               StorageText.ReadPreview((byte[])row.GetValue(row.GetOrdinal("preview"))),
               row.Bool("can_cancel"), row.Bool("is_claimed")),
-          ("$session", sessionId), ("$limit", PendingInputLimit), ("$bytes", StorageText.PreviewByteLimit)).ToArray();
+          ("$run", runId), ("$limit", PendingInputLimit), ("$bytes", StorageText.PreviewByteLimit)).ToArray();
 
   private System.Collections.ObjectModel.ReadOnlyCollection<StartingResourcePruningStatus>? ReadPruningStatuses(
       SqliteTransaction transaction, Guid sessionId) {

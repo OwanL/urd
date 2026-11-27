@@ -319,7 +319,7 @@ void test("uncertain submissions and known executions retain their distinct stat
   assert.equal(settled.canResendNotSent, true);
 });
 
-void test("compaction blocks steering while ordinary active executions remain steerable", () => {
+void test("compaction accepts queued input while preserving execution gates", () => {
   const knownChat = { ...chat, knownExecutionId: executionId };
   const running = deriveChatStatus(
     knownChat,
@@ -340,8 +340,23 @@ void test("compaction blocks steering while ordinary active executions remain st
     true,
   );
   assert.equal(compacting.executionStatus, "compacting");
-  assert.equal(compacting.canSend, false);
-  assert.equal(compacting.canResendNotSent, false);
+  assert.equal(compacting.canSend, true);
+  assert.equal(compacting.canResendNotSent, true);
+  assert.equal(compacting.canContinue, false);
+
+  const manual = deriveChatStatus(
+    { ...chat, knownExecutionId: otherExecutionId },
+    snapshot({
+      unsettledExecutionId: executionId,
+      isCompacting: true,
+      queuedInputExecutionId: otherExecutionId,
+    }),
+    undefined,
+    true,
+    true,
+  );
+  assert.equal(manual.canSend, true);
+  assert.equal(manual.canContinue, false);
 });
 
 void test("a chat that needs recovery shows only the recovery state", () => {

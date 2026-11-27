@@ -135,9 +135,12 @@ public sealed class ManualCompactionTests {
     }
   }
 
-  [Fact]
-  public async Task BusyCompactionQueuesOnceAndWaitsForExecutionCleanup() {
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task QueuedPromptWaitsForManualCompactionToSettle(bool summaryFails) {
     using var database = new TemporaryDatabase();
+    LlmSelection selection = Selection with { ContextWindow = 200_000 };
     var entered = Signal();
     var release = Signal();
     var cleanupEntered = Signal();
@@ -149,6 +152,8 @@ public sealed class ManualCompactionTests {
         ? Paused(entered, release, token, cleanupEntered, cleanupRelease) : Complete(token), async cancellation => {
       summaryEntered.TrySetResult();
       await summaryRelease.Task.WaitAsync(cancellation);
+      if (summaryFails)
+        throw new ProviderOperationException(ProviderFailure.ProviderUnavailable);
       return SummaryResponse();
     });
     using UrdStore store = UrdStore.Open(database.Path);
@@ -161,7 +166,7 @@ public sealed class ManualCompactionTests {
       await entered.Task.WaitAsync(TestTimeout);
       SessionSnapshot snapshot = await session.ReadSnapshotAsync();
       Assert.True(snapshot.CanCompact);
-      var request = new ManualCompactionRequest(Guid.NewGuid(), snapshot.HistoryRevision, Selection);
+      var request = new ManualCompactionRequest(Guid.NewGuid(), snapshot.HistoryRevision, selection);
       CompactionReceipt queued = Assert.IsType<CompactionReceipt>(await session.CompactAsync(request));
       Assert.True(queued.Queued);
       Assert.Equal(request.OperationId, queued.ExecutionId);
@@ -181,17 +186,70 @@ public sealed class ManualCompactionTests {
       SessionSnapshot running = await session.ReadSnapshotAsync();
       Assert.Null(running.QueuedCompactionId);
       Assert.Equal(request.OperationId, running.ManualCompactionId);
+
+      var first = new UserMessageSubmission(Guid.NewGuid(), running.HistoryRevision, "first queued prompt", selection);
+      var removed = first with { SubmissionId = Guid.NewGuid(), Text = "removed prompt" };
+      var last = first with { SubmissionId = Guid.NewGuid(), Text = "last queued prompt" };
+      UserMessageReceipt accepted = await session.SubmitUserMessageAsync(first);
+      Assert.Equal(MessageAcceptance.Accepted, accepted.Acceptance);
+      Guid nextExecution = Assert.IsType<Guid>(accepted.ExecutionId);
+      Assert.NotEqual(request.OperationId, nextExecution);
+      Assert.Equal(accepted, await session.SubmitUserMessageAsync(first));
+      Assert.Equal(nextExecution, (await session.SubmitUserMessageAsync(removed)).ExecutionId);
+      Assert.Equal(nextExecution, (await session.SubmitUserMessageAsync(last)).ExecutionId);
+      Assert.False(await session.RemovePendingInputAsync(request.OperationId, removed.SubmissionId));
+      Assert.True(await session.RemovePendingInputAsync(nextExecution, removed.SubmissionId));
+      SessionSnapshot withQueue = await session.ReadSnapshotAsync();
+      Assert.Equal(request.OperationId, withQueue.UnsettledExecutionId);
+      Assert.Equal(nextExecution, withQueue.QueuedInputExecutionId);
+      Assert.Equal(new[] { first.SubmissionId, last.SubmissionId }, withQueue.PendingInputs.Select(input => input.SubmissionId));
+      Assert.DoesNotContain(client.Requests.SelectMany(messages => messages), message => message.Text == first.Text);
+
       summaryRelease.TrySetResult();
-      Assert.Equal(ExecutionOutcome.Completed,
+      ExecutionOutcome compactionOutcome = summaryFails ? ExecutionOutcome.Failed : ExecutionOutcome.Completed;
+      Assert.Equal(compactionOutcome,
           (await session.WaitForExecutionFinishAsync(request.OperationId).WaitAsync(TestTimeout)).Outcome);
       CompactionReceipt settled = Assert.IsType<CompactionReceipt>(await session.ReadCompactionReceiptAsync(request.OperationId));
       Assert.False(settled.Queued);
-      Assert.Equal(ExecutionOutcome.Completed, settled.Outcome);
+      Assert.Equal(compactionOutcome, settled.Outcome);
+      Assert.Equal(ExecutionOutcome.Completed,
+          (await session.WaitForExecutionFinishAsync(nextExecution).WaitAsync(TestTimeout)).Outcome);
+      var continuation = client.Requests[^1].Select(message => message.Text).ToArray();
+      Assert.Equal(!summaryFails, continuation.Any(text => text?.Contains(Summary, StringComparison.Ordinal) == true));
+      Assert.Equal(summaryFails, continuation.Any(text => text?.StartsWith("ancient-turn: ", StringComparison.Ordinal) == true));
+      Assert.DoesNotContain("removed prompt", continuation);
+      Assert.Equal(new[] { first.Text, last.Text }, continuation[^2..]);
+      Assert.Equal(accepted, await session.ReadUserMessageReceiptAsync(first.SubmissionId));
     } finally {
       release.TrySetResult();
       cleanupRelease.TrySetResult();
       summaryRelease.TrySetResult();
     }
+  }
+
+  [Fact]
+  public void RecoveryRetiresQueuedPromptWithoutReplayingIt() {
+    using var database = new TemporaryDatabase();
+    Guid sessionId = Guid.NewGuid();
+    Guid compactionId = Guid.NewGuid();
+    var submission = new UserMessageSubmission(Guid.NewGuid(), 0, "queued before interruption", Selection);
+    UserMessageReceipt receipt;
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      store.Sessions.CreatePrimary(sessionId);
+      Assert.NotNull(store.Compactions.Start(sessionId, new(compactionId, 0, Selection), accepting: true));
+      receipt = store.UserMessages.Submit(sessionId, 0, submission, accepting: true, Guid.NewGuid(), compactionId).Receipt;
+      Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
+    }
+
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Equal(compactionId, reopened.Snapshots.ReadPersisted(sessionId).UnsettledExecutionId);
+    reopened.RecoverInterruptedExecutions();
+
+    Assert.Null(reopened.Snapshots.ReadPersisted(sessionId).UnsettledExecutionId);
+    NotSentInput notSent = Assert.Single(reopened.NotSentInputs.Read(sessionId, cursor: null).Inputs);
+    Assert.Equal(receipt.ExecutionId, notSent.ExecutionId);
+    Assert.Equal(submission.SubmissionId, notSent.SubmissionId);
+    Assert.Equal(receipt, reopened.UserMessages.ReadReceipt(sessionId, submission.SubmissionId));
   }
 
   [Fact]
@@ -423,10 +481,16 @@ public sealed class ManualCompactionTests {
     CompactionReceipt accepted = Assert.IsType<CompactionReceipt>(await session.CompactAsync(
         new(Guid.NewGuid(), revision, Selection)));
     Task<SessionExecutionResult> settlement = session.WaitForExecutionFinishAsync(accepted.ExecutionId);
+    var submission = new UserMessageSubmission(Guid.NewGuid(), revision, "queued before Stop", Selection);
     try {
       await entered.Task.WaitAsync(TestTimeout);
+      UserMessageReceipt queued = await session.SubmitUserMessageAsync(submission);
       await session.RequestStopAsync(accepted.ExecutionId).WaitAsync(TestTimeout);
       await cleanupEntered.Task.WaitAsync(TestTimeout);
+      Assert.Equal(MessageAcceptance.Accepted, queued.Acceptance);
+      Assert.Equal(queued, await session.SubmitUserMessageAsync(submission));
+      Assert.Empty((await session.ReadSnapshotAsync()).PendingInputs);
+      Assert.Equal(submission.SubmissionId, Assert.Single((await session.ReadNotSentInputsAsync()).Inputs).SubmissionId);
       Assert.False(settlement.IsCompleted);
       Assert.Null(store.Compactions.ReadContext(session.Id, revision).PreviousCompaction);
       Assert.DoesNotContain((await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, revision))).Entries,
@@ -437,6 +501,10 @@ public sealed class ManualCompactionTests {
     }
 
     Assert.Equal(ExecutionOutcome.Cancelled, (await settlement).Outcome);
+    SessionSnapshot stopped = await session.ReadSnapshotAsync();
+    Assert.Null(stopped.UnsettledExecutionId);
+    Assert.Null(stopped.QueuedInputExecutionId);
+    Assert.DoesNotContain(client.Requests.SelectMany(messages => messages), message => message.Text == submission.Text);
     Assert.Null(store.Compactions.ReadContext(session.Id, revision).PreviousCompaction);
   }
 

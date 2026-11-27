@@ -19,7 +19,8 @@ export function PendingInputQueue({
   ready: boolean;
 }) {
   const pendingInputs = snapshot?.pendingInputs ?? [];
-  const pendingExecutionId = snapshot?.unsettledExecutionId ?? null;
+  const pendingExecutionId =
+    snapshot?.queuedInputExecutionId ?? snapshot?.unsettledExecutionId ?? null;
   const inputs = pendingInputs.filter((input) => input.isClaimed === (placement === "preparing"));
   const unlistedRemovals =
     placement === "queued"

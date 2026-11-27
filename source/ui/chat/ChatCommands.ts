@@ -34,6 +34,21 @@ export type ChatCompactionState =
   | { readonly phase: "uncertain"; readonly operationId: string; readonly message: string }
   | { readonly phase: "settled"; readonly message: string; readonly cancelledOperationId?: string };
 
+export function compactionBlocksSend(
+  snapshot: SessionSnapshot | null | undefined,
+  compaction: ChatCompactionState | undefined,
+): boolean {
+  if (
+    compaction?.phase !== "starting" &&
+    !(compaction?.phase === "observing" && !compaction.queued)
+  )
+    return false;
+  return !(
+    snapshot?.manualCompactionId === compaction.operationId &&
+    snapshot.unsettledExecutionId === compaction.operationId
+  );
+}
+
 export function compactionStatus(
   snapshot: SessionSnapshot | null | undefined,
   compaction: ChatCompactionState | undefined,

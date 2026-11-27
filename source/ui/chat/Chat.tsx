@@ -23,7 +23,7 @@ import { unanchoredPrepass, uniqueModelNames } from "./prepass/PrepassPresentati
 import type { ReadingPosition } from "./transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "./transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "./transcript/navigation/TranscriptNavigationStorage.ts";
-import { compactionStatus } from "./ChatCommands.ts";
+import { compactionBlocksSend, compactionStatus } from "./ChatCommands.ts";
 import type { ChatCommands, ChatStopState } from "./ChatCommands.ts";
 import type { ChatState } from "./ChatState.ts";
 import { useSessionSnapshot } from "../sessions/useSessionSnapshot.ts";
@@ -240,7 +240,7 @@ export function Chat({
     stop,
     ready,
     canPersist,
-    pendingInputRemoval || compactionPending,
+    pendingInputRemoval || compactionBlocksSend(snapshot, compaction),
     defaultSelection,
   );
   const canCompact = Boolean(

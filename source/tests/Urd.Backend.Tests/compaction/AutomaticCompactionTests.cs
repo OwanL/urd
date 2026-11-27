@@ -32,7 +32,7 @@ public sealed class AutomaticCompactionTests {
     using var client = CreateClient((call, token) => call switch {
       1 => Complete(token),
       2 => ToolBatch(token, new FunctionCallContent("lookup-call", "lookup", new Dictionary<string, object?>())),
-      3 or 4 => Complete(token),
+      3 or 4 or 5 => Complete(token),
       _ => throw new InvalidOperationException("Unexpected model request.")
     }, async cancellation => {
       Interlocked.Increment(ref summaryCalls);
@@ -50,11 +50,20 @@ public sealed class AutomaticCompactionTests {
     using IDisposable subscription = await session.SubscribeAsync(change => {
       if (change.Status == "compacting") compacting.TrySetResult();
     }, watched: true);
-    UserMessageReceipt receipt = await AcceptAsync(session, "current turn", TestLlmSelection.Default with { ContextWindow = 8_192 });
+    LlmSelection selection = TestLlmSelection.Default with { ContextWindow = 8_192 };
+    UserMessageReceipt receipt = await AcceptAsync(session, "current turn", selection);
     Task<SessionExecutionResult> settlement = session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId));
+    const string queuedPrompt = "sent while automatic compaction runs";
     try {
       await summaryEntered.Task.WaitAsync(TestTimeout);
       await compacting.Task.WaitAsync(TestTimeout);
+      UserMessageReceipt steering = await AcceptAsync(session, queuedPrompt, selection);
+      Assert.Equal(receipt.ExecutionId, steering.ExecutionId);
+      SessionSnapshot snapshot = await session.ReadSnapshotAsync();
+      Assert.True(snapshot.IsCompacting);
+      Assert.Null(snapshot.QueuedInputExecutionId);
+      Assert.Contains(snapshot.PendingInputs, input => input.SubmissionId == steering.Submission.SubmissionId);
+      Assert.DoesNotContain(client.Requests, request => RequestText(request).Contains(queuedPrompt, StringComparison.Ordinal));
       summaryRelease.TrySetResult();
       Assert.Equal(ExecutionOutcome.Completed, (await settlement.WaitAsync(TestTimeout)).Outcome);
     } finally {
@@ -64,7 +73,8 @@ public sealed class AutomaticCompactionTests {
 
     Assert.Equal(1, summaryCalls);
     Assert.Equal(1, toolRuns);
-    Assert.Equal(5, client.Requests.Count);
+    Assert.Equal(6, client.Requests.Count);
+    Assert.Contains(client.Requests[^1], message => message.Role == ChatRole.User && message.Text == queuedPrompt);
     IReadOnlyList<ChatMessage> request = client.Requests[4];
     Assert.Contains(request, message => message.Contents.OfType<TextContent>().Any(content => content.Text.Contains("[HISTORY SUMMARY:")));
     Assert.DoesNotContain(request, message => message.Contents.OfType<TextContent>()

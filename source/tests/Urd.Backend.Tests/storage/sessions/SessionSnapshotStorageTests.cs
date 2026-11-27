@@ -42,7 +42,7 @@ public sealed class SessionSnapshotStorageTests {
     Assert.Contains(plan, step => step.Contains("execution_messages_history_order", StringComparison.Ordinal));
     Assert.DoesNotContain(plan, step => step.Contains("SCAN execution_messages", StringComparison.Ordinal));
     string[] pending = database.ExplainQueryPlan(SnapshotReader.PendingInputsSql,
-        ("$session", session), ("$limit", 8), ("$bytes", 256 * 3 + 3));
+        ("$run", Guid.NewGuid()), ("$limit", 8), ("$bytes", 256 * 3 + 3));
     Assert.Contains(pending, step => step.Contains("nonterminal_execution_inputs", StringComparison.Ordinal));
     Assert.DoesNotContain(pending, step => step.Contains("SCAN execution_inputs", StringComparison.Ordinal));
     string[] settlement = database.ExplainQueryPlan(SnapshotReader.SnapshotSettlementSql,

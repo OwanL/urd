@@ -33,7 +33,7 @@ internal sealed class SessionClosureStorage(Database database, SessionImageClean
         """, ("$session", sessionId));
     if (database.Scalar<bool>(transaction, """
         SELECT EXISTS(SELECT 1 FROM execution_runs
-          WHERE session_id IN closing_sessions AND outcome IS NULL
+          WHERE session_id IN closing_sessions AND outcome IS NULL AND queued_after_compaction IS NULL
             AND ($drained IS NULL OR session_id <> $session OR run_id <> $drained));
         """, ("$session", sessionId), ("$drained", drainedRun)))
       throw new InvalidOperationException("Closure must await execution settlement.");

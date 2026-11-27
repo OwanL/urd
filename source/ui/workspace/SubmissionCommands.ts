@@ -30,6 +30,7 @@ type SubmissionClient = Pick<
 type SubmissionCoordinator = {
   executionSettingsSaving(id: string): boolean;
   isCompacting(id: string): boolean;
+  compactionBlocksSend(id: string, snapshot: SessionSnapshot): boolean;
   isStopping(id: string): boolean;
   hasPendingInputRemoval(id: string): boolean;
   isChecking(id: string): boolean;
@@ -67,7 +68,7 @@ export class SubmissionCommands {
     if (
       !canSend ||
       !this.access.canPersist() ||
-      this.coordinator.isCompacting(id) ||
+      this.coordinator.compactionBlocksSend(id, snapshot) ||
       this.coordinator.executionSettingsSaving(id)
     )
       return;
@@ -182,7 +183,7 @@ export class SubmissionCommands {
       snapshot.sessionId !== id ||
       (source.imageIds?.length ?? 0) > maxUserImages ||
       this.coordinator.executionSettingsSaving(id) ||
-      this.coordinator.isCompacting(id) ||
+      this.coordinator.compactionBlocksSend(id, snapshot) ||
       !latest ||
       latest.pending ||
       latest.pendingContinuation ||

@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 39. It records whether a request
+`UrdStore` owns the shared database, currently schema 46. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -35,8 +35,9 @@ allowing legacy null identities, and a narrow partial `execution_tools` index su
 started `subagent` calls. Legacy lookup is allowed only when it identifies one candidate; ambiguous
 associations remain unresolved, and history edits must not trigger a later legacy resolution.
 Schema 41 adds session-owned user images and ordered per-input image references. Image bytes live
-in the profile’s content-addressed image directory, not in SQLite. These upgrades do not close
-existing sessions. The current build
+in the profile’s content-addressed image directory, not in SQLite. Schema 46 can reserve one
+conversation execution behind a running manual compaction, while retaining the one-active-run
+constraint. Existing runs remain unchanged. These upgrades do not close existing sessions. The current build
 rejects unsupported versions and does not remove or reset databases. Every later durable schema
 change must register its SQL step in `DatabaseSchema` and bump the version, including for development
 builds. On startup, `DatabaseMigrations` applies required steps and records the new version in one
@@ -155,7 +156,7 @@ A delivery race returns false. Stop still cancels active work and retires pendin
 `PrimarySession.ContinueAsync` admits one idle, input-less execution against the exact
 history revision and last execution. Its frozen model and operation identity are durable;
 exact retries and receipt reads never restart it. Empty, active, stopping or fenced sessions
-are ineligible. There is no automatic continuation or after-run scheduler.
+are ineligible. There is no automatic Continue or general after-run scheduler.
 Continue omits a failed, cancelled or dangling final assistant message from model context
 only; earlier failures, completed replies and paired tool results remain. The saved omission
 survives later requests and reopening without changing the visible transcript or invoking
@@ -224,8 +225,16 @@ while an execution is active, the server can accept one in-memory queued request
 execution cleanup and any waking question run. The queue is not replayed on reopen and is invalidated
 when the session is fenced or its history revision changes. Stop addresses the current execution and
 does not cancel an independently queued compaction. The server rechecks history when queued work
-starts; a no-op, failure, cancellation or stale attempt does not advance the boundary. The [server guide](server-development.md#session-http-contract)
-owns the wire contract; the [browser guide](browser-development.md) describes the control.
+starts; a no-op, failure, cancellation or stale attempt does not advance the boundary.
+
+Send during automatic compaction follows the usual steering path. During manual compaction, the
+first accepted prompt reserves a conversation execution with the active model and later prompts
+join it, up to eight nonterminal deliveries. The prompt receipts and queue commit together. The
+same transition that settles compaction activates the conversation before other work can start.
+It uses the last usable context if compaction was a no-op or the summary failed. Stop retires the
+queued prompts as not sent; shutdown and startup recovery never replay them. The
+[server guide](server-development.md#session-http-contract) owns the wire contract; the
+[browser guide](browser-development.md) describes the control.
 
 ## Naming and structure cleanup
 
@@ -339,7 +348,7 @@ shared storage.
   A tool-free reply with pending calls enters `waiting`; input or completion wakes the same driver.
   Stop and terminal provider failure cancel/join owned calls; completed-shell survivors remain chat-owned.
 - Stop retires pending deliveries without rewriting Accepted receipts or automatically carrying
-  them into another execution. No explicit after-execution queue is implemented.
+  them into another execution. This also applies to prompts queued during manual compaction.
 - Public snapshot, history, not-sent and content reads expose committed state without starting
   work; cancelled reads do not cancel execution. Opening a store alone leaves orphan executions
   fenced. The host explicitly recovers under its data-directory lease: close interrupted work,

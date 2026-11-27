@@ -5,7 +5,8 @@ second backend. Session routes cover creation, saved-ID listing, Send/receipt, a
 slim snapshots, paged transcript history, steering removal, manual Continue, not-sent inputs and bounded content reads. Separate
 event routes provide server-sent updates for the browser workspace. Provider management and
 its settings UI are integrated; production sessions borrow provider-managed clients. Startup
-records interrupted work without replay; no explicit after-execution queue is implemented.
+records interrupted work without replay. Prompts can queue during compaction, but there is no
+general after-run queue.
 Tool and background-completion rows expose compact labels and status, with model-facing
 argument/result inspection loaded separately on demand.
 
@@ -199,7 +200,12 @@ rechecks admission in Core and returns 409 when unavailable. Exact retries retur
 retained receipt, while reusing an operation ID with different input conflicts. A queued receipt
 has `queued: true` and its execution ID is the operation ID; it becomes a normal execution receipt
 when started. The queue is in memory and is lost on shutdown or revision replacement. Stopping the
-current execution does not cancel a separately queued compaction.
+current execution does not cancel a separately queued compaction. A Send accepted during manual
+compaction returns the future conversation's execution ID. While compaction runs, the snapshot
+reports that ID as `queuedInputExecutionId` alongside its `pendingInputs`. Address input removal
+with that ID and Stop with the current `unsettledExecutionId`. The queue becomes active at
+compaction settlement unless cancelled or fenced; recovery preserves receipts without replaying
+queued prompts.
 
 Only primary sessions can call `ask_user`. Pass `question`, optional `context`, and `choices`
 (up to six suggestions; an empty array allows a custom answer only). The tool returns exactly the submitted answer.
@@ -275,7 +281,7 @@ llmSelection}`. Admission atomically checks the settled tail and idle eligibilit
 the retained receipt, including after history edits or restart, without starting again; changed
 reuse conflicts. A null lookup alone does not establish rejection. Continue adds no user row or
 hidden user prompt. Failed/cancelled/dangling assistant-tail omission affects model context only,
-not transcript history or prior tool effects. There is no automatic after-run dispatch.
+not transcript history or prior tool effects. There is no general after-run dispatch.
 
 ### Earlier-message editing
 
@@ -384,8 +390,9 @@ metadata through `/history` and message bytes through `/content`.
 A distinct busy Send can receive an Accepted receipt for durable steering in the owned execution,
 up to eight nonterminal input deliveries. At the next safe request boundary, tool results
 precede separate user messages in admission order; pending steering also continues after a
-successful no-tool response. Already-claimed requests are unchanged. The HTTP layer adds no
-busy policy or steering-specific routes and does not turn a durable refusal into an HTTP error.
+successful no-tool response. Already-claimed requests are unchanged. During manual compaction,
+Send instead queues input for the next conversation execution. The HTTP layer adds no busy
+policy or steering-specific routes and does not turn a durable refusal into an HTTP error.
 History entries include tool names and execution status. Inspect arguments/results on demand
 at `/api/sessions/{sessionId}/tool-calls/{requestId}/{callId}` with explicit `returned` and
 `full` flags. Previews retain at most 65,536 characters per field at the storage read and only

@@ -332,18 +332,23 @@ public abstract partial class SessionBase {
       activeExecution.Register(executionId, selection, compaction, firstRequest, compactionSkipReason);
 
   // Caller holds the session lock. Save before releasing resources or publishing settlement.
-  internal SessionExecutionResult SaveSettlement(Guid executionId, ExecutionOutcome outcome) =>
-      store.Executions.TryFinish(Id, executionId, outcome)
-        ?? throw new InvalidOperationException("The current execution could not be settled.");
+  internal (SessionExecutionResult Saved, QueuedInputStart? Next) SaveSettlement(Guid executionId, ExecutionOutcome outcome) {
+    var (saved, next) = store.Executions.TryFinish(Id, executionId, outcome, canStartQueuedInput: CanStartWork);
+    return (saved ?? throw new InvalidOperationException("The current execution could not be settled."), next);
+  }
 
   // Caller holds the session lock. A completed run may admit a queued waking ask.
-  internal TaskCompletionSource? FinishExecution(SessionExecutionDriver execution, SessionExecutionResult saved) {
+  internal TaskCompletionSource? FinishExecution(SessionExecutionDriver execution, SessionExecutionResult saved,
+      QueuedInputStart? next) {
     Questions.FinishExecution(failedConversation: saved.Outcome == ExecutionOutcome.Failed && !execution.IsManualCompaction);
     execution.Release();
     activeExecution.Clear();
     notifications.ClearToolDrafts();
     status.Settled(saved);
+    TaskCompletionSource? inputStart = next is null ? null : StartExecutionAfterUnlock(next.ExecutionId, next.Selection);
     PublishChange();
+    if (inputStart is not null)
+      return inputStart;
     TaskCompletionSource? wakeStart = saved.Outcome == ExecutionOutcome.Completed ? Questions.StartPendingQuestionRun() : null;
     // Stop cancels the current execution, not an independently accepted queued compaction.
     return wakeStart ?? manualCompaction.StartQueued();

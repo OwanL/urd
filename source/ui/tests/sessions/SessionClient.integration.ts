@@ -102,6 +102,8 @@ void test(
       canCloseAfterFailure: false,
       isCompacting: false,
       unsettledExecutionId: null,
+      queuedInputExecutionId: null,
+      rateLimitRetryAt: null,
       stopRequested: false,
       lastSettlement: null,
       latestLlmSelection: null,

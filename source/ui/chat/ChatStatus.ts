@@ -41,7 +41,6 @@ export function deriveChatStatus(
   defaultSelection: LlmSelection | null = null,
 ): ChatStatus {
   const active = Boolean(snapshot?.unsettledExecutionId && !snapshot.admissionFenced);
-  const compacting = Boolean(active && snapshot?.isCompacting);
   const stopId = stop?.pending ? stop.executionId : undefined;
   const selectionLocked = Boolean(
     active ||
@@ -64,7 +63,6 @@ export function deriveChatStatus(
   const canResendNotSent = Boolean(
     snapshot &&
     canPersist &&
-    !compacting &&
     !chat.pending &&
     !chat.pendingContinuation &&
     !chat.messageEdit &&
@@ -74,6 +72,7 @@ export function deriveChatStatus(
     !stopId &&
     (!chat.knownExecutionId ||
       snapshot.unsettledExecutionId === chat.knownExecutionId ||
+      snapshot.queuedInputExecutionId === chat.knownExecutionId ||
       snapshot.lastSettlement?.executionId === chat.knownExecutionId),
   );
   const canSend = Boolean(

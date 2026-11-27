@@ -26,7 +26,8 @@ internal sealed class ContinuationStorage(Database database, ToolResultCodec too
           (SELECT r.outcome FROM execution_runs r
               WHERE r.session_id = s.session_id AND r.history_revision = s.history_revision
               ORDER BY r.ordinal DESC LIMIT 1) AS latest_outcome,
-          EXISTS (SELECT 1 FROM execution_runs r WHERE r.session_id = s.session_id AND r.outcome IS NULL) AS has_active_execution,
+          EXISTS (SELECT 1 FROM execution_runs r WHERE r.session_id = s.session_id AND r.outcome IS NULL
+              AND r.queued_after_compaction IS NULL) AS has_active_execution,
           EXISTS (SELECT 1 FROM execution_runs r JOIN execution_requests q ON q.run_id = r.run_id
               WHERE r.session_id = s.session_id AND r.history_revision = s.history_revision
                   AND q.attempt = 2) AS has_request,

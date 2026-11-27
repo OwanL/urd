@@ -55,7 +55,10 @@ internal sealed class MessageEditStorage(Database database, UserMessageStorage m
     IReadOnlyList<Guid>? imageIds = submission.ImageIds ?? target.ImageIds;
     ValidateReplacement(transaction, sessionId, submission, imageIds);
     if (database.Scalar<bool>(transaction,
-        "SELECT EXISTS(SELECT 1 FROM execution_runs WHERE session_id = $session AND outcome IS NULL);", ("$session", sessionId)))
+        """
+        SELECT EXISTS(SELECT 1 FROM execution_runs
+            WHERE session_id = $session AND outcome IS NULL AND queued_after_compaction IS NULL);
+        """, ("$session", sessionId)))
       throw new InvalidOperationException("Editing must await execution settlement.");
 
     RemoveSuffix(transaction, sessionId, target);

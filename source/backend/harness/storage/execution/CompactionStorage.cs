@@ -114,7 +114,8 @@ internal sealed class CompactionStorage(Database database, ToolResultCodec toolR
             compaction_focus, working_started_at)
         SELECT s.session_id, $run, s.history_revision, $kind, $selection, $focus, $started FROM sessions s
         WHERE s.session_id = $session AND s.history_revision = $revision AND $accepting = 1
-            AND NOT EXISTS (SELECT 1 FROM execution_runs r WHERE r.session_id = $session AND r.outcome IS NULL);
+            AND NOT EXISTS (SELECT 1 FROM execution_runs r
+                WHERE r.session_id = $session AND r.outcome IS NULL AND r.queued_after_compaction IS NULL);
         """, ("$session", sessionId), ("$run", submission.OperationId), ("$revision", submission.ExpectedHistoryRevision),
           ("$kind", (int)ExecutionRunKind.Compaction),
           ("$selection", LlmSelectionJson.Write(submission.LlmSelection)), ("$focus", submission.Focus),

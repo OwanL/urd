@@ -30,32 +30,40 @@ internal sealed class UserMessageStorage(Database database) {
     Validate(sessionId, submission);
     ValidateImages(transaction, sessionId, submission.ImageIds, submission.LlmSelection!);
     long actualRevision = ReadRevision(transaction, sessionId);
-    MessageRefusalReason? refusal = DecideRefusal(
-        transaction, sessionId, actualRevision, historyRevision, submission, accepting, activeExecutionId);
+    ActiveRun? active = database.QuerySingleOrDefault(transaction, """
+      SELECT r.run_id, r.kind, r.stopping, r.llm_selection_json, q.run_id AS queued_run
+      FROM execution_runs r LEFT JOIN execution_runs q ON q.queued_after_compaction = r.run_id AND q.outcome IS NULL
+      WHERE r.session_id = $session AND r.outcome IS NULL AND r.queued_after_compaction IS NULL;
+      """, row => new ActiveRun(row.Guid("run_id"), row.Int("kind") == (int)ExecutionRunKind.Compaction,
+          row.Bool("stopping"), row.NullableString("llm_selection_json"), row.NullableGuid("queued_run")),
+        ("$session", sessionId));
+    Guid? compactionId = active is { IsCompaction: true } ? active.Id : null;
+    Guid? deliveryRun = active?.DeliveryId;
+    MessageRefusalReason? refusal = DecideRefusal(transaction, actualRevision, historyRevision, submission,
+        accepting, active, activeExecutionId, provenance);
     if (refusal is { } reason) {
       var refused = new UserMessageReceipt(sessionId, submission, MessageAcceptance.Refused, reason, null);
       InsertReceipt(transaction, refused);
       return (refused, false);
     }
 
-    Guid? currentExecutionId = ReadActiveExecution(transaction, sessionId);
-    Guid executionId = currentExecutionId ?? proposedExecutionId;
+    Guid executionId = deliveryRun ?? proposedExecutionId;
     if (executionId == Guid.Empty)
       throw new ArgumentException("Execution ID cannot be empty.", nameof(proposedExecutionId));
 
     var accepted = new UserMessageReceipt(sessionId, submission, MessageAcceptance.Accepted, null, executionId);
     InsertReceipt(transaction, accepted);
-    if (currentExecutionId is null) {
+    if (deliveryRun is null) {
       database.Execute(transaction, """
         INSERT INTO execution_runs (session_id, run_id, history_revision, input_id, kind,
-            llm_selection_json, working_started_at)
-        VALUES ($session, $run, $revision, $input, $kind, $selection, $started);
+            llm_selection_json, working_started_at, queued_after_compaction)
+        VALUES ($session, $run, $revision, $input, $kind, $selection, $started, $compaction);
         """,
           ("$session", sessionId), ("$run", executionId),
           ("$revision", actualRevision), ("$input", submission.SubmissionId),
           ("$kind", (int)ExecutionRunKind.UserInput),
           ("$selection", LlmSelectionJson.Write(submission.LlmSelection)),
-          ("$started", StorageText.UtcTimestamp()));
+          ("$started", compactionId is null ? StorageText.UtcTimestamp() : null), ("$compaction", compactionId));
     }
 
     database.Execute(transaction, """
@@ -113,42 +121,26 @@ internal sealed class UserMessageStorage(Database database) {
       database.Scalar<long?>(transaction, "SELECT history_revision FROM sessions WHERE session_id = $session;", ("$session", sessionId))
           ?? throw new KeyNotFoundException($"Session {sessionId} does not exist.");
 
-  private MessageRefusalReason? DecideRefusal(SqliteTransaction transaction, Guid sessionId, long actualRevision,
-      long historyRevision, UserMessageSubmission submission, bool accepting, Guid? activeExecutionId) {
-    long? stopFlag = database.Scalar<long?>(transaction,
-        "SELECT CASE WHEN kind = $compaction THEN 2 ELSE stopping END FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
-        ("$session", sessionId), ("$compaction", (int)ExecutionRunKind.Compaction));
-    if (!accepting || stopFlag is 1L)
+  private MessageRefusalReason? DecideRefusal(SqliteTransaction transaction, long actualRevision, long historyRevision,
+      UserMessageSubmission submission, bool accepting, ActiveRun? active, Guid? ownedRun, InputProvenance provenance) {
+    if (!accepting || active?.Stopping == true)
       return MessageRefusalReason.Stopping;
-
     if (actualRevision != historyRevision || submission.ExpectedHistoryRevision != actualRevision)
       return MessageRefusalReason.StaleRevision;
-
-    if (stopFlag is 2L)
-      return MessageRefusalReason.Capacity;
-    if (stopFlag is null)
+    if (active is null)
       return null;
-
-    Guid? currentExecutionId = ReadActiveExecution(transaction, sessionId);
-    if (activeExecutionId is null || currentExecutionId != activeExecutionId)
+    if (active.Id != ownedRun || (active.IsCompaction && provenance != InputProvenance.Human))
       return MessageRefusalReason.Capacity;
-
-    if (database.Scalar<long>(transaction,
-        "SELECT COUNT(*) FROM execution_inputs WHERE run_id = $run AND outcome IS NULL;", ("$run", currentExecutionId)) >= 8)
+    if (active.DeliveryId is { } deliveryRun && database.Scalar<long>(transaction,
+        "SELECT COUNT(*) FROM execution_inputs WHERE run_id = $run AND outcome IS NULL;", ("$run", deliveryRun)) >= 8)
       return MessageRefusalReason.Capacity;
-
-    LlmSelection? initiatingSelection = LlmSelectionJson.Read(database.Scalar<string?>(transaction, """
-      SELECT llm_selection_json FROM execution_runs
-      WHERE session_id = $session AND run_id = $run;
-      """, ("$session", sessionId), ("$run", currentExecutionId)));
-    return LlmSelectionJson.SameOperation(initiatingSelection, submission.LlmSelection)
+    return LlmSelectionJson.SameOperation(LlmSelectionJson.Read(active.Selection), submission.LlmSelection)
         ? null : MessageRefusalReason.SelectionLocked;
   }
 
-  private Guid? ReadActiveExecution(SqliteTransaction transaction, Guid sessionId) =>
-      database.QuerySingleOrDefault<Guid?>(transaction,
-          "SELECT run_id FROM execution_runs WHERE session_id = $session AND outcome IS NULL;",
-          row => row.Guid("run_id"), ("$session", sessionId));
+  private sealed record ActiveRun(Guid Id, bool IsCompaction, bool Stopping, string? Selection, Guid? QueuedId) {
+    internal Guid? DeliveryId => IsCompaction ? QueuedId : Id;
+  }
 
   private void InsertReceipt(SqliteTransaction transaction, UserMessageReceipt receipt) {
     // Length-bearing UTF-8 bytes preserve embedded NUL as well as exact Unicode.

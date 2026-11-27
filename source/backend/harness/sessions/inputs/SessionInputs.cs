@@ -25,15 +25,16 @@ internal sealed class SessionInputs(SessionBase session, UrdStore store, AsyncLo
 
     using var _ = await sessionLock.AcquireAsync();
     if (!session.CanStartWork || session.CurrentExecution is not { } current
-        || current.Identity.ExecutionId != executionId || current.Identity.HistoryRevision != session.HistoryRevision
+        || current.Identity.HistoryRevision != session.HistoryRevision
         || current.IsStopping)
       return false;
 
     SessionSnapshot snapshot = session.ReadCurrentSnapshot();
-    if (snapshot.AdmissionFenced || snapshot.StopRequested || snapshot.UnsettledExecutionId != executionId)
+    if (snapshot.AdmissionFenced || snapshot.StopRequested || snapshot.UnsettledExecutionId != current.ExecutionId
+        || executionId != (snapshot.QueuedInputExecutionId ?? current.ExecutionId))
       return false;
 
-    bool removed = session.WriteToStore(() => store.Executions.RemovePendingInput(current.Identity, submissionId));
+    bool removed = session.WriteToStore(() => store.Executions.RemovePendingInput(current.Identity, executionId, submissionId));
     if (removed) {
       current.Wake();
       session.PublishChange();
@@ -77,11 +78,12 @@ internal sealed class SessionInputs(SessionBase session, UrdStore store, AsyncLo
       if (receipt.Acceptance == MessageAcceptance.Accepted)
         session.MarkAcceptedInput();
 
-      // Steering joins the owned execution; neither it nor a retained receipt starts another driver.
+      // Steering wakes the owned execution; a prompt queued behind compaction waits for settlement.
       if (newlyAccepted) {
         if (session.CurrentExecution is null)
           executionStart = session.StartExecutionAfterUnlock(receipt.ExecutionId!.Value, receipt.Submission.LlmSelection!);
-        session.CurrentExecution!.Wake();
+        else if (session.CurrentExecution.ExecutionId == receipt.ExecutionId)
+          session.CurrentExecution.Wake();
         session.PublishChange();
       }
     }

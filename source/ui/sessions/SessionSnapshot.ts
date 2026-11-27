@@ -44,6 +44,7 @@ export interface SessionSnapshot {
   readonly manualCompactionId?: string | null;
   readonly compactionUnavailableReason?: string | null;
   readonly unsettledExecutionId: string | null;
+  readonly queuedInputExecutionId?: string | null;
   readonly isCompacting?: boolean;
   readonly rateLimitRetryAt?: string | null;
   readonly stopRequested: boolean;

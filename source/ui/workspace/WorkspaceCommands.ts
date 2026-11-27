@@ -7,6 +7,7 @@ export { pendingInputRemovalKey } from "./PendingInputRemovalCommands.ts";
 import { SubmissionCommands } from "./SubmissionCommands.ts";
 import { RequestError } from "../http/RequestError.ts";
 import { errorMessage, requestErrorDescription } from "../http/ErrorMessages.ts";
+import { compactionBlocksSend } from "../chat/ChatCommands.ts";
 import type {
   ChatCompactionState,
   ChatStopState,
@@ -141,6 +142,8 @@ export class WorkspaceCommands {
     this.submissions = new SubmissionCommands(client, access, {
       executionSettingsSaving: (id) => this.executionSettingsSaving(id),
       isCompacting: (id) => this.isCompacting(id),
+      compactionBlocksSend: (id, snapshot) =>
+        compactionBlocksSend(snapshot, this.state.compactions[id]),
       isStopping: (id) => !!this.state.stopping[id],
       hasPendingInputRemoval: (id) => this.hasPendingInputRemoval(id),
       isChecking: (id) => this.checks.has(id),

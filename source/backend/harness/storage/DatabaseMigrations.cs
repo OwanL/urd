@@ -8,7 +8,7 @@ internal static class DatabaseMigrations {
   internal const int FirstSupportedVersion = 36;
 
   internal static void Upgrade(SqliteConnection connection, int targetVersion,
-      IReadOnlyDictionary<int, string> migrations) {
+      IReadOnlyDictionary<int, string[]> migrations) {
     using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
     using SqliteCommand command = connection.CreateCommand();
     command.Transaction = transaction;
@@ -25,8 +25,10 @@ internal static class DatabaseMigrations {
         throw new InvalidOperationException($"Missing session database migration from schema {source} to {source + 1}.");
     }
     for (int source = version; source < targetVersion; source++) {
-      command.CommandText = migrations[source];
-      command.ExecuteNonQuery();
+      foreach (string sql in migrations[source]) {
+        command.CommandText = sql;
+        command.ExecuteNonQuery();
+      }
     }
     command.CommandText = string.Create(CultureInfo.InvariantCulture, $"PRAGMA user_version = {targetVersion};");
     command.ExecuteNonQuery();

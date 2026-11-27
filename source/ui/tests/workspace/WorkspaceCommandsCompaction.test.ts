@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { CompactionReceipt } from "../../sessions/inputs/Compaction.ts";
 import { compactionStatus } from "../../chat/ChatCommands.ts";
+import { editDraft } from "../../chat/ChatState.ts";
 import {
   sessionId,
   firstExecutionId,
@@ -151,6 +152,38 @@ void test("acknowledged queued compaction allows steering but prevents duplicate
   await coordinator.send(sessionId, active, true, true);
   assert.equal(starts, 1);
   assert.equal(sends, 1);
+});
+
+void test("manual compaction admits Send only after its snapshot confirms it", async () => {
+  const workspace = fixture();
+  let sends = 0;
+  let operationId = "";
+  const coordinator = commands(workspace.access, {
+    ...emptyClient(async (_id, submission) => {
+      sends++;
+      return receipt(submission);
+    }),
+    startCompaction: async (_id, submission) => {
+      operationId = submission.operationId;
+      return compactionReceipt(operationId, null);
+    },
+  });
+  await coordinator.compact(sessionId, snapshot(), true);
+  await coordinator.send(sessionId, snapshot(), false, true);
+  assert.equal(sends, 0);
+  const active = snapshot({
+    unsettledExecutionId: operationId,
+    manualCompactionId: operationId,
+    isCompacting: true,
+  });
+  await coordinator.send(sessionId, active, true, true);
+  assert.equal(sends, 1);
+  const queued = { ...active, queuedInputExecutionId: firstExecutionId };
+  coordinator.observeSnapshot(queued, firstExecutionId);
+  assert.equal(workspace.read().chats[sessionId]?.knownExecutionId, firstExecutionId);
+  workspace.access.updateChat(sessionId, (chat) => editDraft(chat, "next prompt"));
+  await coordinator.send(sessionId, queued, true, true);
+  assert.equal(sends, 2);
 });
 
 void test("queued compaction is not reconciled until it leaves the server queue", async () => {

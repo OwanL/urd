@@ -36,7 +36,8 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
     LlmSelectionJson.Read(database.Scalar<string?>(transaction, """
       SELECT COALESCE(r.llm_selection_json, d.llm_selection_json) FROM execution_runs r
       LEFT JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
-      WHERE r.session_id = $session AND COALESCE(r.llm_selection_json, d.llm_selection_json) IS NOT NULL
+      WHERE r.session_id = $session AND r.queued_after_compaction IS NULL
+          AND COALESCE(r.llm_selection_json, d.llm_selection_json) IS NOT NULL
       ORDER BY r.ordinal DESC LIMIT 1;
       """, ("$session", sessionId))));
 
@@ -97,15 +98,16 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
                 AND omitted.ordinal <= (SELECT r.ordinal FROM execution_runs r WHERE r.run_id = $run);
             """, ExecutionSql.Parameters(execution, ("$continuation", (int)ExecutionRunKind.Continuation))));
 
-  internal bool RemovePendingInput(ExecutionIdentity execution, Guid submissionId) => database.Write(transaction =>
+  internal bool RemovePendingInput(ExecutionIdentity execution, Guid deliveryId, Guid submissionId) => database.Write(transaction =>
     database.Execute(transaction, $"""
       UPDATE execution_inputs SET outcome = $cancelled, not_sent = 0
-      WHERE session_id = $session AND run_id = $run AND input_id = $input
-          AND request_id IS NULL AND outcome IS NULL
+      WHERE session_id = $session AND run_id = $delivery AND input_id = $input AND request_id IS NULL AND outcome IS NULL
           AND EXISTS (SELECT 1 FROM execution_runs r JOIN sessions s ON s.session_id = r.session_id
+              JOIN execution_runs delivery ON delivery.run_id = execution_inputs.run_id
               WHERE r.session_id = $session AND r.run_id = $run AND {ExecutionSql.CurrentRunCondition}
-                  AND (r.input_id IS NULL OR r.input_id <> $input));
-      """, ExecutionSql.Parameters(execution, ("$input", submissionId),
+                  AND (delivery.run_id = r.run_id OR delivery.queued_after_compaction = r.run_id)
+                  AND (delivery.input_id IS NULL OR delivery.input_id <> $input));
+      """, ExecutionSql.Parameters(execution, ("$delivery", deliveryId), ("$input", submissionId),
         ("$cancelled", (int)ExecutionOutcome.Cancelled))) == 1);
 
   // A rejected provider request may be retried only before any output or call was observed.
@@ -180,7 +182,9 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
             not_sent = CASE WHEN provenance <> $agentQuestion AND NOT EXISTS (SELECT 1 FROM execution_messages m
                 WHERE m.run_id = execution_inputs.run_id AND m.role = {(int)TranscriptEntryKind.User}
                     AND m.input_id = execution_inputs.input_id) THEN 1 ELSE 0 END
-        WHERE session_id = $session AND run_id = $run AND request_id IS NULL AND outcome IS NULL
+        WHERE session_id = $session AND request_id IS NULL AND outcome IS NULL
+            AND (run_id = $run OR run_id = (SELECT run_id FROM execution_runs
+                WHERE queued_after_compaction = $run AND outcome IS NULL))
             AND EXISTS (SELECT 1 FROM execution_runs WHERE run_id = $run AND stopping = 1 AND outcome IS NULL);
         """, ("$session", sessionId), ("$run", executionId), ("$agentQuestion", (int)InputProvenance.AgentQuestion));
       return receipt;
@@ -188,11 +192,15 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
   }
 
   // The caller has joined all owned work, including cancellation callbacks, before settlement.
-  internal SessionExecutionResult? TryFinish(Guid sessionId, Guid executionId, ExecutionOutcome driverOutcome) {
+  internal SessionExecutionResult? TryFinish(Guid sessionId, Guid executionId, ExecutionOutcome driverOutcome) =>
+      TryFinish(sessionId, executionId, driverOutcome, canStartQueuedInput: false).Result;
+
+  internal (SessionExecutionResult? Result, QueuedInputStart? Next) TryFinish(Guid sessionId, Guid executionId,
+      ExecutionOutcome driverOutcome, bool canStartQueuedInput) {
     if (!Enum.IsDefined(driverOutcome))
       throw new ArgumentOutOfRangeException(nameof(driverOutcome));
 
-    return database.Write<SessionExecutionResult?>(transaction => {
+    return database.Write<(SessionExecutionResult?, QueuedInputStart?)>(transaction => {
       RunFinishState? state = database.QuerySingleOrDefault(transaction, $"""
         SELECT r.outcome, r.stopping,
             (SELECT q.outcome FROM execution_requests q WHERE q.run_id = r.run_id
@@ -215,17 +223,18 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
                 WHERE q.run_id = r.run_id AND q.outcome = {(int)ExecutionOutcome.Failed}
                 ORDER BY q.request_index DESC LIMIT 1), substr(r.error, 1, 1024)) AS error,
             r.working_started_at
-        FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run;
+        FROM execution_runs r WHERE r.session_id = $session AND r.run_id = $run AND r.queued_after_compaction IS NULL;
         """, row => new RunFinishState((ExecutionOutcome?)row.NullableInt("outcome"), row.Bool("stopping"),
           (ExecutionOutcome?)row.NullableInt("last_outcome"), row.Bool("pending_inputs"), row.Bool("missing_results"),
           row.Bool("needs_tool_continuation"), row.Bool("auxiliary_work_pending"), row.Bool("is_compaction"),
           row.NullableString("error"), row.NullableTimestamp("working_started_at")),
         ("$session", sessionId), ("$run", executionId), ("$compaction", (int)ExecutionRunKind.Compaction));
       if (ChooseFinalOutcome(state, driverOutcome) is not { } settlement)
-        return null;
+        return default;
 
+      var result = new SessionExecutionResult(executionId, settlement.Outcome, settlement.Error);
       if (settlement.AlreadySettled)
-        return new(executionId, settlement.Outcome, settlement.Error);
+        return (result, null);
 
       auxiliaryConversations.Retire(transaction, executionId, settlement.Outcome);
       TimeSpan elapsed = settlement.StartedAt is { } startedAt
@@ -274,8 +283,34 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
       long revision = database.Scalar<long>(transaction,
           "SELECT history_revision FROM execution_runs WHERE run_id = $run;", ("$run", executionId));
       PublishCompletions(transaction, sessionId, revision);
-      return new(executionId, settlement.Outcome, settlement.Error);
+      QueuedInputStart? next = state!.IsCompaction
+          ? SettleCompactionQueue(transaction, executionId, settlement.Outcome, canStartQueuedInput) : null;
+      return (result, next);
     });
+  }
+
+  // Compaction and the handoff commit together: there is never an idle gap that can admit other work.
+  private QueuedInputStart? SettleCompactionQueue(SqliteTransaction transaction, Guid compactionId,
+      ExecutionOutcome outcome, bool canStart) {
+    QueuedInputStart? queued = database.QuerySingleOrDefault(transaction, """
+      SELECT run_id, llm_selection_json FROM execution_runs WHERE queued_after_compaction = $compaction AND outcome IS NULL;
+      """, row => new QueuedInputStart(row.Guid("run_id"), LlmSelectionJson.Read(row.String("llm_selection_json"))!),
+      ("$compaction", compactionId));
+    if (queued is null)
+      return null;
+
+    if (outcome != ExecutionOutcome.Cancelled && canStart && database.Execute(transaction, """
+        UPDATE execution_runs SET queued_after_compaction = NULL, working_started_at = $started
+        WHERE run_id = $run AND history_revision = (
+            SELECT s.history_revision FROM sessions s WHERE s.session_id = execution_runs.session_id);
+        """, ("$run", queued.ExecutionId), ("$started", StorageText.UtcTimestamp())) == 1)
+      return queued;
+
+    database.Execute(transaction, """
+      UPDATE execution_inputs SET outcome = $cancelled, not_sent = 1 WHERE run_id = $run AND outcome IS NULL;
+      UPDATE execution_runs SET queued_after_compaction = NULL, outcome = $cancelled WHERE run_id = $run;
+      """, ("$run", queued.ExecutionId), ("$cancelled", (int)ExecutionOutcome.Cancelled));
+    return null;
   }
 
   // Host-only startup operation, under its exclusive data-directory lease. Opening a store
@@ -283,7 +318,13 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
   internal void RecoverInterruptedExecutions() {
     database.Write(transaction => {
       var interrupted = database.Query(transaction,
-          "SELECT run_id, session_id, history_revision FROM execution_runs WHERE outcome IS NULL;",
+          """
+          SELECT run_id, session_id, history_revision FROM execution_runs
+          WHERE outcome IS NULL AND queued_after_compaction IS NULL
+          UNION ALL
+          SELECT run_id, session_id, history_revision FROM execution_runs
+          WHERE outcome IS NULL AND queued_after_compaction IS NOT NULL;
+          """,
           row => (RunId: row.Guid("run_id"), SessionId: row.Guid("session_id"), Revision: row.Long("history_revision")));
 
       foreach (var run in interrupted) {
@@ -306,7 +347,8 @@ internal sealed class SessionExecutionStorage(Database database, ToolResultCodec
               ended_at = CASE WHEN started = 1 THEN $ended ELSE NULL END
           WHERE run_id = $run AND result_json IS NULL;
           UPDATE sessions SET working_time_incomplete = 1 WHERE session_id = $session;
-          UPDATE execution_runs SET outcome = $failed, working_started_at = NULL WHERE run_id = $run;
+          UPDATE execution_runs SET outcome = $failed, working_started_at = NULL, queued_after_compaction = NULL
+          WHERE run_id = $run;
           """, ("$run", run.RunId), ("$session", run.SessionId), ("$failed", (int)ExecutionOutcome.Failed),
             ("$agentQuestion", (int)InputProvenance.AgentQuestion),
             ("$unstarted", "Interrupted before tool execution; tool was not executed."),

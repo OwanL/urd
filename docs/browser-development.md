@@ -98,7 +98,7 @@ Removal never stops active work. With an empty composer, an eligible idle conver
 instead of Send, without adding a user message. Continue journals its exact operation before dispatch;
 reload checks receipts, and an
 uncertain result offers explicit check/retry without clearing a newer draft. Stop cancels the
-active run and its pending steering; there is no after-run queue. The composer keeps its model
+active run and its pending input. The composer keeps its model
 and reasoning pickers and Send/Continue visible on one row at every width. Stop appears only
 while work is active and is disabled while stopping. More options holds session details; these
 never crowd or wrap the toolbar.
@@ -378,8 +378,11 @@ its descriptive tooltip retains context details and feedback, also reachable fro
 context indicators overflow. When the server permits it, a request
 made during work queues until execution and cleanup finish. The control shows queued and running
 states from the session snapshot; an acknowledged queue does not block steering. Hover or focus
-**Queued** to reveal **Cancel**. After compaction starts, use **Stop** instead. The control leaves composer
-drafts unchanged and does not automatically repeat a no-op or failure. The
+**Queued** to reveal **Cancel**. After compaction starts, use **Stop** instead. Send stays available
+during compaction. Prompts appear in the queue and wait until compaction finishes. During manual
+compaction the first prompt starts the next run; later queued prompts can be removed individually.
+Stop cancels both the compaction and its queued prompts. The control leaves composer drafts
+unchanged and does not automatically repeat a no-op or failure. The
 browser control has no focus-instructions field; the HTTP operation still accepts optional focus.
 Successful manual or automatic compaction adds a quiet **History compacted** entry; its summary
 and token counts load on demand. While a response is preparing, any preparation rows already

@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 45;
+  private const int SchemaVersion = 46;
 
   private const string SnoozedSessionsIndex = """
       CREATE INDEX sessions_snoozed_until ON sessions(snoozed_until_ms) WHERE snoozed_until_ms IS NOT NULL;
@@ -124,15 +124,27 @@ internal static class DatabaseSchema {
 
   private const string SessionTreeIndex = "CREATE INDEX sessions_children ON sessions(parent_session_id);";
 
+  private const string QueuedAfterCompactionColumn = """
+      queued_after_compaction TEXT REFERENCES execution_runs(run_id)
+          CHECK (queued_after_compaction IS NULL OR (kind = 0 AND working_started_at IS NULL))
+      """;
+
+  private const string ActiveExecutionIndexes = """
+      CREATE UNIQUE INDEX one_active_execution ON execution_runs(session_id)
+          WHERE outcome IS NULL AND queued_after_compaction IS NULL;
+      CREATE UNIQUE INDEX one_queued_execution_per_compaction ON execution_runs(queued_after_compaction)
+          WHERE queued_after_compaction IS NOT NULL AND outcome IS NULL;
+      """;
+
   // Each entry upgrades its source version to the next one. Schema 36 is the baseline.
-  private static readonly Dictionary<int, string> migrations = new() {
-    [36] = """
+  private static readonly Dictionary<int, string[]> migrations = new() {
+    [36] = ["""
         CREATE TABLE setup_completion (
             singleton INTEGER PRIMARY KEY CHECK (singleton = 1)
         ) STRICT;
         INSERT INTO setup_completion (singleton) VALUES (1);
-        """,
-    [37] = $$"""
+        """],
+    [37] = [$$"""
         ALTER TABLE execution_inputs RENAME TO previous_execution_inputs;
         {{ExecutionInputsTable}}
         INSERT INTO execution_inputs SELECT * FROM previous_execution_inputs;
@@ -142,8 +154,8 @@ internal static class DatabaseSchema {
         {{ExecutionInputsIndexes}}
         {{SessionTreeIndex}}
         {{ClosedUsageSchema}}
-        """,
-    [38] = """
+        """],
+    [38] = ["""
         ALTER TABLE sessions ADD COLUMN owning_request_id TEXT
             CHECK (owning_request_id IS NULL OR (kind = 1 AND length(owning_request_id) > 0));
         CREATE UNIQUE INDEX sessions_owning_request
@@ -152,21 +164,24 @@ internal static class DatabaseSchema {
         CREATE INDEX execution_tools_subagent_started
             ON execution_tools(call_id, run_id)
             WHERE name = 'subagent' AND started = 1;
-        """,
-    [39] = """
+        """],
+    [39] = ["""
         ALTER TABLE preferences ADD COLUMN lan_hosting_enabled INTEGER NOT NULL DEFAULT 0
             CHECK (lan_hosting_enabled IN (0, 1));
-        """,
-    [40] = UserImagesTable + "\nALTER TABLE input_decisions ADD COLUMN image_ids_json TEXT;",
-    [41] = McpServersTable,
-    [42] = "ALTER TABLE preferences ADD COLUMN source_ignores_json TEXT;",
-    [43] = """
+        """],
+    [40] = [UserImagesTable + "\nALTER TABLE input_decisions ADD COLUMN image_ids_json TEXT;"],
+    [41] = [McpServersTable],
+    [42] = ["ALTER TABLE preferences ADD COLUMN source_ignores_json TEXT;"],
+    [43] = ["""
         ALTER TABLE sessions ADD COLUMN snoozed_until_ms INTEGER CHECK (snoozed_until_ms IS NULL OR kind = 0);
-        """ + "\n" + SnoozedSessionsIndex,
-    [44] = """
+        """ + "\n" + SnoozedSessionsIndex],
+    [44] = ["""
         ALTER TABLE preferences ADD COLUMN max_subagent_depth INTEGER NOT NULL DEFAULT 4
             CHECK (max_subagent_depth >= 0 AND max_subagent_depth <= 2147483647);
-        """
+        """],
+    // Prepare the index changes after SQLite has applied the column definition.
+    [45] = [$"ALTER TABLE execution_runs ADD COLUMN {QueuedAfterCompactionColumn};",
+        "DROP INDEX one_active_execution;", ActiveExecutionIndexes]
   };
 
   internal static void Initialize(SqliteConnection connection) {
@@ -346,6 +361,7 @@ internal static class DatabaseSchema {
           error TEXT,
           stopping INTEGER NOT NULL DEFAULT 0 CHECK (stopping IN (0, 1)),
           working_started_at TEXT,
+          {{QueuedAfterCompactionColumn}},
           outcome INTEGER CHECK (outcome IN (0, 1, 2)),
           created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
           UNIQUE (session_id, input_id),
@@ -656,7 +672,7 @@ internal static class DatabaseSchema {
       CREATE INDEX continuation_omitted_requests ON execution_runs(session_id, history_revision, continuation_omitted_request_id)
           WHERE continuation_omitted_request_id IS NOT NULL;
       CREATE INDEX execution_runs_terminal_order ON execution_runs(session_id, ordinal DESC) WHERE outcome IS NOT NULL;
-      CREATE UNIQUE INDEX one_active_execution ON execution_runs(session_id) WHERE outcome IS NULL;
+      {{ActiveExecutionIndexes}}
       CREATE UNIQUE INDEX one_unfinished_request ON execution_requests(run_id) WHERE outcome IS NULL;
       CREATE INDEX execution_messages_history_order ON execution_messages(session_id, history_revision, ordinal DESC);
       CREATE INDEX execution_messages_request_order ON execution_messages(request_id, role, first_chunk_index);

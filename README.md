@@ -33,9 +33,9 @@ restore them early. Restoring a chat does not select it or start work.
 
 Windows file/shell tools, browser navigation through older history and on-demand tool-body
 inspection are available. Host startup records interrupted executions without replay; broader
-recovery remains unfinished. An explicit after-run queue is unavailable. Transcript
-virtualization, images and storage caching are active work; transcript records distinguish approved
-requirements from delivered behavior. Reopening does not replay work.
+recovery remains unfinished. Prompts can queue during compaction, but there is no general after-run
+queue. Transcript virtualization, images and storage caching are active work; transcript records
+distinguish approved requirements from delivered behavior. Reopening does not replay work.
 
 ## Start here
 

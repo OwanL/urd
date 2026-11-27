@@ -118,6 +118,39 @@ public sealed class SessionEventRoutesTests {
   }
 
   [Fact]
+  public async Task WatchedSessionReplaysLatestToolDraft() {
+    using var database = new TemporaryDatabase();
+    using var store = UrdStore.Open(database.Path);
+    using var client = new ScriptedChatClient(Complete);
+    await using var sessions = new SessionManager(store, _ => client, [], Path.GetDirectoryName(database.Path)!);
+    PrimarySession session = await sessions.CreatePrimaryAsync();
+    Guid executionId = Guid.NewGuid();
+    Guid requestId = Guid.NewGuid();
+    using var drafts = new Urd.Core.Execution.ToolDraftBuffer(executionId, requestId, session.ToolDraftGate,
+        session.PublishToolDraft);
+    string Emoji(int count) => string.Concat(Enumerable.Repeat("😀", count));
+    string arguments = "[" + Emoji(1100);
+    drafts.Append(0, "call", "read", System.Text.Encoding.UTF8.GetBytes(arguments));
+    drafts.Complete(0, null, null, System.Text.Encoding.UTF8.GetBytes(arguments + "]"));
+
+    using var page = new SessionEventPage(sessions.BootId, _ => { });
+    await page.UpdateAsync(sessions, [session.Id], [session.Id], CancellationToken.None);
+    using var deadline = new CancellationTokenSource(TestTimeout);
+    SessionSseEvent? replay;
+    do replay = (await page.ReadNextAsync(deadline.Token)).Event; while (replay?.Name != "tool-draft");
+    using JsonDocument document = JsonDocument.Parse(JsonSerializer.Serialize(replay.Data));
+    JsonElement data = document.RootElement;
+    Assert.Equal(session.Id, data.GetProperty("session").GetGuid());
+    Assert.Equal(sessions.BootId, data.GetProperty("boot").GetGuid());
+    Assert.Equal(executionId, data.GetProperty("executionId").GetGuid());
+    Assert.Equal(requestId, data.GetProperty("requestId").GetGuid());
+    Assert.Equal("drafted", data.GetProperty("state").GetString());
+    Assert.Equal(4402, data.GetProperty("argumentBytes").GetInt64());
+    Assert.Equal("[" + Emoji(255), data.GetProperty("head").GetString());
+    Assert.Equal(Emoji(767) + "]", data.GetProperty("tail").GetString());
+  }
+
+  [Fact]
   public async Task EventRoutesKeepTheBrowserGateAndBoundRegistrationSets() {
     using var database = new TemporaryDatabase();
     await using var server = new RunningServer(RunningServer.OptionsFor(database));

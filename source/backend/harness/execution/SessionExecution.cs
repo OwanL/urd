@@ -37,6 +37,7 @@ internal sealed class SessionExecution : IDisposable {
   private RequestContextEstimate? contextEstimate;
   private readonly CancellationTokenSource stop = new();
   private Task? stopCallbacks;
+  private ToolDraftBuffer? activeDrafts; // Protected by the draft gate, including at Stop.
   private readonly ManualCompactionRequest? manualCompactionRequest;
   private readonly string? compactionSkipReason;
   private const string NoCompactionCut = "No older history can be compacted without dropping recent context.";
@@ -86,7 +87,10 @@ internal sealed class SessionExecution : IDisposable {
   internal Task StopAsync() {
     if (stopCallbacks is not null)
       return stopCallbacks;
-    stopCallbacks = stop.CancelAsync();
+    lock (session.ToolDraftGate) {
+      stopCallbacks = stop.CancelAsync();
+      RetireDrafts();
+    }
     toolExecution.CancelBackgroundTools();
     return stopCallbacks;
   }
@@ -102,30 +106,41 @@ internal sealed class SessionExecution : IDisposable {
   // Called sequentially outside the session lock. Foreground calls join here;
   // registered background calls remain owned until the session drains them.
   internal async Task<ExecutionOutcome> RunRequestAsync(LlmRequest request) {
-    (LlmRequestResult result, IReadOnlyList<AIFunctionDeclaration> offeredTools, ContextStamp? stamp) =
-        await SendLlmRequestAsync(request);
-    // Retry only the rejected model exchange, never a tool or any observed partial output.
-    bool canCompactAndRetry = result.Failure == ProviderFailure.ContextWindowExceeded
-        && !result.OutputObserved && !IsStopping;
-    if (canCompactAndRetry && await recorder.CanRetryOverflowAsync(request.RequestId)) {
-      RetireContextEstimate();
-      try {
-        LlmRequest? reducedRequest = await CompactHistoryAsync(request.RequestId, CompactionReason.Overflow,
-            stamp: request.Stamp);
-        if (reducedRequest is null)
-          result = result with { Error = $"{NoCompactionCut} Shorten the input or use a larger-context model. ({result.Error})" };
-        else
-          (result, offeredTools, stamp) = await SendLlmRequestAsync(reducedRequest, allowAutomaticCompaction: false);
-      } catch (Exception failure) {
-        result = CreateRequestResult(request.RequestId, failure);
-      }
-    }
+    ToolDraftBuffer? drafts = CreateDrafts(request.RequestId);
+    LlmRequestResult result;
+    IReadOnlyList<AIFunctionDeclaration> offeredTools;
+    ContextStamp? stamp;
+    try {
+      (result, offeredTools, stamp) = await SendLlmRequestAsync(request, drafts);
+      if (result.Outcome != ExecutionOutcome.Completed)
+        RetireDrafts();
 
-    bool requestSaved = await recorder.CompleteRequestAsync(result);
-    if (!requestSaved)
-      return ExecutionOutcome.Cancelled;
-    if (result.Outcome != ExecutionOutcome.Completed)
-      return result.Outcome;
+      // Retry only the rejected model exchange, never a tool or any observed partial output.
+      bool canCompactAndRetry = result.Failure == ProviderFailure.ContextWindowExceeded
+          && !result.OutputObserved && !IsStopping;
+      if (canCompactAndRetry && await recorder.CanRetryOverflowAsync(request.RequestId)) {
+        RetireContextEstimate();
+        try {
+          LlmRequest? reducedRequest = await CompactHistoryAsync(request.RequestId, CompactionReason.Overflow,
+              stamp: request.Stamp);
+          if (reducedRequest is null) {
+            result = result with { Error = $"{NoCompactionCut} Shorten the input or use a larger-context model. ({result.Error})" };
+          } else {
+            drafts = CreateDrafts(request.RequestId);
+            (result, offeredTools, stamp) = await SendLlmRequestAsync(reducedRequest, drafts, allowAutomaticCompaction: false);
+          }
+        } catch (Exception failure) {
+          result = CreateRequestResult(request.RequestId, failure);
+        }
+      }
+
+      if (!await recorder.CompleteRequestAsync(result, drafts))
+        return ExecutionOutcome.Cancelled;
+      if (result.Outcome != ExecutionOutcome.Completed)
+        return result.Outcome;
+    } finally {
+      RetireDrafts();
+    }
 
     return await toolExecution.RunBatchAsync(request.RequestId, result.ToolCalls ?? [], offeredTools, stamp);
   }
@@ -375,7 +390,7 @@ internal sealed class SessionExecution : IDisposable {
   }
 
   private async Task<(LlmRequestResult Result, IReadOnlyList<AIFunctionDeclaration> OfferedTools, ContextStamp? Stamp)> SendLlmRequestAsync(
-      LlmRequest request, bool allowAutomaticCompaction = true) {
+      LlmRequest request, ToolDraftBuffer? drafts, bool allowAutomaticCompaction = true) {
     IChatClient client;
     IReadOnlyList<ChatMessage> messages;
     IReadOnlyList<AIFunctionDeclaration> offeredTools;
@@ -428,9 +443,12 @@ internal sealed class SessionExecution : IDisposable {
       Volatile.Write(ref contextEstimate, estimate);
       options.AdditionalProperties[RequestContextEstimate.PropertyName] = estimate;
     }
+    if (drafts is not null)
+      options.AdditionalProperties[ToolDraftBuffer.PropertyName] = drafts;
     LlmResponseRunner.Result response = await LlmResponseRunner.RunAsync(client, messages, options,
         request.RequestId, SaveChunkAsync,
-        (callId, name) => RecordToolCallAsync(request.RequestId, callId, name), stop.Token, contextEstimate: estimate);
+        (callId, name) => RecordToolCallAsync(request.RequestId, callId, name, drafts),
+        stop.Token, contextEstimate: estimate);
     LlmRequestResult result = CreateRequestResult(request.RequestId, response.Failure);
     return (result with {
       ToolCalls = result.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
@@ -463,8 +481,22 @@ internal sealed class SessionExecution : IDisposable {
   private Task SaveChunkAsync(LlmResponseChunk chunk) =>
     RequireSavedAsync(recorder.RecordOutputAsync(chunk), static failure => new OutputSaveException(failure));
 
-  private Task RecordToolCallAsync(Guid requestId, string callId, string? name) =>
-    RequireSavedAsync(recorder.RecordToolCallAsync(requestId, callId, name), static failure => new OutputSaveException(failure));
+  private ToolDraftBuffer? CreateDrafts(Guid requestId) {
+    lock (session.ToolDraftGate) {
+      return activeDrafts = session.Kind == SessionKind.Primary && !IsStopping
+          ? recorder.CreateToolDraftBuffer(requestId) : null;
+    }
+  }
+
+  private void RetireDrafts() {
+    lock (session.ToolDraftGate) {
+      activeDrafts?.Retire();
+      activeDrafts = null;
+    }
+  }
+
+  private Task RecordToolCallAsync(Guid requestId, string callId, string? name, ToolDraftBuffer? drafts) =>
+    RequireSavedAsync(recorder.RecordToolCallAsync(requestId, callId, name, drafts), static failure => new OutputSaveException(failure));
 
   private static async Task RequireSavedAsync(Task<bool> save, Func<Exception, Exception> wrapFailure) {
     bool saved;

@@ -93,6 +93,29 @@ public sealed class SessionEventQueueTests {
   }
 
   [Fact]
+  public async Task DraftsCoalescePerCallWithoutReplacingProgressAndAreRemovedOnUnwatch() {
+    var queue = new SessionEventQueue();
+    Guid session = Guid.NewGuid();
+    queue.Enqueue(new("tool-draft", session, new { text = "drafting" }, "first"));
+    queue.Enqueue(new("tool-draft", session, new { text = "other" }, "second"));
+    queue.Enqueue(Progress(session, "first", "running"));
+    queue.Enqueue(new("tool-draft", session, new { text = "promoted" }, "first"));
+
+    SessionSseRead first = await queue.ReadNextAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+    Assert.Equal("tool-draft", first.Event?.Name);
+    Assert.Equal("promoted", ReadText(first.Event!.Data));
+    SessionSseRead second = await queue.ReadNextAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+    Assert.Equal("other", ReadText(second.Event!.Data));
+    SessionSseRead third = await queue.ReadNextAsync(TimeSpan.FromSeconds(1), CancellationToken.None);
+    Assert.Equal("tool-progress", third.Event?.Name);
+    Assert.Equal("running", ReadText(third.Event!.Data));
+
+    queue.Enqueue(new("tool-draft", session, new { text = "discarded" }, "first"));
+    queue.RemoveSessionUpdates(session);
+    Assert.True((await queue.ReadNextAsync(TimeSpan.FromMilliseconds(20), CancellationToken.None)).Heartbeat);
+  }
+
+  [Fact]
   public async Task RemovingQueuedUpdatesLeavesHeartbeatWaitsUsable() {
     var queue = new SessionEventQueue();
     Guid session = Guid.NewGuid();

@@ -315,6 +315,10 @@ public abstract partial class SessionBase {
   // Live tool output is transient and only useful to currently watched sessions.
   internal void PublishToolProgress(ToolProgressUpdate progress) => notifications.PublishToolProgress(progress);
 
+  internal Lock ToolDraftGate => notifications.ToolDraftGate;
+  internal void PublishToolDraft(ToolDraftUpdate draft, Func<ToolDraftUpdate>? readLatest) =>
+      notifications.PublishToolDraft(draft, readLatest);
+
   // Completion and cancellation-failure notifications never start another driver or join themselves.
   internal async Task ReportToolOutcomeAsync(Guid executionId, Exception? failure = null) {
     using var _ = await sessionLock.AcquireAsync();
@@ -337,6 +341,7 @@ public abstract partial class SessionBase {
     Questions.FinishExecution(failedConversation: saved.Outcome == ExecutionOutcome.Failed && !execution.IsManualCompaction);
     execution.Release();
     activeExecution.Clear();
+    notifications.ClearToolDrafts();
     status.Settled(saved);
     PublishChange();
     TaskCompletionSource? wakeStart = saved.Outcome == ExecutionOutcome.Completed ? Questions.StartPendingQuestionRun() : null;

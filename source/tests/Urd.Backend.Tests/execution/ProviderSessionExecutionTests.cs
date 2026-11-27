@@ -34,7 +34,11 @@ public sealed class ProviderSessionExecutionTests {
   [InlineData(LlmApi.OpenAIChatCompletions, true)]
   public async Task ManagedToolLoopPersistsNativeContextAndReplaysItAfterReopening(LlmApi api, bool background) {
     using var database = new TemporaryDatabase();
-    using var first = new ScriptedOpenAIHandler(ToolResponse(api, background));
+    using var timeout = new CancellationTokenSource(TestTimeout);
+    TaskCompletionSource release = Signal();
+    bool omitCallItemDone = api == LlmApi.OpenAIResponses && !background;
+    string stream = ToolResponse(api, background, correction: api == LlmApi.OpenAIResponses, omitCallItemDone: omitCallItemDone);
+    using var first = new ScriptedOpenAIHandler(stream) { ReadGate = DraftGate(api, stream, release.Task) };
     using var done = new ScriptedOpenAIHandler(api == LlmApi.OpenAIResponses
         ? ProviderModelStreams.Responses([ProviderModelStreams.Message.Replace("hello", "done")], text: "done")
             .Replace("msg_fixture", "msg_done").Replace("resp_fixture", "resp_done")
@@ -76,7 +80,33 @@ public sealed class ProviderSessionExecutionTests {
       await fixture.OpenAsync(api, new ToolCatalog([lookup]));
       sessionId = fixture.Session.Id;
       connectionId = fixture.Connection.Id;
-      await fixture.SendAsync("go", supportsImages: true);
+      var changes = Channel.CreateUnbounded<ToolDraftUpdate>();
+      using var watcher = await WatchDrafts(fixture.Session, changes, timeout.Token);
+      var selection = new LlmSelection(fixture.Connection, "fixture-model", null, ModelFamily.Other, true);
+      UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", selection));
+      ToolDraftUpdate draft;
+      try {
+        draft = await AssertDraftAsync(api == LlmApi.OpenAIResponses ? "drafting" : "drafted", background,
+            receipt, changes, fixture.Session, timeout.Token, correction: api == LlmApi.OpenAIResponses);
+        Assert.Equal(0, effects);
+      } finally {
+        release.TrySetResult();
+      }
+      Assert.Equal(ExecutionOutcome.Completed, (await fixture.Session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value)
+          .WaitAsync(timeout.Token)).Outcome);
+      if (api == LlmApi.OpenAIResponses && !omitCallItemDone) {
+        await ReadDraftAsync(changes, "drafted", timeout.Token);
+        ToolDraftUpdate corrected = await ReadDraftAsync(changes, "drafted", timeout.Token);
+        Assert.Equal(draft.EntryId, corrected.EntryId);
+        Assert.Equal(background ? "{\"key\":\"abc\",\"background\":true}" : "{\"key\":\"abc\"}", corrected.Head + corrected.Tail);
+      }
+      if (omitCallItemDone)
+        Assert.Equal("stray", (await ReadDraftAsync(changes, "discarded", timeout.Token)).CallId);
+      ToolDraftUpdate promoted = await ReadDraftAsync(changes, "promoted", timeout.Token);
+      Assert.Equal(draft.EntryId, promoted.EntryId);
+      if (omitCallItemDone) Assert.Equal("{\"key\":\"abc\"}", promoted.Head + promoted.Tail);
+      TranscriptHistoryPage history = await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
+      Assert.Equal(draft.EntryId, Assert.Single(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Tool).Entry.EntryId);
 
       Assert.Equal(2, providerCalls);
       Assert.Equal(1, effects);
@@ -135,6 +165,91 @@ public sealed class ProviderSessionExecutionTests {
           2 or 3 => doneTransport.SendAsync(request, token),
           _ => throw new InvalidOperationException("Unexpected provider request.")
         };
+  }
+
+  [Fact]
+  public async Task ChatCompletionsInterleavedToolDraftsStayDraftingUntilFinish() {
+    using var database = new TemporaryDatabase();
+    using var timeout = new CancellationTokenSource(TestTimeout);
+    TaskCompletionSource release = Signal();
+    string Chunk(object delta, string? finishReason = null) => "data: " + JsonSerializer.Serialize(new {
+      id = "chatcmpl_fixture", @object = "chat.completion.chunk", created = 1700000000, model = "fixture-model",
+      choices = new[] { new { index = 0, delta, finish_reason = finishReason } }
+    }) + "\n\n";
+    string finish = Chunk(new Dictionary<string, object?>(), "tool_calls");
+    string stream = Chunk(new { role = "assistant", content = "hello" }) +
+        Chunk(new { tool_calls = new[] { new { index = 0, id = "call_first", type = "function",
+          function = new { name = "lookup", arguments = "{\"key\":\"first" } } } }) +
+        Chunk(new { tool_calls = new[] { new { index = 1, id = "call_second", type = "function",
+          function = new { name = "lookup", arguments = "{\"key\":\"second" } } } }) +
+        Chunk(new { tool_calls = new[] { new { index = 0, function = new { arguments = "\"}" } } } }) +
+        Chunk(new { tool_calls = new[] { new { index = 1, function = new { arguments = "\"}" } } } }) +
+        finish + "data: [DONE]\n\n";
+    int finishOffset = stream.IndexOf(finish, StringComparison.Ordinal);
+    using var first = new ScriptedOpenAIHandler(stream) {
+      ReadGate = (Encoding.UTF8.GetByteCount(stream.AsSpan(0, finishOffset)), release.Task)
+    };
+    using var done = new ScriptedOpenAIHandler(OpenAIStreams.ChatStream());
+    using var firstTransport = new HttpMessageInvoker(first, disposeHandler: false);
+    using var doneTransport = new HttpMessageInvoker(done, disposeHandler: false);
+    int providerCalls = 0, effects = 0;
+    var handler = new ControlledProviderHandler((request, cancellation) =>
+        Interlocked.Increment(ref providerCalls) == 1
+            ? firstTransport.SendAsync(request, cancellation)
+            : doneTransport.SendAsync(request, cancellation));
+    AIFunction lookup = AIFunctionFactory.Create((string key) => {
+      Assert.Contains(key, new[] { "first", "second" });
+      Interlocked.Increment(ref effects);
+      return key;
+    }, name: "lookup");
+
+    await using var fixture = new ManagedSession(database, handler);
+    await fixture.OpenAsync(LlmApi.OpenAIChatCompletions, [lookup]);
+    var changes = Channel.CreateUnbounded<ToolDraftUpdate>();
+    using var watcher = await WatchDrafts(fixture.Session, changes, timeout.Token);
+    var selection = new LlmSelection(fixture.Connection, "fixture-model", null, ModelFamily.Other, false);
+    UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "go", selection));
+    var beforeFinish = new Dictionary<string, ToolDraftUpdate>(StringComparer.Ordinal);
+    try {
+      while (beforeFinish.Count < 2) {
+        ToolDraftUpdate draft = await ReadDraftAsync(changes, "drafting", timeout.Token);
+        beforeFinish[draft.CallId] = draft;
+      }
+      Assert.Equal(new[] { "call_first", "call_second" }, beforeFinish.Keys.Order(StringComparer.Ordinal));
+      Assert.Equal("{\"key\":\"first", beforeFinish["call_first"].Head + beforeFinish["call_first"].Tail);
+      Assert.Equal("{\"key\":\"second", beforeFinish["call_second"].Head + beforeFinish["call_second"].Tail);
+      await Task.Delay(TimeSpan.FromMilliseconds(200), timeout.Token);
+      while (changes.Reader.TryRead(out var update)) {
+        Assert.Equal("drafting", update.State);
+        beforeFinish[update.CallId] = update;
+      }
+      Assert.Equal(0, effects);
+    } finally {
+      release.TrySetResult();
+    }
+
+    Assert.Equal(ExecutionOutcome.Completed, (await fixture.Session.WaitForExecutionFinishAsync(
+        Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(timeout.Token)).Outcome);
+    Assert.Equal(2, effects);
+    var drafted = new Dictionary<string, ToolDraftUpdate>(StringComparer.Ordinal);
+    while (drafted.Count < 2) {
+      ToolDraftUpdate update = await ReadDraftAsync(changes, "drafted", timeout.Token);
+      drafted[update.CallId] = update;
+    }
+    foreach (string callId in beforeFinish.Keys) {
+      Assert.Equal(beforeFinish[callId].EntryId, drafted[callId].EntryId);
+      Assert.Equal(callId == "call_first" ? "{\"key\":\"first\"}" : "{\"key\":\"second\"}",
+          drafted[callId].Head + drafted[callId].Tail);
+    }
+    var promoted = new Dictionary<string, ToolDraftUpdate>(StringComparer.Ordinal);
+    while (promoted.Count < 2) {
+      ToolDraftUpdate update = await ReadDraftAsync(changes, "promoted", timeout.Token);
+      promoted[update.CallId] = update;
+    }
+    foreach (string callId in beforeFinish.Keys)
+      Assert.Equal(beforeFinish[callId].EntryId, promoted[callId].EntryId);
+    TranscriptHistoryPage history = await fixture.Session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0));
+    Assert.Equal(2, history.Entries.Count(entry => entry.Entry.Kind == TranscriptEntryKind.Tool));
   }
 
   [Fact]
@@ -466,10 +581,16 @@ public sealed class ProviderSessionExecutionTests {
   [Theory]
   [InlineData(LlmApi.OpenAIResponses)]
   [InlineData(LlmApi.OpenAIChatCompletions)]
-  public async Task TransportFailureAfterNativeToolFinishWithholdsEffectsAndContext(LlmApi api) {
+  [InlineData(LlmApi.OpenAIResponses, true)]
+  public async Task TransportFailureOrStopWithholdsEffectsAndContext(LlmApi api, bool stop = false) {
     using var database = new TemporaryDatabase();
     // Chat's [DONE] would let the SDK stop without observing the failing stream tail.
-    var handler = new ScriptedOpenAIHandler(ToolResponse(api).Replace("data: [DONE]\n\n", "")) { FailAtEnd = true };
+    using var timeout = new CancellationTokenSource(TestTimeout);
+    TaskCompletionSource release = Signal();
+    string stream = ToolResponse(api).Replace("data: [DONE]\n\n", "");
+    var handler = new ScriptedOpenAIHandler(stream) {
+      ReadGate = DraftGate(api, stream, release.Task, argumentsDone: true), FailAtEnd = true
+    };
     int effects = 0;
     AIFunction lookup = AIFunctionFactory.Create((string key) => Interlocked.Increment(ref effects), name: "lookup");
     Guid sessionId;
@@ -479,16 +600,31 @@ public sealed class ProviderSessionExecutionTests {
       await fixture.OpenAsync(api, [lookup]);
       sessionId = fixture.Session.Id;
       connectionId = fixture.Connection.Id;
+      var changes = Channel.CreateUnbounded<ToolDraftUpdate>();
+      using var watcher = await WatchDrafts(fixture.Session, changes, timeout.Token);
       var selection = new LlmSelection(fixture.Connection, "fixture-model", null, ModelFamily.Other, false);
       UserMessageReceipt receipt = await fixture.Session.SubmitUserMessageAsync(
           new(Guid.NewGuid(), 0, "go", selection));
       Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
       Guid executionId = Assert.IsType<Guid>(receipt.ExecutionId);
+      ToolDraftUpdate draft;
+      try {
+        draft = await ReadDraftAsync(changes, "drafted", timeout.Token);
+        Assert.Equal(0, effects);
+        if (stop) {
+          await fixture.Session.RequestStopAsync(executionId).WaitAsync(timeout.Token);
+          Assert.True(changes.Reader.TryPeek(out var next) && next.State == "discarded");
+        }
+      } finally {
+        release.TrySetResult();
+      }
       settlement = await fixture.Session.WaitForExecutionFinishAsync(executionId).WaitAsync(TestTimeout);
+      ToolDraftUpdate discarded = await ReadDraftAsync(changes, "discarded", timeout.Token);
+      Assert.Equal(draft.EntryId, discarded.EntryId);
 
-      Assert.Equal(ExecutionOutcome.Failed, settlement.Outcome);
-      Assert.Equal("ProviderUnavailable (IOException)", settlement.Error);
-      Assert.DoesNotContain("Synthetic private provider transport details", settlement.Error!, StringComparison.Ordinal);
+      Assert.False(changes.Reader.TryRead(out _));
+      Assert.Equal(stop ? ExecutionOutcome.Cancelled : ExecutionOutcome.Failed, settlement.Outcome);
+      Assert.Equal(stop ? null : "ProviderUnavailable (IOException)", settlement.Error);
       Assert.Equal(0, effects);
       Assert.Single(handler.Requests);
       Assert.Equal(1, handler.StreamDisposals);
@@ -502,6 +638,7 @@ public sealed class ProviderSessionExecutionTests {
       TranscriptHistoryPage history = await fixture.Session.Transcript.ReadHistoryAsync(
           new(TranscriptHistoryMode.Latest, snapshot.HistoryRevision));
       Assert.Equal(settlement, Assert.Single(history.Settlements));
+      Assert.DoesNotContain(history.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Tool);
     }
 
     using var reopenedHandler = new ScriptedOpenAIHandler("");
@@ -634,15 +771,77 @@ public sealed class ProviderSessionExecutionTests {
     Assert.DoesNotContain("session-id", request.Body, StringComparison.OrdinalIgnoreCase);
   }
 
-  private static string ToolResponse(LlmApi api, bool background = false) {
+  private static string ToolResponse(LlmApi api, bool background = false, bool correction = false,
+      bool omitCallItemDone = false) {
     string arguments = background ? "{\"key\":\"abc\",\"background\":true}" : "{\"key\":\"abc\"}";
+    if (api == LlmApi.OpenAIChatCompletions)
+      return ProviderModelStreams.ChatCalls(reasoning: true, arguments: arguments);
     JsonObject call = JsonNode.Parse(ProviderModelStreams.Call)!.AsObject();
     call["arguments"] = arguments;
-    return api == LlmApi.OpenAIResponses
-        ? ProviderModelStreams.Responses([ProviderModelStreams.Message,
-            ProviderModelStreams.Reasoning.Replace("\"summary\":[]", "\"summary\":[{\"type\":\"summary_text\",\"text\":\"thought\"}]"),
-            call.ToJsonString()])
-        : ProviderModelStreams.ChatCalls(reasoning: true, arguments: arguments);
+    string stream = ProviderModelStreams.Responses([ProviderModelStreams.Message,
+        ProviderModelStreams.Reasoning.Replace("\"summary\":[]", "\"summary\":[{\"type\":\"summary_text\",\"text\":\"thought\"}]"),
+        call.ToJsonString()], itemDone: !omitCallItemDone,
+        toolArgumentDelta: correction ? arguments.Replace("abc", "wrong") : arguments);
+    JsonObject added = (JsonObject)call.DeepClone();
+    added["status"] = "in_progress";
+    added["arguments"] = "";
+    string delta = "event: response.function_call_arguments.delta";
+    stream = stream.Replace(delta, OpenAIStreams.Event("response.output_item.added", new {
+      type = "response.output_item.added", sequence_number = 2, output_index = 2, item = added
+    }) + delta);
+    int firstDone = stream.IndexOf(omitCallItemDone ? "event: response.completed" : "event: response.output_item.done",
+        StringComparison.Ordinal);
+    stream = stream.Insert(firstDone, OpenAIStreams.Event("response.function_call_arguments.done", new {
+      type = "response.function_call_arguments.done", sequence_number = 4, item_id = "fc_fixture", output_index = 2,
+      arguments = correction ? arguments.Replace("abc", "wrong") : arguments
+    }));
+    if (omitCallItemDone)
+      stream = stream.Replace("event: response.completed", OpenAIStreams.Event("response.output_item.added", new {
+        type = "response.output_item.added", sequence_number = 5, output_index = 3,
+        item = new { type = "function_call", id = "fc_stray", status = "in_progress", call_id = "stray", name = "lookup", arguments = "{}" }
+      }) + "event: response.completed");
+    return stream;
+  }
+
+  private static (int, Task) DraftGate(LlmApi api, string stream, Task release, bool argumentsDone = false) {
+    string marker = api != LlmApi.OpenAIResponses ? "data: [DONE]"
+        : ResponseDraftGateMarker(argumentsDone);
+    int offset = stream.IndexOf(marker, StringComparison.Ordinal);
+    if (offset < 0 && api == LlmApi.OpenAIChatCompletions) offset = stream.Length;
+    Assert.True(offset > 0);
+    return (Encoding.UTF8.GetByteCount(stream.AsSpan(0, offset)), release);
+  }
+
+  private static string ResponseDraftGateMarker(bool argumentsDone) =>
+      argumentsDone ? "event: response.output_item.done" : "event: response.function_call_arguments.done";
+
+  private static Task<IDisposable> WatchDrafts(PrimarySession session, Channel<ToolDraftUpdate> changes, CancellationToken cancellation) =>
+      session.SubscribeAsync(change => {
+        if (change.ToolDraft is { } draft) changes.Writer.TryWrite(draft);
+      }, watched: true, cancellation);
+
+  private static async Task<ToolDraftUpdate> ReadDraftAsync(Channel<ToolDraftUpdate> changes, string state,
+      CancellationToken cancellation) {
+    ToolDraftUpdate draft;
+    do draft = await changes.Reader.ReadAsync(cancellation); while (draft.State != state || draft.ArgumentBytes == 0);
+    return draft;
+  }
+
+  private static async Task<ToolDraftUpdate> AssertDraftAsync(string state, bool background, UserMessageReceipt receipt,
+      Channel<ToolDraftUpdate> changes, PrimarySession session, CancellationToken cancellation, bool correction = false) {
+    string arguments = background ? "{\"key\":\"abc\",\"background\":true}" : "{\"key\":\"abc\"}";
+    if (correction) arguments = arguments.Replace("abc", "wrong");
+    ToolDraftUpdate draft = await ReadDraftAsync(changes, state, cancellation);
+    Assert.Equal(receipt.ExecutionId, draft.ExecutionId);
+    Assert.Equal("call_fixture", draft.CallId);
+    Assert.Equal("lookup", draft.Name);
+    Assert.Equal(0, draft.Order);
+    Assert.Equal(Encoding.UTF8.GetByteCount(arguments), draft.ArgumentBytes);
+    Assert.Equal(arguments, draft.Head + draft.Tail);
+    Assert.Equal(background ? "background" : "key", draft.Field);
+    TranscriptHistoryPage before = await session.Transcript.ReadHistoryAsync(new(TranscriptHistoryMode.Latest, 0), cancellation);
+    Assert.DoesNotContain(before.Entries, entry => entry.Entry.Kind == TranscriptEntryKind.Tool);
+    return draft;
   }
 
   // Inspect the actual SDK request, not a reconstructed context or another serialization pass.

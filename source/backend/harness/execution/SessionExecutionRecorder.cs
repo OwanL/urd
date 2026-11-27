@@ -84,16 +84,34 @@ internal sealed class SessionExecutionRecorder(SessionBase session, UrdStore sto
     return true;
   }
 
-  internal Task<bool> RecordToolCallAsync(Guid requestId, string callId, string? name) =>
-    RecordChangeAsync(() => store.LlmResponses.RecordToolCall(Identity, requestId, callId, name),
-      afterSave: imageImports.CloseResponse);
+  internal async Task<bool> RecordToolCallAsync(Guid requestId, string callId, string? name, ToolDraftBuffer? drafts = null) {
+    using var _ = await sessionLock.AcquireAsync();
+    if (!session.CanRecordExecution(Identity))
+      return false;
 
-  internal Task<bool> CompleteRequestAsync(LlmRequestResult outcome) =>
+    Guid? entryId = drafts?.FindEntryId(callId);
+    if (session.WriteToStore(() => store.LlmResponses.RecordToolCall(Identity, requestId, callId, name, entryId))
+        is not { } reservedId)
+      return false;
+
+    // Stop takes this same lock, so it cannot retire a draft between commit and promotion.
+    if (drafts is not null && reservedId == entryId)
+      drafts.Promote(reservedId);
+    imageImports.CloseResponse();
+    session.PublishChange();
+    return true;
+  }
+
+  internal Task<bool> CompleteRequestAsync(LlmRequestResult outcome, ToolDraftBuffer? drafts = null) =>
     RecordChangeAsync(() => store.LlmResponses.CompleteRequest(Identity, outcome),
       allowStopping: outcome.Outcome != ExecutionOutcome.Completed, afterSave: () => {
         session.CurrentExecution!.RetireContextEstimate();
+        drafts?.Retire();
         imageImports.CloseResponse();
       });
+
+  internal ToolDraftBuffer CreateToolDraftBuffer(Guid requestId) =>
+      new(Identity.ExecutionId, requestId, session.ToolDraftGate, session.PublishToolDraft);
 
   internal async Task PublishContextEstimateAsync(RequestContextEstimate estimate, CancellationToken cancellation) {
     using var _ = await sessionLock.AcquireAsync(cancellation);

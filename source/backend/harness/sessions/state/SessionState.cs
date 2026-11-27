@@ -8,6 +8,7 @@ namespace Urd.Core.Sessions;
 public sealed record SessionChange([property: JsonPropertyName("session")] Guid SessionId, long Version,
     string? Status = null, string? Title = null,
     [property: JsonPropertyName("toolProgress")] ToolProgressUpdate? ToolProgress = null,
+    [property: JsonPropertyName("toolDraft")] ToolDraftUpdate? ToolDraft = null,
     bool HasPendingUserQuestion = false);
 
 // Transient output for one running tool call. A null Text clears its displayed progress.

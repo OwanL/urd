@@ -8,6 +8,11 @@ namespace Urd.Core.Sessions;
 // Subscriptions may be disposed anywhere. Observers enqueue into bounded server queues, not block delivery.
 internal sealed class SessionNotifications(Guid sessionId) {
   private readonly ConcurrentDictionary<long, SessionObserver> observers = new();
+  private readonly Dictionary<string, (ToolDraftUpdate Published, Func<ToolDraftUpdate>? ReadLatest)> drafts =
+      new(StringComparer.Ordinal);
+  private (Guid Execution, Guid Request) draftRequest;
+  // The buffer and replay share this gate so replay can read text that has not been broadcast yet.
+  internal Lock ToolDraftGate { get; } = new();
   private long version;
   private long nextObserverId;
   private string? currentStatus;
@@ -21,10 +26,17 @@ internal sealed class SessionNotifications(Guid sessionId) {
     hasPendingUserQuestion = pendingUserQuestion;
     long observerId = Interlocked.Increment(ref nextObserverId);
     var subscription = new SessionObserver(observer, watched, () => observers.TryRemove(observerId, out _));
-    observers.TryAdd(observerId, subscription);
-    subscription.Notify(new SessionChange(sessionId, version, status, title, HasPendingUserQuestion: pendingUserQuestion));
-    if (watched)
+    lock (ToolDraftGate) {
+      observers.TryAdd(observerId, subscription);
+      subscription.Notify(new SessionChange(sessionId, version, status, title, HasPendingUserQuestion: pendingUserQuestion));
+      if (!watched)
+        return subscription;
+
       subscription.Notify(new SessionChange(sessionId, version));
+      foreach (var draft in drafts.Values.Select(value => value.ReadLatest?.Invoke() ?? value.Published)
+          .OrderBy(draft => draft.Order))
+        subscription.Notify(new SessionChange(sessionId, version, ToolDraft: draft));
+    }
     return subscription;
   }
 
@@ -46,7 +58,34 @@ internal sealed class SessionNotifications(Guid sessionId) {
     }
   }
 
+  internal void PublishToolDraft(ToolDraftUpdate draft, Func<ToolDraftUpdate>? readLatest) {
+    lock (ToolDraftGate) {
+      // A retry can share the request ID, but its first live draft replaces the old tombstones.
+      if (draftRequest != (draft.ExecutionId, draft.RequestId)
+          || (draft.State is "drafting" or "drafted" && drafts.Values.All(value => value.Published.State == "discarded"))) {
+        drafts.Clear();
+        draftRequest = (draft.ExecutionId, draft.RequestId);
+      }
+      drafts[draft.CallId] = (draft, readLatest);
+      if (observers.IsEmpty)
+        return;
+      SessionChange? change = null;
+      foreach (SessionObserver observer in observers.Values) {
+        if (!observer.Watched)
+          continue;
+        change ??= new SessionChange(sessionId, Volatile.Read(ref version), ToolDraft: readLatest?.Invoke() ?? draft);
+        observer.Notify(change);
+      }
+    }
+  }
+
+  internal void ClearToolDrafts() {
+    lock (ToolDraftGate)
+      drafts.Clear();
+  }
+
   internal void Close() {
+    ClearToolDrafts();
     version = checked(version + 1);
     var unavailable = new SessionChange(sessionId, version, "unavailable");
     foreach (SessionObserver observer in observers.Values) {

@@ -9,13 +9,15 @@ internal sealed class SessionEventQueue {
   internal const int MaxOpenSessions = 128;
   internal const int MaxCreations = 128;
   internal const int MaxProgressEvents = MaxOpenSessions;
-  private const int MaxPendingEvents = MaxOpenSessions * 3 + MaxCreations + MaxProgressEvents;
+  private const int MaxDraftEvents = MaxOpenSessions * Urd.Core.Execution.ToolDraftBuffer.CallLimit;
+  private const int MaxPendingEvents = MaxOpenSessions * 3 + MaxCreations + MaxProgressEvents + MaxDraftEvents;
   private readonly object gate = new();
   private readonly LinkedList<SessionSseEvent> pending = new();
   private readonly Dictionary<EventKey, LinkedListNode<SessionSseEvent>> byKey = new();
   private TaskCompletionSource changed = NewSignal();
   private int pendingCreations;
   private int pendingProgressEvents;
+  private int pendingDraftEvents;
   private bool closed;
 
   internal bool IsClosed {
@@ -38,10 +40,14 @@ internal sealed class SessionEventQueue {
 
       bool creation = message.Name == "session-created";
       bool progress = message.Name == "tool-progress";
+      bool draft = message.Name == "tool-draft";
       if (progress && (pendingProgressEvents == MaxProgressEvents || pending.Count == MaxPendingEvents)
           && !RemoveOldestProgressLocked())
         return true;
-      if ((creation && pendingCreations == MaxCreations) || pending.Count == MaxPendingEvents) {
+      // Drafts include terminal updates: losing one can leave a stale row on the client.
+      // Reconnect instead of evicting a draft when its separate quota is exhausted.
+      if ((creation && pendingCreations == MaxCreations) || (draft && pendingDraftEvents == MaxDraftEvents)
+          || pending.Count == MaxPendingEvents) {
         CloseLocked();
         return false;
       }
@@ -51,6 +57,8 @@ internal sealed class SessionEventQueue {
         pendingCreations++;
       if (progress)
         pendingProgressEvents++;
+      if (draft)
+        pendingDraftEvents++;
       changed.TrySetResult();
       changed = NewSignal();
       return true;
@@ -63,10 +71,12 @@ internal sealed class SessionEventQueue {
       LinkedListNode<SessionSseEvent>? node = pending.First;
       while (node is not null) {
         LinkedListNode<SessionSseEvent>? next = node.Next;
-        if (node.Value.Session == sessionId && node.Value.Name is "status" or "change" or "browser" or "tool-progress") {
+        if (node.Value.Session == sessionId && node.Value.Name is "status" or "change" or "browser" or "tool-progress" or "tool-draft") {
           byKey.Remove(new EventKey(node.Value.Name, sessionId, node.Value.CoalesceKey));
           if (node.Value.Name == "tool-progress")
             pendingProgressEvents--;
+          if (node.Value.Name == "tool-draft")
+            pendingDraftEvents--;
           pending.Remove(node);
           removed = true;
         }
@@ -93,6 +103,8 @@ internal sealed class SessionEventQueue {
             pendingCreations--;
           if (message.Name == "tool-progress")
             pendingProgressEvents--;
+          if (message.Name == "tool-draft")
+            pendingDraftEvents--;
           return new(message, false, false);
         }
         signal = changed.Task;
@@ -119,6 +131,7 @@ internal sealed class SessionEventQueue {
     byKey.Clear();
     pendingCreations = 0;
     pendingProgressEvents = 0;
+    pendingDraftEvents = 0;
     changed.TrySetResult();
   }
 

@@ -66,9 +66,11 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       ChatOptions wireOptions;
       LlmProviderScope scope;
       RequestContextEstimate? estimate;
+      ToolDraftBuffer? drafts;
       try {
         cancellationToken.ThrowIfCancellationRequested();
         estimate = TakeContextEstimate(ref options);
+        drafts = TakeToolDraftBuffer(ref options);
         wireOptions = ProviderModelOptions.Prepare(state.Connection, options);
         scope = new(state.Connection.Id, state.Generation, state.Connection.Api, options.ModelId!);
         IReadOnlyList<ChatMessage>? input = estimate is null ? null : messages as IReadOnlyList<ChatMessage> ?? messages.ToArray();
@@ -96,7 +98,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
 
       using (client) {
         var guard = new ProviderStreamState(scope, options.Tools, state.Connection.Route == ProviderRoute.ChatGpt,
-            state.Credentials);
+            state.Credentials, drafts);
         IAsyncEnumerator<ChatResponseUpdate> stream;
         try {
           stream = client.GetStreamingResponseAsync(history, wireOptions, progress.Token).GetAsyncEnumerator(progress.Token);
@@ -201,6 +203,16 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
     options.AdditionalProperties = new(options.AdditionalProperties!);
     options.AdditionalProperties.Remove(ChatGptSocketRun.PropertyName);
     return value as ChatGptSocketRun;
+  }
+
+  private static ToolDraftBuffer? TakeToolDraftBuffer(ref ChatOptions options) {
+    if (options.AdditionalProperties?.TryGetValue(ToolDraftBuffer.PropertyName, out object? value) != true)
+      return null;
+
+    options = options.Clone();
+    options.AdditionalProperties = new(options.AdditionalProperties!);
+    options.AdditionalProperties.Remove(ToolDraftBuffer.PropertyName);
+    return value as ToolDraftBuffer;
   }
 
   private static RequestContextEstimate? TakeContextEstimate(ref ChatOptions options) {

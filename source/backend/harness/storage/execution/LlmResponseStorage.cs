@@ -80,12 +80,15 @@ internal sealed class LlmResponseStorage(Database database) {
 
   // A provider-observed boundary closes the current text run and reserves a display entry,
   // but it does not authorize execution or persist any arguments.
-  internal bool RecordToolCall(ExecutionIdentity execution, Guid requestId, string callId, string? name) {
+  internal bool RecordToolCall(ExecutionIdentity execution, Guid requestId, string callId, string? name) =>
+      RecordToolCall(execution, requestId, callId, name, entryId: null) is not null;
+
+  internal Guid? RecordToolCall(ExecutionIdentity execution, Guid requestId, string callId, string? name, Guid? entryId) {
     ArgumentException.ThrowIfNullOrWhiteSpace(callId);
     if (name is not null && string.IsNullOrWhiteSpace(name))
       throw new ArgumentException("A tool name must be nonempty when supplied.", nameof(name));
 
-    return database.Write(transaction => {
+    return database.Write<Guid?>(transaction => {
       bool allowed = database.Scalar<bool>(transaction, $"""
         SELECT EXISTS (SELECT 1 FROM execution_requests q
             JOIN execution_runs r ON r.run_id = q.run_id JOIN sessions s ON s.session_id = r.session_id
@@ -95,23 +98,23 @@ internal sealed class LlmResponseStorage(Database database) {
                     WHERE later.run_id = $run AND later.request_index > q.request_index));
         """, ExecutionSql.Parameters(execution, ("$request", requestId)));
       if (!allowed)
-        return false;
+        return null;
 
       var existing = database.Query(transaction, $"""
-        SELECT tool_name FROM execution_messages
+        SELECT message_id, tool_name FROM execution_messages
         WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Tool} AND call_id = $call;
-        """, row => row.NullableString("tool_name"), ("$request", requestId), ("$call", callId));
+        """, row => (row.Guid("message_id"), row.NullableString("tool_name")), ("$request", requestId), ("$call", callId));
       if (existing.Count != 0) {
-        string? savedName = existing[0];
+        (Guid savedId, string? savedName) = existing[0];
         if (savedName is not null && name is not null && savedName != name)
-          return false;
+          return null;
         if (savedName is null && name is not null) {
           database.Execute(transaction, $"""
             UPDATE execution_messages SET tool_name = $name
             WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Tool} AND call_id = $call AND tool_name IS NULL;
             """, ("$name", name), ("$request", requestId), ("$call", callId));
         }
-        return true;
+        return savedId;
       }
 
       database.Execute(transaction, $"""
@@ -120,14 +123,9 @@ internal sealed class LlmResponseStorage(Database database) {
         WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Text} AND end_chunk_index IS NULL;
         """, ("$request", requestId));
 
-      database.Execute(transaction, $"""
-        INSERT INTO execution_messages (
-            session_id, history_revision, run_id, role, message_id, request_id, created_at, call_id, tool_name)
-        VALUES ($session, $revision, $run, {(int)TranscriptEntryKind.Tool}, $entry, $request, $created, $call, $name);
-        """, ExecutionSql.Parameters(execution,
-          ("$entry", Guid.NewGuid()), ("$request", requestId), ("$created", StorageText.UtcTimestamp()),
-          ("$call", callId), ("$name", name)));
-      return true;
+      Guid reservedId = entryId ?? Guid.NewGuid();
+      ReserveCall(transaction, execution, requestId, callId, name, reservedId);
+      return reservedId;
     });
   }
 
@@ -208,7 +206,7 @@ internal sealed class LlmResponseStorage(Database database) {
           WHERE request_id = $request AND role = {(int)TranscriptEntryKind.Tool} AND call_id = $call;
           """, ("$name", call.Name), ("$request", completion.RequestId), ("$call", call.CallId));
       } else {
-        ReserveCompletedCall(transaction, execution, completion.RequestId, call.CallId, call.Name);
+        ReserveCall(transaction, execution, completion.RequestId, call.CallId, call.Name);
       }
 
       database.Execute(transaction, """
@@ -238,14 +236,14 @@ internal sealed class LlmResponseStorage(Database database) {
     return true;
   }
 
-  private void ReserveCompletedCall(SqliteTransaction transaction, ExecutionIdentity execution,
-      Guid requestId, string callId, string name) {
+  private void ReserveCall(SqliteTransaction transaction, ExecutionIdentity execution,
+      Guid requestId, string callId, string? name, Guid? entryId = null) {
     database.Execute(transaction, $"""
       INSERT INTO execution_messages (
           session_id, history_revision, run_id, role, message_id, request_id, created_at, call_id, tool_name)
       VALUES ($session, $revision, $run, {(int)TranscriptEntryKind.Tool}, $entry, $request, $created, $call, $name);
       """, ExecutionSql.Parameters(execution,
-        ("$entry", Guid.NewGuid()), ("$request", requestId), ("$created", StorageText.UtcTimestamp()),
+        ("$entry", entryId ?? Guid.NewGuid()), ("$request", requestId), ("$created", StorageText.UtcTimestamp()),
         ("$call", callId), ("$name", name)));
   }
 

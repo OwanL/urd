@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.AI;
 using OpenAI.Chat;
 using OpenAI.Responses;
+using Urd.Core.Execution;
 using ChatFinishReason = Microsoft.Extensions.AI.ChatFinishReason;
 using ChatMessage = Microsoft.Extensions.AI.ChatMessage;
 
@@ -13,11 +14,12 @@ namespace Urd.Core.Providers;
 
 // Bounded completed state, never a transcript of streaming updates. Native terminals authorize completion.
 internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AITool>? tools, bool isChatGpt,
-    ProviderCredentials? credentials) {
+    ProviderCredentials? credentials, ToolDraftBuffer? drafts = null) {
   private readonly HashSet<string> allowedFunctions = tools?.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal) ?? [];
   private readonly SortedDictionary<int, string> completedItems = [];
   private readonly HashSet<int> chatCallIndexes = [];
   private readonly List<FunctionCallContent> chatCalls = [];
+  private readonly ProviderToolDraftCapture? draftCapture = drafts is null ? null : new(drafts);
   private readonly StringBuilder text = new();
   private readonly StringBuilder reasoning = new();
   private ResponseItem[]? output;
@@ -92,12 +94,22 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
             failed.Response?.Error?.Param);
       case StreamingResponseErrorUpdate error:
         throw StreamFailure(error.Code, error.Message, error.Param);
+      case StreamingResponseOutputItemAddedUpdate added:
+        draftCapture?.Added(added.OutputIndex, added.Item);
+        break;
+      case StreamingResponseFunctionCallArgumentsDeltaUpdate delta:
+        draftCapture?.Delta(delta);
+        break;
+      case StreamingResponseFunctionCallArgumentsDoneUpdate argumentsDone:
+        draftCapture?.ArgumentsDone(argumentsDone);
+        break;
       case StreamingResponseOutputItemDoneUpdate done:
         ValidateItem(done.Item);
         string encoded = Encode(done.Item);
         completedBytes = Add(completedBytes, Encoding.UTF8.GetByteCount(encoded), "completed output size limit exceeded");
         if (done.OutputIndex < 0) throw Invalid("negative output item index");
         if (!completedItems.TryAdd(done.OutputIndex, encoded)) throw Invalid("duplicate output item index");
+        draftCapture?.ItemDone(done.OutputIndex, done.Item);
         break;
       case null:
         throw Invalid("missing native response update");
@@ -128,6 +140,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
       argumentBytes = Add(argumentBytes, call.FunctionArgumentsUpdate?.ToMemory().Length ?? 0, "tool call size limit exceeded");
       argumentBytes = Add(argumentBytes, Encoding.UTF8.GetByteCount(call.ToolCallId ?? "") + Encoding.UTF8.GetByteCount(call.FunctionName ?? ""),
           "tool call size limit exceeded");
+      draftCapture?.ChatDelta(call.Index, call.ToolCallId, call.FunctionName, call.FunctionArgumentsUpdate?.ToMemory() ?? default);
     }
     if (native.FinishReason is not { } finish) return;
     if (finish == OpenAI.Chat.ChatFinishReason.Length) {
@@ -136,6 +149,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
     }
     if (finish != OpenAI.Chat.ChatFinishReason.Stop && finish != OpenAI.Chat.ChatFinishReason.ToolCalls)
       throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
+    draftCapture?.ChatFinish();
     toolFinish = finish == OpenAI.Chat.ChatFinishReason.ToolCalls;
     terminal = update;
   }
@@ -191,6 +205,7 @@ internal sealed class ProviderStreamState(LlmProviderScope scope, IEnumerable<AI
       FinishReason = calls.Count > 0 ? ChatFinishReason.ToolCalls : ChatFinishReason.Stop
     };
     LlmProviderContext.SetResponse(final, response);
+    drafts?.Reconcile(calls);
     return final;
   }
 

@@ -33,6 +33,7 @@ export class MarkdownWindowSurface {
   private published: {
     snapshot: MarkdownRenderSnapshot;
     imageLoader: MarkdownImageLoader | null;
+    closed: boolean;
   } | null = null;
   private lastScrollTop: number | null = null;
 
@@ -143,11 +144,12 @@ export class MarkdownWindowSurface {
     snapshot: MarkdownRenderSnapshot,
     anchor: MarkdownWindowAnchor | null,
     imageLoader: MarkdownImageLoader | null,
+    closed: boolean,
   ): number | undefined {
     const previous = this.published;
     const top = this.scrollport.scrollTop;
     try {
-      this.renderSnapshot(snapshot, anchor, imageLoader);
+      this.renderSnapshot(snapshot, anchor, imageLoader, closed);
       const restoredTop = this.scrollport.scrollTop;
       return restoredTop === top ? undefined : restoredTop;
     } catch (error) {
@@ -156,7 +158,7 @@ export class MarkdownWindowSurface {
       this.unmount();
       if (previous) {
         try {
-          this.renderSnapshot(previous.snapshot, null, previous.imageLoader);
+          this.renderSnapshot(previous.snapshot, null, previous.imageLoader, previous.closed);
           this.scrollport.scrollTop = top;
           this.lastScrollTop = this.scrollport.scrollTop;
         } catch (restoreError) {
@@ -175,12 +177,13 @@ export class MarkdownWindowSurface {
     snapshot: MarkdownRenderSnapshot,
     anchor: MarkdownWindowAnchor | null,
     imageLoader: MarkdownImageLoader | null,
+    closed: boolean,
   ): void {
     if (this.root?.dataset.markdownGeneration !== snapshot.generation) this.clearPins();
     const width = this.host.getBoundingClientRect().width;
     this.geometry.configure(snapshot.generation, width > 0 ? width : 1, "message");
     const images = {
-      resources: this.images.update(snapshot, imageLoader),
+      resources: this.images.update(snapshot, imageLoader, closed),
       scrollport: this.scrollport,
     };
     const renderWindow = () => {
@@ -194,7 +197,7 @@ export class MarkdownWindowSurface {
     if (this.root && this.geometry.measure(this.root, this.scrollport)) renderWindow();
     if (this.root) this.geometry.restore(this.root, anchor, this.scrollport);
     this.lastScrollTop = this.scrollport.scrollTop;
-    this.published = { snapshot, imageLoader };
+    this.published = { snapshot, imageLoader, closed };
     if (this.root && !this.pins) {
       this.pins = new MarkdownSelectionPins(
         this.root,

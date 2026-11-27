@@ -9,6 +9,11 @@ type ImageState =
   | { kind: "ready"; url: string; width: number; height: number }
   | { kind: "unavailable" };
 
+// The importer rechecks the full source once when a response closes, so a local image
+// that failed while streaming can resolve shortly after the closed extent is published.
+const closedRetryLimit = 4;
+const closedRetryDelayMs = 250;
+
 // Only the mounted message window owns URLs. Projection IDs are generation-local, so an
 // unchanged occurrence retains its resource by message, source range and image key instead.
 export class MarkdownImageWindow {
@@ -22,6 +27,7 @@ export class MarkdownImageWindow {
   update(
     snapshot: MarkdownRenderSnapshot,
     loader: MarkdownImageLoader | null,
+    closed: boolean,
   ): ReadonlyMap<number, MarkdownImageResource> {
     const resources = new Map<number, MarkdownImageResource>();
     const retained = new Map<string, MarkdownImageResource>();
@@ -41,6 +47,10 @@ export class MarkdownImageWindow {
     for (const [identity, resource] of this.retained)
       if (!retained.has(identity)) resource.dispose();
     this.retained = retained;
+    if (closed) {
+      for (const resource of resources.values()) resource.retryWhenResponseClosed();
+      return resources;
+    }
     return resources;
   }
 
@@ -54,6 +64,9 @@ export class MarkdownImageResource {
   private current: ImageState = { kind: "pending" };
   private controller: AbortController | null = null;
   private disposed = false;
+  private responseClosed = false;
+  private closedRetryAttempts = 0;
+  private closedRetryTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly loader: MarkdownImageLoader;
   private readonly key: string;
   private readonly changed: () => void;
@@ -87,7 +100,22 @@ export class MarkdownImageResource {
     } finally {
       this.controller = null;
     }
-    if (!controller.signal.aborted) this.publish(state);
+    if (controller.signal.aborted) return;
+    this.publish(state);
+    if (
+      state.kind === "unavailable" &&
+      this.responseClosed &&
+      this.closedRetryAttempts < closedRetryLimit
+    )
+      this.scheduleClosedRetry();
+  }
+
+  // A closed publication gives unavailable images a bounded retry; loaded images are
+  // kept. An in-flight visible load also reaches the schedule through its own failure.
+  retryWhenResponseClosed(): void {
+    if (this.disposed || this.responseClosed) return;
+    this.responseClosed = true;
+    if (this.current.kind === "unavailable") this.beginClosedRetry();
   }
 
   imageFailed(url: string): void {
@@ -98,6 +126,7 @@ export class MarkdownImageResource {
 
   dispose(): void {
     this.disposed = true;
+    clearTimeout(this.closedRetryTimer);
     this.controller?.abort();
     if (this.current.kind === "ready") URL.revokeObjectURL(this.current.url);
   }
@@ -105,6 +134,22 @@ export class MarkdownImageResource {
   private publish(state: ImageState): void {
     this.current = state;
     this.changed();
+  }
+
+  private scheduleClosedRetry(): void {
+    if (this.disposed || this.closedRetryTimer !== undefined) return;
+    this.closedRetryTimer = setTimeout(() => {
+      this.closedRetryTimer = undefined;
+      this.beginClosedRetry();
+    }, closedRetryDelayMs);
+  }
+
+  private beginClosedRetry(): void {
+    if (this.disposed || this.controller) return;
+    this.closedRetryAttempts++;
+    // The intermediate reset is not announced; each attempt publishes its own outcome.
+    this.current = { kind: "pending" };
+    void this.load();
   }
 }
 

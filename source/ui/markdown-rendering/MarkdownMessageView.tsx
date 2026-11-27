@@ -340,10 +340,15 @@ export class MarkdownMessageView {
     anchor: MarkdownWindowAnchor | null,
     generation = this.activeGeneration,
   ): void {
+    // Closed extents let the importer's final pass complete, so unavailable image
+    // resources get a bounded retry at the closed publication.
+    const closed =
+      generation !== null && (generation.source.isClosed || generation.source.finalOutputCommitted);
     const restoredScrollTop = this.surface.publish(
       snapshot,
       anchor,
       generation?.imageLoader ?? null,
+      closed,
     );
     this.activeGeneration = generation;
     this.sourceMappings.prune(generation, snapshot);

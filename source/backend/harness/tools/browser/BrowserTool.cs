@@ -41,8 +41,9 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
     screenshot of the active page and is rejected when the viewport changed since it. Downloads
     save to a temp folder automatically and the result gives the path; the folder disappears with
     the chat, so move kept files elsewhere. If a captcha or similar challenge blocks a flow,
-    use ask_user so the user can complete it directly in the viewer. Never
-    attempt to bypass bot detection or access controls.
+    ask the user to complete it in the viewer via ask_user in a primary session. In a subagent,
+    use ask_agent to notify the parent; if the parent is blocked on your delegation, return the
+    blocker in your report. Never attempt to bypass bot detection or access controls.
     """;
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {

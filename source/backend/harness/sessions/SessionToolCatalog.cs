@@ -1,3 +1,4 @@
+using Urd.Core.Context;
 using Urd.Core.Tools;
 
 namespace Urd.Core.Sessions;
@@ -12,11 +13,13 @@ internal sealed class SessionToolCatalog(AgentToolSettings? toolSettings, GitBas
   // Only sessions with configured agent tools capture a saved working directory.
   internal bool ProvidesWorkingDirectory => toolSettings is not null || injectedTools.Count > 0;
 
-  internal ToolCatalog Create(PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
+  internal ToolCatalog Create(SessionKind kind, PendingToolCalls pending, bool processTools, out ChatProcesses? processes) {
     processes = null;
     AgentTool[] shared = [new WebSearchTool(browser), new WebReadTool(browser),
       new ListPendingCallsTool(pending), new CancelPendingCallsTool(pending), new SubagentTool(), new ListAgentsTool(),
-      new AskAgentTool(), new AnswerAgentTool(), new AskUserTool(userQuestions)];
+      new AskAgentTool(), new AnswerAgentTool()];
+    if (kind == SessionKind.Primary)
+      shared = [.. shared, new AskUserTool(userQuestions)];
     if (browserHost() is { } host)
       shared = [.. shared, new BrowserTool(host)];
     if (toolSettings is null || !processTools)

@@ -405,43 +405,28 @@ void test(
   },
 );
 
-void test("a child ask_user is routed to its primary session", { timeout: 90_000 }, async (t) => {
+void test("ask_user is offered only to the primary agent", { timeout: 90_000 }, async (t) => {
   const f = await setup(t);
-  const args = { bucket: "small", includeUserInput: false, task: "Ask the user." };
-  const report = "The fixture answer is 41 — café 東京 verified.";
+  const args = { bucket: "small", includeUserInput: false, task: "Return a short report." };
+  const report = "Child report — café 東京.";
   f.first.enqueue({
     text: "",
     toolCall: { id: "call-child", name: "subagent", arguments: args },
   });
   f.first.enqueue({ text: "Child finished." });
-  f.second.enqueue({
-    text: "",
-    toolCall: {
-      id: "call-child-user",
-      name: "ask_user",
-      arguments: { question: "Child question?", choices: [] },
-    },
-  });
   f.second.enqueue({ text: report });
   const id = await f.create();
-  const execution = await f.submit(id, f.firstConnection, "Delegate a question.");
-  const question = await f.pending(id);
-  const children = await f.client.getLiveSubagents(id, f.signal);
-  assert.equal(children.length, 1);
-  assert.equal(question.askingSessionId, children[0]!.id);
-  assert.equal(question.question, "Child question?");
-  assert.equal(question.context, null);
-  assert.deepEqual(question.answers, []);
-  assert.equal(question.background, false);
-  assert.ok(question.sourceTitle);
-  assert.deepEqual(await f.answer(id, question.id, "Child answer"), { answer: "Child answer" });
+  const execution = await f.submit(id, f.firstConnection, "Delegate a task.");
   await f.settle(id, execution);
-  assertToolResult(f.second.calls[1]!.request, "ask_user", "call-child-user", "Child answer");
+
+  const childRequest = f.second.calls[0]!.request;
+  const childTools = (childRequest.tools ?? []).map((tool) => tool.function?.name);
+  assert.ok(childTools.includes("ask_agent"));
+  assert.ok(!childTools.includes("ask_user"));
+  assert.ok(f.first.calls[0]!.request.tools?.some((tool) => tool.function?.name === "ask_user"));
   assertToolResult(f.first.calls[1]!.request, "subagent", "call-child", report);
   await f.transcript(id, "call-child", "subagent", args, report);
-  const childUsers = messages(f.second.calls[0]!.request).filter(
-    (message) => message.role === "user",
-  );
+  const childUsers = messages(childRequest).filter((message) => message.role === "user");
   assert.equal(childUsers.length, 1);
   assert.equal(text(childUsers[0]!), args.task);
   const history = await f.client.getHistory(
@@ -458,7 +443,6 @@ void test("a child ask_user is routed to its primary session", { timeout: 90_000
     f.signal,
   );
   assert.ok(child);
-  assert.equal(child.id, question.askingSessionId);
   assert.equal(child.parentId, id);
   assert.ok(child.title);
   const view = await f.client.getSubagentView(child.id, f.signal);

@@ -16,54 +16,37 @@ namespace Urd.Backend.Tests.Sessions;
 
 public sealed class UserQuestionTests {
   [Fact]
-  public async Task PrimaryChecksAskingSessionRatherThanQuestionIdentityUntilEachQuestionSettles() {
+  public async Task PrimaryHasPendingQuestionsUntilEachSettles() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     await using var manager = new SessionManager(store, _ => throw new InvalidOperationException("No model request."));
     PrimarySession primary = await manager.CreatePrimaryAsync();
-    Guid childId = Guid.NewGuid();
-    var first = Question(primary.Id);
-    var second = Question(primary.Id);
-    var child = Question(childId);
     using var firstCancellation = new CancellationTokenSource();
     using var secondCancellation = new CancellationTokenSource();
-    using var childCancellation = new CancellationTokenSource();
-    Task<string> firstAsk = primary.AskUserAsync(first, firstCancellation.Token);
-    Task<string> secondAsk = primary.AskUserAsync(second, secondCancellation.Token);
-    Task<string> childAsk = primary.AskUserAsync(child, childCancellation.Token);
+    Task<string> firstAsk = primary.AskUserAsync("First?", null, [], false, firstCancellation.Token);
+    Task<string> secondAsk = primary.AskUserAsync("Second?", null, [], false, secondCancellation.Token);
     try {
-      PendingUserQuestion[] published = await WaitForQuestionsAsync(primary, 3);
-      Assert.Contains(first, published);
-      Assert.Contains(second, published);
-      Assert.Contains(child, published);
-      Assert.True(await primary.HasPendingUserQuestionAsync(primary.Id, CancellationToken.None));
-      Assert.True(await primary.HasPendingUserQuestionAsync(childId, CancellationToken.None));
-      Assert.False(await primary.HasPendingUserQuestionAsync(first.Id, CancellationToken.None));
-      Assert.False(await primary.HasPendingUserQuestionAsync(Guid.NewGuid(), CancellationToken.None));
-      Assert.False(await primary.HasPendingUserQuestionAsync(Guid.Empty, CancellationToken.None));
+      PendingUserQuestion[] published = await WaitForQuestionsAsync(primary, 2);
+      PendingUserQuestion first = Assert.Single(published, item => item.Question == "First?");
+      PendingUserQuestion second = Assert.Single(published, item => item.Question == "Second?");
+      Assert.All(published, item => Assert.Equal(primary.Id, item.AskingSessionId));
+      Assert.True(await primary.HasPendingUserQuestionAsync(CancellationToken.None));
 
       Assert.False(await primary.AnswerUserQuestionAsync(Guid.NewGuid(), "not an answer"));
       Assert.True(await primary.AnswerUserQuestionAsync(first.Id, "first answer"));
       Assert.Equal("first answer", await firstAsk.WaitAsync(TestTimeout));
       Assert.False(await primary.AnswerUserQuestionAsync(first.Id, "too late"));
-      Assert.True(await primary.HasPendingUserQuestionAsync(primary.Id, CancellationToken.None));
-      Assert.True(await primary.HasPendingUserQuestionAsync(childId, CancellationToken.None));
+      Assert.True(await primary.HasPendingUserQuestionAsync(CancellationToken.None));
 
       await secondCancellation.CancelAsync();
       await Assert.ThrowsAnyAsync<OperationCanceledException>(() => secondAsk.WaitAsync(TestTimeout));
-      Assert.False(await primary.HasPendingUserQuestionAsync(primary.Id, CancellationToken.None));
-      Assert.True(await primary.HasPendingUserQuestionAsync(childId, CancellationToken.None));
+      Assert.False(await primary.HasPendingUserQuestionAsync(CancellationToken.None));
       Assert.False(await primary.AnswerUserQuestionAsync(second.Id, "too late"));
-
-      Assert.True(await primary.AnswerUserQuestionAsync(child.Id, "child answer"));
-      Assert.Equal("child answer", await childAsk.WaitAsync(TestTimeout));
-      Assert.False(await primary.HasPendingUserQuestionAsync(childId, CancellationToken.None));
       Assert.Empty(await primary.ReadUserQuestionsAsync());
     } finally {
       await firstCancellation.CancelAsync();
       await secondCancellation.CancelAsync();
-      await childCancellation.CancelAsync();
-      await DrainAsync(firstAsk, secondAsk, childAsk);
+      await DrainAsync(firstAsk, secondAsk);
     }
   }
 
@@ -75,10 +58,10 @@ public sealed class UserQuestionTests {
     PrimarySession primary = await manager.CreatePrimaryAsync();
     using var cancellation = new CancellationTokenSource();
     await cancellation.CancelAsync();
-    PendingUserQuestion question = Question(primary.Id);
 
-    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => primary.AskUserAsync(question, cancellation.Token));
-    Assert.False(await primary.HasPendingUserQuestionAsync(primary.Id, CancellationToken.None));
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+        primary.AskUserAsync("Question?", null, [], false, cancellation.Token));
+    Assert.False(await primary.HasPendingUserQuestionAsync(CancellationToken.None));
     Assert.Empty(await primary.ReadUserQuestionsAsync());
   }
 
@@ -93,28 +76,30 @@ public sealed class UserQuestionTests {
     Assert.Equal(SessionCloseStatus.Closed, await manager.ClosePrimaryAsync(closedId));
     Guid unopenedId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
     Guid finishedChildId = store.Sessions.CreateSubagent(Guid.NewGuid(), primary.Id, "finished").Id;
+    SessionRecord liveChild = store.Sessions.CreateSubagent(Guid.NewGuid(), primary.Id, "live");
+    await manager.Registry.RunOpenAsync(() => {
+      manager.Registry.TrackChild(new SubagentSession(liveChild, store, _ => throw new InvalidOperationException("No model request.")));
+      return true;
+    });
     Guid unknownId = Guid.NewGuid();
-    using var cancellation = new CancellationTokenSource();
-    using var nextCancellation = new CancellationTokenSource();
+    using var cancellation = new CancellationTokenSource(TestTimeout);
     HarnessToolContext caller = Caller(store, manager, primary.Id, "ask") with { Background = true };
     Task<string> ask = manager.AskUserAsync(caller, "Choose?", "Context", ["one", "two"], cancellation.Token);
-    Task<string>[] foreignAsks = [.. new[] { other.Id, finishedChildId, unopenedId, closedId, unknownId }
-        .Select(id => primary.AskUserAsync(Question(id), cancellation.Token))];
-    Task<string>? cancelledAsk = null;
     try {
-      PendingUserQuestion[] published = await WaitForQuestionsAsync(primary, 6);
-      PendingUserQuestion question = Assert.Single(published, item => item.AskingSessionId == primary.Id);
+      PendingUserQuestion question = Assert.Single(await WaitForQuestionsAsync(primary, 1));
+      Assert.Equal(primary.Id, question.AskingSessionId);
       Assert.Equal("Choose?", question.Question);
       Assert.Equal("Context", question.Context);
       Assert.Equal(new[] { "one", "two" }, question.Answers);
       Assert.Null(question.SourceTitle);
       Assert.True(question.Background);
-      Assert.True(await primary.HasPendingUserQuestionAsync(finishedChildId, CancellationToken.None));
-      Assert.True(await primary.HasPendingUserQuestionAsync(other.Id, CancellationToken.None));
-      Assert.True(await primary.HasPendingUserQuestionAsync(unopenedId, CancellationToken.None));
-      Assert.True(await primary.HasPendingUserQuestionAsync(closedId, CancellationToken.None));
-      Assert.True(await primary.HasPendingUserQuestionAsync(unknownId, CancellationToken.None));
+      HarnessToolContext childCaller = Caller(store, manager, liveChild.Id, "child-ask");
+      var rejection = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+          manager.AskUserAsync(childCaller, "Child question?", null, [], cancellation.Token));
+      Assert.Contains("Subagents must use ask_agent", rejection.Message);
+      Assert.Equal(question, Assert.Single(await primary.ReadUserQuestionsAsync()));
       Assert.True(await manager.HasPendingUserQuestionAsync(primary.Id));
+      Assert.False(await manager.HasPendingUserQuestionAsync(liveChild.Id));
       Assert.False(await manager.HasPendingUserQuestionAsync(other.Id));
       Assert.False(await manager.HasPendingUserQuestionAsync(finishedChildId));
       Assert.False(await manager.HasPendingUserQuestionAsync(unopenedId));
@@ -126,29 +111,17 @@ public sealed class UserQuestionTests {
       Assert.True(await primary.AnswerUserQuestionAsync(question.Id, "one"));
       Assert.Equal("one", await ask.WaitAsync(TestTimeout));
       Assert.False(await manager.HasPendingUserQuestionAsync(primary.Id));
-      Assert.False(await manager.HasPendingUserQuestionAsync(finishedChildId));
-
-      Task<string> nextAsk = manager.AskUserAsync(caller, "Another?", null, [], nextCancellation.Token);
-      cancelledAsk = nextAsk;
-      await WaitForQuestionsAsync(primary, 6);
-      Assert.True(await manager.HasPendingUserQuestionAsync(primary.Id));
-      await nextCancellation.CancelAsync();
-      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => nextAsk.WaitAsync(TestTimeout));
-      Assert.False(await manager.HasPendingUserQuestionAsync(primary.Id));
     } finally {
       await cancellation.CancelAsync();
-      await nextCancellation.CancelAsync();
-      await DrainAsync([ask, .. foreignAsks]);
-      if (cancelledAsk is not null)
-        await DrainAsync(cancelledAsk);
+      await DrainAsync(ask);
     }
   }
 
   [Fact]
-  public async Task LiveDescendantQuestionIsAttributedToTheChildNotItsPrimary() {
+  public async Task SubagentCannotSeeOrInvokeAskUser() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
-    int conversations = 0;
+    ScriptedRequest? childRequest = null;
     using var client = new ScriptedChatClient(Route);
     using var providers = new ProviderManager(store, () => new Uri("http://localhost:54321/api/providers/callback"),
         new ScriptedOpenAIHandler(Catalog, "application/json"));
@@ -158,32 +131,21 @@ public sealed class UserQuestionTests {
     new PreferenceManager(store).SetBucketModels(ModelBucket.Small, [new(connection.Id, "user-question-fixture")]);
     await using var manager = new SessionManager(store, _ => client, modelSelector: new ModelSelector(providers));
     PrimarySession primary = await manager.CreatePrimaryAsync();
-    PrimarySession other = await manager.CreatePrimaryAsync();
     using var cancellation = new CancellationTokenSource();
     ISubagentRunner runner = manager;
     Task<SubagentRunResult> run = runner.RunSubagentAsync(Caller(store, manager, primary.Id, "spawn"),
         new("small", false, "Ask the user"), cancellation.Token);
     try {
-      PendingUserQuestion question = Assert.Single(await WaitForQuestionsAsync(primary, 1));
-      Guid[] children = [.. database.ReadRows("SELECT session_id FROM sessions WHERE kind = 1;",
-          row => Guid.Parse(row.GetString(0)))]; // raw-sql: independently identify the registered child.
-      Guid childId = Assert.Single(children);
-      Assert.Equal(childId, question.AskingSessionId);
-      Assert.Equal("Which option?", question.Question);
-      Assert.True(await manager.IsSubagentLiveAsync(childId));
-      Assert.True(await primary.HasPendingUserQuestionAsync(childId, CancellationToken.None));
-      Assert.True(await manager.HasPendingUserQuestionAsync(childId));
-      Assert.False(await manager.HasPendingUserQuestionAsync(primary.Id));
-      Assert.False(await manager.HasPendingUserQuestionAsync(other.Id));
-      Assert.False(await manager.HasPendingUserQuestionAsync(question.Id));
-
-      Assert.True(await primary.AnswerUserQuestionAsync(question.Id, "option A"));
       SubagentRunResult result = await run.WaitAsync(TestTimeout);
-      Assert.Equal(childId, result.ChildSessionId);
       Assert.Null(result.Error);
-      Assert.False(await manager.IsSubagentLiveAsync(childId));
-      Assert.False(await manager.HasPendingUserQuestionAsync(childId));
-      Assert.False(await manager.HasPendingUserQuestionAsync(primary.Id));
+      Assert.Equal("finished", result.Report);
+      Assert.NotNull(childRequest);
+      Assert.DoesNotContain(childRequest.Options!.Tools!, tool => tool.Name == "ask_user");
+      Assert.Contains(childRequest.Options.Tools!, tool => tool.Name == "ask_agent");
+      FunctionResultContent rejected = Assert.Single(client.Requests.SelectMany(messages => messages)
+          .SelectMany(message => message.Contents).OfType<FunctionResultContent>(), item => item.CallId == "ask");
+      Assert.Equal("Unknown tool 'ask_user'.", rejected.Result);
+      Assert.Empty(await primary.ReadUserQuestionsAsync());
     } finally {
       await cancellation.CancelAsync();
       try {
@@ -200,19 +162,21 @@ public sealed class UserQuestionTests {
     IAsyncEnumerable<ChatResponseUpdate> Route(ScriptedRequest request, CancellationToken token) {
       return request.Purpose switch {
         "title" => TextUpdates(["child title"], token),
-        "conversation" => Interlocked.Increment(ref conversations) == 1
-            ? ToolBatch(token, new FunctionCallContent("ask", "ask_user", new Dictionary<string, object?> {
-              ["question"] = "Which option?", ["choices"] = new[] { "option A", "option B" }
-            })) : TextUpdates(["finished"], token),
+        "conversation" when childRequest is null => AttemptAskUser(request, token),
+        "conversation" => TextUpdates(["finished"], token),
         { } pruning when pruning.StartsWith("pruning.", StringComparison.Ordinal) =>
             TextUpdates([PrepassTolerantChatClient.KeepAll(request.Messages)], token),
         _ => throw new InvalidOperationException($"Unexpected purpose '{request.Purpose}'.")
       };
     }
-  }
 
-  private static PendingUserQuestion Question(Guid askingSessionId) =>
-      new(Guid.NewGuid(), askingSessionId, "Question?", null, [], null, false);
+    IAsyncEnumerable<ChatResponseUpdate> AttemptAskUser(ScriptedRequest request, CancellationToken token) {
+      childRequest = request;
+      return ToolBatch(token, new FunctionCallContent("ask", "ask_user", new Dictionary<string, object?> {
+        ["question"] = "Which option?", ["choices"] = new[] { "option A", "option B" }
+      }));
+    }
+  }
 
   private static HarnessToolContext Caller(UrdStore store, SessionManager manager, Guid sessionId, string callId) =>
       new(sessionId, Guid.NewGuid(), callId, new ToolSessionServices(store.Sessions, manager, manager)) {

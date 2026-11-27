@@ -224,7 +224,7 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
     ChatProcesses? processes = null;
     (UserPreferences defaults, ToolCatalog catalog) = await registry.RunOpenAsync(() => {
       UserPreferences defaults = preferences.Read(fallbackWorkingDirectory);
-      ToolCatalog catalog = toolCatalog.Create(new PendingToolCalls(), true, out processes);
+      ToolCatalog catalog = toolCatalog.Create(SessionKind.Primary, new PendingToolCalls(), true, out processes);
       return (defaults, catalog);
     }, cancellation);
     // Catalog construction starts no processes; still dispose its empty shell owner.
@@ -238,13 +238,13 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
 
   private PrimarySession CreateSession(SessionRecord record) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = toolCatalog.Create(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
+    ToolCatalog catalog = toolCatalog.Create(SessionKind.Primary, pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
     return new PrimarySession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this);
   }
 
   private SubagentSession CreateChild(SessionRecord record, int depth) {
     var pending = new PendingToolCalls();
-    ToolCatalog catalog = toolCatalog.Create(pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
+    ToolCatalog catalog = toolCatalog.Create(SessionKind.Subagent, pending, record.WorkingDirectory is not null, out ChatProcesses? processes);
     return new SubagentSession(record, store, createChatClient, catalog, processes, pending, preferences, modelSelector, this, depth);
   }
 

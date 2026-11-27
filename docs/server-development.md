@@ -171,7 +171,7 @@ provider calls.
 | DELETE `/api/sessions/{sessionId}/compactions/operations/{operationId}` | Empty body or `{}` → 200 cancelled receipt; 409 when not queued or already started |
 | GET `/api/sessions/{sessionId}/compactions/{compactionId}` | `expectedHistoryRevision` → 200 `CompactionSummary`, or 404 |
 | GET `/api/sessions/{sessionId}/snapshot` | 200 slim `SessionSnapshot` |
-| GET `/api/sessions/{sessionId}/user-questions` | 200 pending `ask_user` calls from this primary session and its descendants |
+| GET `/api/sessions/{sessionId}/user-questions` | 200 pending `ask_user` calls from this primary session |
 | POST `/api/sessions/{sessionId}/user-questions/{questionId}/answer` | `{answer}` → 200 `{answer}`; 400 for invalid text, 409 if no longer pending |
 | GET `/api/sessions/{sessionId}/history` | Mode/revision and optional entry anchor → 200 bounded `TranscriptHistoryPage` with `toolLabels` |
 | GET `/api/sessions/{sessionId}/markdown-images/{executionId}/{messageId}/{key}` | `historyRevision` and an image key from the assistant Markdown projection → 200 managed raster bytes, or 404 if unavailable |
@@ -201,8 +201,8 @@ has `queued: true` and its execution ID is the operation ID; it becomes a normal
 when started. The queue is in memory and is lost on shutdown or revision replacement. Stopping the
 current execution does not cancel a separately queued compaction.
 
-For `ask_user`, pass `question`, optional `context`, and `choices` (up to six suggestions;
-an empty array allows a custom answer only). The tool returns exactly the submitted answer.
+Only primary sessions can call `ask_user`. Pass `question`, optional `context`, and `choices`
+(up to six suggestions; an empty array allows a custom answer only). The tool returns exactly the submitted answer.
 By default the caller waits; the harness option `background: true` lets it continue and receive
 the answer later. Pending questions are live state, scoped to the primary session and announced
 through watched-session changes.

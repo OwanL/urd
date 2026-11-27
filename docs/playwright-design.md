@@ -99,10 +99,12 @@ A disposable probe already showed frame display and click mapping on headless Ch
 
 ## Handoff
 
-- There is no dedicated handoff action. The agent uses `ask_user` to say what the user should do
-  ("Solve the captcha, then reply Done"); the question blocks the agent, appears in the chat
-  (including questions from helpers) and Stop cancels it. When the asking session has pages, the
-  question shows **Open browser**. The reply can carry information back to the agent.
+- There is no dedicated handoff action. The primary agent uses `ask_user` to say what the user
+  should do ("Solve the captcha, then reply Done"); the question appears in the chat and Stop
+  cancels it. When the primary has pages, the question shows **Open browser**. The reply can carry
+  information back to the agent. A subagent notifies its parent via `ask_agent`; while the child
+  is live, the user can select its page in the browser viewer. If the parent is waiting on a
+  foreground delegation, the subagent reports the blocker instead.
 - The viewer is always live and interactive; there is no control mode. If the user acts while the
   agent is working, the agent's next action may fail or see a changed page, and it re-reads the
   page. Stop removes the agent.

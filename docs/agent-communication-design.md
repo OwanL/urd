@@ -118,7 +118,8 @@ The backend implements these runtime behaviors:
 ## Backend model-facing tool surface (settled 2026-11-16; implemented)
 
 The backend exposes the settled `subagent`, `list_agents`, `ask_agent` and `answer_agent` tools.
-The `ask_user` tool also lets the calling session ask the human directly.
+Only primary sessions can use `ask_user`. Subagents raise questions with their parent via
+`ask_agent` or report the blocker if the parent is waiting on a foreground delegation.
 
 ### `subagent`
 

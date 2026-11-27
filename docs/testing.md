@@ -77,8 +77,8 @@ the exact cut notice, or a held-response timeout before commit. Pre-commit cance
 remains covered. The viewer stream test keeps click-triggered dialog reopening, without
 repeating it for keys or waiting past the production deadline.
 
-The agent communication integration now checks the foreground child report in the child
-question flow instead of launching a second server fixture. The `ask_user` round trip keeps
+The agent communication integration checks the foreground child report in the same fixture
+that verifies only the primary is offered `ask_user`. The primary's `ask_user` round trip keeps
 the custom CRLF/Unicode answer; it no longer repeats the flow with a preset answer.
 
 ## Separate Chromium checks

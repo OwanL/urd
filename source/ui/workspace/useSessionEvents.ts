@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { SessionEvents } from "../sessions/SessionEvents.ts";
 import type { WorkspaceCommandAccess } from "./WorkspaceCommands.ts";
-import { newChat } from "../chat/ChatState.ts";
-import { applySessionTitle } from "./WorkspaceState.ts";
+import { applySessionTitle, mergeWorkspaceSessions } from "./WorkspaceState.ts";
 import { enumerateSessionPages } from "../sessions/SessionPages.ts";
 import {
   emptySessionActivity,
@@ -20,7 +19,6 @@ type SessionConnectionState = "connecting" | "connected" | "disconnected" | "pau
 export function useSessionEvents(
   client: SessionClient,
   access: WorkspaceCommandAccess,
-  discovered: Set<string>,
   forget: (ids: Iterable<string>) => void,
   isClosed: (id: string) => boolean,
   ready: boolean,
@@ -56,17 +54,14 @@ export function useSessionEvents(
     let streamConnected = false;
     let connectedBefore = false;
     let discovery: AbortController | null = null;
-    function add(session: string) {
-      if (disposed || isClosed(session) || discovered.has(session)) return;
-      discovered.add(session);
+    function addSessions(sessions: Iterable<string>) {
+      if (disposed) return;
       const state = access.read();
-      // Discovery never replaces an existing record or draft.
-      if (state.chats[session]) return;
-      access.save({
-        ...state,
-        tabs: [...state.tabs, session],
-        chats: { ...state.chats, [session]: newChat(null) },
-      });
+      const next = mergeWorkspaceSessions(
+        state,
+        [...sessions].filter((id) => !isClosed(id)),
+      );
+      if (next !== state) access.save(next);
     }
     async function discover(signal: AbortSignal) {
       const savedIds = Object.keys(access.read().chats);
@@ -74,12 +69,10 @@ export function useSessionEvents(
       try {
         for await (const page of enumerateSessionPages(client, signal)) {
           if (signal.aborted || disposed) return;
-          for (const session of page.sessionIds) {
-            listed.add(session);
-            add(session);
-          }
+          for (const session of page.sessionIds) listed.add(session);
         }
         if (signal.aborted || disposed) return;
+        addSessions(listed);
         // Only absence from a complete read is authoritative. A chat added while paging
         // may not be in this read, so compare only records that predate the read.
         forget(savedIds.filter((id) => !listed.has(id)));
@@ -127,7 +120,7 @@ export function useSessionEvents(
         const titled = applySessionTitle(state, session, title);
         if (titled !== state) access.save(titled);
       },
-      created: add,
+      created: (session) => addSessions([session]),
       browser(session) {
         if (isClosed(session)) return;
         setBrowserRefresh((previous) => ({
@@ -195,7 +188,7 @@ export function useSessionEvents(
       window.removeEventListener("pageshow", activate);
       window.removeEventListener("focus", activate);
     };
-  }, [client, access, discovered, forget, isClosed, ready, refreshSnoozed]);
+  }, [client, access, forget, isClosed, ready, refreshSnoozed]);
 
   useEffect(() => {
     if (watched !== active) {

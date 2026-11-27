@@ -1,5 +1,5 @@
 import type { LlmSelection } from "../providers/LlmSelection.ts";
-import { isChat, isId, isRecord, isSelection } from "../chat/ChatState.ts";
+import { isChat, isId, isRecord, isSelection, newChat } from "../chat/ChatState.ts";
 import type { ChatState } from "../chat/ChatState.ts";
 
 export interface WorkspaceState {
@@ -12,6 +12,25 @@ export interface WorkspaceState {
 
 export function emptyWorkspace(): WorkspaceState {
   return { version: 8, tabs: [], activeId: null, chats: {}, lastSelection: null };
+}
+
+export function mergeWorkspaceSessions(
+  state: WorkspaceState,
+  sessions: Iterable<string>,
+): WorkspaceState {
+  const known = new Set(state.tabs);
+  const added: string[] = [];
+  for (const id of sessions) {
+    if (known.has(id)) continue;
+    known.add(id);
+    added.push(id);
+  }
+  if (!added.length) return state;
+
+  const newChats = Object.fromEntries(
+    added.filter((id) => !Object.hasOwn(state.chats, id)).map((id) => [id, newChat(null)]),
+  );
+  return { ...state, tabs: [...state.tabs, ...added], chats: { ...state.chats, ...newChats } };
 }
 
 export function applySessionTitle(

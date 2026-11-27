@@ -165,7 +165,6 @@ export function Workspace({
   const events = useSessionEvents(
     sessions,
     workspace.access,
-    navigation.discovered,
     navigation.forget,
     isClosed,
     navigation.ready,

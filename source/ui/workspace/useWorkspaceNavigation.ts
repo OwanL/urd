@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useState } from "preact/hooks";
 import type { LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import { RequestError } from "../http/RequestError.ts";
 import { errorMessage } from "../http/ErrorMessages.ts";
 import { moveTab } from "./tabs/TabOrder.ts";
-import { newChat } from "../chat/ChatState.ts";
+import { mergeWorkspaceSessions } from "./WorkspaceState.ts";
 import type { SessionIdPage } from "../sessions/SessionIdPage.ts";
 import type { PersistedWorkspace } from "./usePersistedWorkspace.ts";
 import { enumerateSessionPages } from "../sessions/SessionPages.ts";
@@ -38,16 +38,10 @@ export function useWorkspaceNavigation(
 ) {
   const [ready, setReady] = useState(false);
   const [lastUsedSelection, setLastUsedSelection] = useState<LlmSelection | null>(null);
-  const discovered = useRef(new Set<string>());
   const [error, setError] = useState<string | null>(null);
   const forget = useCallback(
     (ids: Iterable<string>) => {
-      const removed = new Set<string>();
-      for (const id of ids) {
-        if (isClosed(id)) continue;
-        discovered.current.delete(id);
-        removed.add(id);
-      }
+      const removed = new Set([...ids].filter((id) => !isClosed(id)));
       if (removed.size) forgetSessions(removed);
     },
     [forgetSessions, isClosed],
@@ -57,12 +51,7 @@ export function useWorkspaceNavigation(
       if (isClosed(id) || isSnoozed(id)) return;
       const workspace = access.read();
       if (workspace.activeId === id) return;
-      access.save({
-        ...workspace,
-        activeId: id,
-        tabs: workspace.tabs.includes(id) ? workspace.tabs : [...workspace.tabs, id],
-        chats: { ...workspace.chats, [id]: workspace.chats[id] ?? newChat(null) },
-      });
+      access.save({ ...mergeWorkspaceSessions(workspace, [id]), activeId: id });
     },
     [access, isClosed, isSnoozed],
   );
@@ -82,6 +71,7 @@ export function useWorkspaceNavigation(
   useEffect(() => {
     // A successful load (including a retried read) is the initialization boundary.
     if (!loaded) return;
+    const { first } = loaded;
     const controller = new AbortController();
     async function discover() {
       try {
@@ -92,23 +82,22 @@ export function useWorkspaceNavigation(
           for (const id of page.sessionIds) listed.add(id);
         }
         if (controller.signal.aborted || !initialPage) return;
-        for (const id of listed) if (!isClosed(id)) discovered.current.add(id);
         setLastUsedSelection(initialPage.latestLlmSelection ?? null);
+        forget(Object.keys(access.read().chats).filter((id) => !listed.has(id)));
+
+        const previous = access.read();
+        const workspace = mergeWorkspaceSessions(
+          previous,
+          [...listed].filter((id) => !isClosed(id)),
+        );
         const hash = hashSessionId();
-        const candidates = [...Object.keys(access.read().chats), ...(hash ? [hash] : [])];
-        forget(candidates.filter((id) => !listed.has(id)));
-        if (hash && discovered.current.has(hash) && !isSnoozed(hash)) open(hash);
-        else if (loaded!.first) {
-          const tabs = initialPage.sessionIds.filter((id) => !isClosed(id));
-          if (tabs.length) {
-            access.save({
-              ...access.read(),
-              tabs,
-              activeId: tabs.find((id) => !isSnoozed(id)) ?? null,
-              chats: Object.fromEntries(tabs.map((id) => [id, newChat(null)])),
-            });
-          } else if (!hash && initialPage.nextCursor === null) await create();
-        }
+        const activeId =
+          hash && listed.has(hash) && !isClosed(hash) && !isSnoozed(hash)
+            ? hash
+            : (workspace.activeId ?? workspace.tabs.find((id) => !isSnoozed(id)) ?? null);
+        if (workspace !== previous || activeId !== previous.activeId)
+          access.save({ ...workspace, activeId });
+        else if (first && !hash && !listed.size) await create();
         if (!controller.signal.aborted) setReady(true);
       } catch (cause) {
         if (!controller.signal.aborted) setError(errorMessage(cause));
@@ -116,7 +105,7 @@ export function useWorkspaceNavigation(
     }
     void discover();
     return () => controller.abort();
-  }, [client, loaded, access, forget, isClosed, isSnoozed, open, create]);
+  }, [client, loaded, access, forget, isClosed, isSnoozed, create]);
 
   useEffect(() => {
     if (ready) syncHash(state.activeId);
@@ -160,7 +149,6 @@ export function useWorkspaceNavigation(
     open,
     forget,
     reorder,
-    discovered: discovered.current,
     lastUsedSelection,
   };
 }

@@ -14,6 +14,7 @@ import {
   decodeWorkspace,
   emptyWorkspace,
   encodeWorkspace,
+  mergeWorkspaceSessions,
 } from "../../workspace/WorkspaceState.ts";
 import type { WorkspaceState } from "../../workspace/WorkspaceState.ts";
 import type { LlmSelection } from "../../providers/LlmSelection.ts";
@@ -142,6 +143,20 @@ void test("new state is independent, empty and does not invent a selection", () 
   assert.equal(typeof chat.title, "string");
   assert.equal(chat.titleProvenance, "placeholder");
   assert.deepEqual(decodeWorkspace(encodeWorkspace(emptyWorkspace())), emptyWorkspace());
+});
+
+void test("session discovery appends missing tabs without changing the local workspace", () => {
+  const before = workspace();
+  const reopened = "reopened";
+  before.chats[reopened] = editDraft(newChat(null), "Preserved draft");
+
+  const next = mergeWorkspaceSessions(before, ["newest", reopened, sessionId, "older", "newest"]);
+  assert.deepEqual(next.tabs, [sessionId, "newest", reopened, "older"]);
+  assert.equal(next.activeId, sessionId);
+  assert.equal(next.chats[sessionId], before.chats[sessionId]);
+  assert.equal(next.chats[reopened], before.chats[reopened]);
+  assert.deepEqual(next.chats.older, newChat(null));
+  assert.equal(mergeWorkspaceSessions(next, next.tabs), next);
 });
 
 void test("an inactive tab's title leaves its draft, pending send and navigation intact", () => {

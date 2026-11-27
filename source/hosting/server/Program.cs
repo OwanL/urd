@@ -62,18 +62,9 @@ internal static class Program {
     }
   }
 
-  internal static Task RunServerAsync(ServerOptions options, Action<Uri> onReady, CancellationToken stopping,
-      bool warmInstructions = false) =>
-      RunServerAsync(options, (origin, _) => onReady(origin), null, stopping, warmInstructions: warmInstructions);
-
   internal static Task RunServerAsync(ServerOptions options, Action<Uri, LanHosting> onReady, CancellationToken stopping,
       bool warmInstructions = false) =>
       RunServerAsync(options, onReady, null, stopping, warmInstructions: warmInstructions);
-
-  internal static Task RunServerAsync(ServerOptions options, Action<Uri> onReady, Func<IChatClient>? createClient,
-      CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null,
-      Func<MessageMarkdownService>? createMarkdown = null, bool warmInstructions = false) =>
-      RunServerAsync(options, (origin, _) => onReady(origin), createClient, stopping, createProviders, createMarkdown, warmInstructions);
 
   // Production borrows provider-managed clients. Tests may supply an owned client;
   // the run disposes it only after successful drain, never through a session.

@@ -259,11 +259,19 @@ public sealed class McpRoutesTests {
     using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
     using var arguments = JsonDocument.Parse("{\"query\":\"weather\"}");
     var tool = Assert.Single(await connections.DiscoverAsync(deadline.Token));
-    using (connections.PauseAgentToolsForLan()) {
+    bool remembered = true;
+    await using (var hosting = new LanHosting(new LanAccess(), 1234, () => [IPAddress.Parse("192.168.1.10")],
+        _ => Task.FromResult<IAsyncDisposable>(new PausedMcpListener(connections.PauseAgentToolsForLan())),
+        enabled => remembered = enabled, remembered: true)) {
+      await hosting.RestoreAsync();
+      Assert.True(hosting.Enabled);
       Assert.Empty(await connections.DiscoverAsync(deadline.Token));
       Assert.True((await connections.CallAsync(tool.ServerId, tool.Tool.Name, arguments.RootElement, deadline.Token)).IsError);
+      await hosting.SetEnabledAsync(false);
+      Assert.False(remembered);
+      Assert.Single(await connections.DiscoverAsync(deadline.Token));
+      Assert.False((await connections.CallAsync(tool.ServerId, tool.Tool.Name, arguments.RootElement, deadline.Token)).IsError);
     }
-    Assert.False((await connections.CallAsync(tool.ServerId, tool.Tool.Name, arguments.RootElement, deadline.Token)).IsError);
     Assert.True(connections.Remove(id));
     Assert.True((await connections.CallAsync(tool.ServerId, tool.Tool.Name, arguments.RootElement, deadline.Token)).IsError);
     Assert.Single(peer.Requests, request => request.Method == "tools/call");
@@ -329,6 +337,13 @@ public sealed class McpRoutesTests {
     AssertPrivateResponse(response);
     using JsonDocument document = JsonDocument.Parse(content);
     return document.RootElement.Clone();
+  }
+
+  private sealed class PausedMcpListener(IDisposable pause) : IAsyncDisposable {
+    public ValueTask DisposeAsync() {
+      pause.Dispose();
+      return ValueTask.CompletedTask;
+    }
   }
 
   private sealed record Request(string? Method, string? Authorization, JsonElement Parameters);

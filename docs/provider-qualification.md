@@ -264,8 +264,15 @@ original OAuth grant and the origin advertised by `/copilot_internal/user`:
 `/models` returned `200`. A repeat with catalog counts showed eight entries;
 GitHub flagged all eight `model_picker_enabled: false` and supplied no
 `supported_endpoints` for any. Urd correctly exposed none. This verifies the
-catalog HTTP path, not why GitHub marked those entries unselectable, usable model
-access, billing, or inference.
+catalog HTTP path, not usable model access, billing, or inference. The same account's
+GitHub settings confirmed an active Business seat, and GitHub's own web picker showed
+24 options. The limited catalog is not an account-wide absence of selectable models.
+With one grant and only `X-GitHub-Api-Version` changed, `2026-06-01`, `2025-04-01`,
+and an omitted header returned eight, eight and seven entries respectively. No entry
+was picker-enabled or advertised an inference endpoint in any response. This rules
+out those version changes as a fix. [LiteLLM's custom-app experiment](https://github.com/BerriAI/litellm/pull/52386)
+reported a larger catalog with the SDK's integration ID on a different grant. That
+is evidence for client-specific routing, not permission to use another client's ID.
 
 Official documentation below was inspected **2026-11-04**; mutable docs are not
 version-pinned. Library/source pins are research evidence, not selected packages.

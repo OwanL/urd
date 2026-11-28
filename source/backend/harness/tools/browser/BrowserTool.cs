@@ -18,13 +18,20 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
   public override string Name => "browser";
   public override ToolRelevance RelevantWhen => ToolRelevance.Always;
   public override string Description => """
-    Drive this session's pages in one shared headless Chromium. Sign-ins persist in the profile
-    shared by every chat: check which account is signed in first, never sign an account out, and
-    say when a flow needs a different account. A session owns at most 3 pages; opening one more
-    closes its least recently used page, named in the result. Pages close when the chat closes or
-    snoozes, when a helper finishes, and after 30 minutes without agent or viewer activity; page
-    state beyond the profile, such as a half-filled form or a used one-time link, is lost with
-    them, so one session owns a multi-step flow end to end. Navigation returns the page tree;
+    Drive this session's pages in shared headless Chromium. The user can watch or interact with
+    the same live page via Join browser in chat. For sign-in, MFA, CAPTCHA, or another step the user
+    needs to do, use ask_user in the primary session: tell them to click Open browser, do the step
+    there (enter secrets on the page, not in chat), and reply when done. Wait without acting on
+    the page, then take a fresh snapshot. In a subagent, use ask_agent to notify the parent;
+    if the parent is blocked on your delegation, report the blocker instead. Never bypass bot
+    detection or access controls.
+    Sign-ins persist in the profile shared by every chat: check which account is signed in first,
+    never sign an account out, and say when a flow needs a different account. A session owns at
+    most 3 pages; opening one more closes its least recently used page, named in the result.
+    Pages close when the chat closes or snoozes, when a helper finishes, or after 30 minutes without
+    agent or viewer activity (unless a user question is pending). Closing a page loses
+    live state such as half-filled forms or used one-time links; keep a multi-step flow in one session.
+    Navigation returns the page tree;
     in-page diffs list changed elements as fragments with current refs, not the full tree.
     evaluate returns its value and notices only, without a page view, so the next diff still
     covers what it changed on the page. Oversized full views keep the tree to the deepest
@@ -40,10 +47,7 @@ internal sealed partial class BrowserTool(BrowserHost host) : HarnessTool {
     dialog action answers it. click_at uses page-coordinate pixel positions from the latest
     screenshot of the active page and is rejected when the viewport changed since it. Downloads
     save to a temp folder automatically and the result gives the path; the folder disappears with
-    the chat, so move kept files elsewhere. If a captcha or similar challenge blocks a flow,
-    ask the user to complete it in the viewer via ask_user in a primary session. In a subagent,
-    use ask_agent to notify the parent; if the parent is blocked on your delegation, return the
-    blocker in your report. Never attempt to bypass bot detection or access controls.
+    the chat, so move kept files elsewhere.
     """;
   public override JsonElement ParametersSchema { get; } = ToolSchema.Parse("""
     {

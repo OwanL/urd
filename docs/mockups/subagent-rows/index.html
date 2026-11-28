@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urd · Subagent row mockups</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #0e0e0e;
+      --transcript: #050505;
+      --surface-input: #141414;
+      --surface-hover: #262626;
+      --text-primary: #e3e3e3;
+      --text-secondary: #a0a0a0;
+      --border-subtle: #303030;
+      --accent: #c6c6c6;
+      background: var(--canvas);
+      color: var(--text-primary);
+      font: 13px/1.6 system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    h1, h2, h3, p, ul { margin: 0; }
+    button { color: inherit; font: inherit; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .definitions { position: absolute; width: 0; height: 0; }
+    .icon { width: 12px; height: 12px; flex: none; }
+    .board { width: min(100%, 1300px); margin: auto; padding: 48px 32px; }
+    .intro { margin-bottom: 27px; }
+    .eyebrow { margin-bottom: 5px; color: var(--text-secondary); font-size: 11px; }
+    h1 { margin-bottom: 4px; font-size: 27px; font-weight: 620; line-height: 1.3; }
+    .intro p, .option-label p, .footnote { color: var(--text-secondary); }
+    .options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+    .option { min-width: 0; container-type: inline-size; }
+    .option-label { margin-bottom: 10px; }
+    .option-label h2 { font-size: 14px; font-weight: 600; }
+    .option-label p { font-size: 12px; }
+    .transcript {
+      min-height: 323px;
+      padding: 20px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 9px;
+      background: var(--transcript);
+    }
+    .user {
+      width: fit-content;
+      max-width: 86%;
+      margin: 0 0 20px auto;
+      padding: 8px 12px;
+      border-radius: 12px 12px 4px 12px;
+      background: #a8a8a8;
+      color: #171717;
+    }
+    .assistant { margin-bottom: 15px; }
+    .list-heading { margin-bottom: 2px; color: var(--text-secondary); font-size: 12px; font-weight: 500; }
+    .rows { padding: 0; list-style-type: none; }
+    .row { margin-bottom: 3px; }
+    .row:last-child { margin-bottom: 0; }
+    .row-header { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .row-title {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      min-width: 0;
+      min-height: 28px;
+      padding-left: 4px;
+    }
+    .row-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-title .icon { color: var(--text-secondary); }
+    .metrics {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 57px 79px;
+      align-items: baseline;
+      gap: 7px;
+      flex: 0 0 253px;
+      margin-left: auto;
+      color: var(--text-secondary);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .elapsed { text-align: right; }
+    .elapsed, .amount { font-variant-numeric: tabular-nums; }
+    .elapsed .icon { margin-right: 3px; vertical-align: -2px; }
+    .cost { position: relative; text-align: right; }
+    .cost-button, .cost-missing { display: inline-flex; align-items: center; gap: 3px; min-height: 28px; padding: 0 5px; }
+    .cost-button { border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
+    .cost-button:hover, .cost-button[aria-expanded="true"] { background: var(--surface-hover); color: var(--text-primary); }
+    .report {
+      margin: 1px 0 6px 4px;
+      padding-left: 9px;
+      border-left: 1px solid var(--border-subtle);
+      color: var(--text-secondary);
+    }
+    .cost-detail {
+      position: absolute;
+      z-index: 1;
+      inset: calc(100% + 3px) 0 auto auto;
+      width: 224px;
+      max-width: calc(100cqi - 40px);
+      padding: 9px 11px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 7px;
+      background: var(--surface-input);
+      box-shadow: 0 6px 20px #0009;
+      text-align: left;
+      white-space: normal;
+    }
+    .cost-heading { display: block; margin-bottom: 4px; color: var(--text-primary); font-size: 12px; font-weight: 600; }
+    .cost-line { display: flex; justify-content: space-between; gap: 8px; }
+    .cost-total { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--border-subtle); color: var(--text-primary); }
+    .footnote { margin-top: 14px; font-size: 12px; }
+
+    .compact .row-title { flex: 1 1 auto; }
+    .stacked .row-header { display: grid; gap: 0; }
+    .stacked .row-title { justify-self: start; max-width: 100%; }
+    .stacked .metrics { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: -4px 0 0 4px; }
+    .stacked .metrics > :not(:first-child)::before { content: "·"; margin-right: 8px; }
+    .stacked .cost-button, .stacked .cost-missing { margin-left: -3px; }
+    .stacked .row { position: relative; margin-bottom: 5px; }
+    .stacked .cost { position: static; }
+    .stacked .cost-detail { inset: 51px auto auto 4px; }
+
+    @container (max-width: 485px) {
+      .compact .row-header { display: grid; gap: 0; }
+      .compact .row-title { justify-self: start; max-width: 100%; }
+      .compact .metrics { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: -4px 0 0 4px; }
+      .compact .metrics > :not(:first-child)::before { content: "·"; margin-right: 8px; }
+      .compact .cost-button, .compact .cost-missing { margin-left: -3px; }
+      .compact .row { position: relative; margin-bottom: 5px; }
+      .compact .cost { position: static; }
+      .compact .cost-detail { inset: 51px auto auto 4px; }
+    }
+    @media (max-width: 1060px) {
+      .board { max-width: 700px; }
+      .options { grid-template-columns: minmax(0, 1fr); }
+    }
+    @media (max-width: 550px) {
+      .board { padding: 25px 15px; }
+      .transcript { padding: 14px; }
+    }
+  </style>
+</head>
+<body>
+  <svg class="definitions" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <symbol id="chevron" viewBox="0 0 16 16">
+      <path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="running" viewBox="0 0 16 16">
+      <path d="M8 2.5a5.5 5.5 0 1 1-5.5 5.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="layers" viewBox="0 0 16 16">
+      <path d="m8 3 5.5 3L8 9 2.5 6 8 3ZM13.5 9 8 12 2.5 9" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+  </svg>
+
+  <main class="board">
+    <header class="intro">
+      <p class="eyebrow">Urd / Transcript</p>
+      <h1>Subagent rows</h1>
+      <p>Model, elapsed time, and total cost without opening the subagent.</p>
+    </header>
+
+    <div class="options">
+      <section class="option compact" aria-labelledby="compact-label">
+        <header class="option-label">
+          <h2 id="compact-label">A · Aligned metrics</h2>
+          <p>Faster to scan across a batch. Stacks when space runs out.</p>
+        </header>
+        <div class="transcript" data-preview="a"></div>
+      </section>
+      <section class="option stacked" aria-labelledby="stacked-label">
+        <header class="option-label">
+          <h2 id="stacked-label">B · Below the title</h2>
+          <p>More room for titles, with the same layout at every width.</p>
+        </header>
+        <div class="transcript" data-preview="b"></div>
+      </section>
+    </div>
+    <p class="footnote">Select a cost to see the breakdown. Values are illustrative.</p>
+  </main>
+
+  <template id="preview">
+    <p class="user">Check the transcript for regressions before we ship.</p>
+    <p class="assistant">I’ll split the review across scrolling, accessibility, and tests.</p>
+    <h3 class="list-heading">Subagents</h3>
+    <ul class="rows">
+      <li class="row">
+        <div class="row-header">
+          <div class="row-title" title="Trace scroll anchoring">
+            <span>Trace scroll anchoring</span><svg class="icon" aria-hidden="true"><use href="#chevron"/></svg>
+          </div>
+          <div class="metrics">
+            <span class="model" title="Claude Sonnet 4.6">Claude Sonnet 4.6</span>
+            <span class="elapsed" title="1 minute 18 seconds elapsed"><time datetime="PT1M18S">1:18</time></span>
+            <span class="cost">
+              <button class="cost-button" type="button" aria-expanded="false" aria-label="Scroll anchoring cost: $0.084 including descendants">
+                <svg class="icon" aria-hidden="true"><use href="#layers"/></svg><span class="amount">$0.084</span>
+              </button>
+              <span class="cost-detail" hidden>
+                <span class="cost-heading">Cost breakdown</span>
+                <span class="cost-line"><span>This subagent</span><span class="amount">$0.031</span></span>
+                <span class="cost-line"><span>Nested subagents</span><span class="amount">$0.053</span></span>
+                <span class="cost-line cost-total"><span>Total</span><span class="amount">$0.084</span></span>
+              </span>
+            </span>
+          </div>
+        </div>
+        <p class="report">Appending tool results preserves the reading position.</p>
+      </li>
+      <li class="row">
+        <div class="row-header">
+          <div class="row-title" title="Review keyboard and focus behavior">
+            <span>Review keyboard and focus behavior</span><svg class="icon" aria-hidden="true"><use href="#chevron"/></svg>
+          </div>
+          <div class="metrics">
+            <span class="model" title="GPT-5.4 Mini">GPT-5.4 Mini</span>
+            <span class="elapsed" title="Running · 24 seconds elapsed"><svg class="icon" aria-hidden="true"><use href="#running"/></svg><time datetime="PT24S" aria-label="Running, 24 seconds elapsed">0:24</time></span>
+            <span class="cost">
+              <button class="cost-button" type="button" aria-expanded="false" aria-label="Keyboard and focus review cost so far: $0.012">
+                <span class="amount">$0.012</span>
+              </button>
+              <span class="cost-detail" hidden>
+                <span class="cost-heading">Cost so far</span>
+                <span class="cost-line"><span>This subagent</span><span class="amount">$0.012</span></span>
+                <span class="cost-line cost-total"><span>Total</span><span class="amount">$0.012</span></span>
+              </span>
+            </span>
+          </div>
+        </div>
+      </li>
+      <li class="row">
+        <div class="row-header">
+          <div class="row-title" title="Run transcript tests">
+            <span>Run transcript tests</span>
+          </div>
+          <div class="metrics">
+            <span class="model" title="Claude Haiku 4.5">Claude Haiku 4.5</span>
+            <span class="elapsed" title="Not started">Queued</span>
+            <span class="cost"><span class="cost-missing" title="Cost not available">—</span></span>
+          </div>
+        </div>
+      </li>
+    </ul>
+  </template>
+
+  <script>
+    const sample = document.getElementById('preview');
+    for (const transcript of document.querySelectorAll('[data-preview]')) {
+      transcript.append(sample.content.cloneNode(true));
+      for (const [index, button] of [...transcript.querySelectorAll('.cost-button')].entries()) {
+        const id = `cost-${transcript.dataset.preview}-${index}`;
+        button.setAttribute('aria-controls', id);
+        button.nextElementSibling.id = id;
+      }
+    }
+
+    let activeCost;
+    function closeCost() {
+      if (!activeCost) return;
+      activeCost.setAttribute('aria-expanded', 'false');
+      activeCost.nextElementSibling.hidden = true;
+      activeCost = undefined;
+    }
+    document.addEventListener('click', (event) => {
+      const button = event.target.closest('.cost-button');
+      if (activeCost?.nextElementSibling.contains(event.target)) return;
+      const alreadyOpen = activeCost === button;
+      closeCost();
+      if (button && !alreadyOpen) {
+        activeCost = button;
+        button.setAttribute('aria-expanded', 'true');
+        button.nextElementSibling.hidden = false;
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && activeCost) {
+        activeCost.focus();
+        closeCost();
+      }
+    });
+    document.addEventListener('focusin', (event) => {
+      if (activeCost && !activeCost.parentElement.contains(event.target)) closeCost();
+    });
+  </script>
+</body>
+</html>

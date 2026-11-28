@@ -274,6 +274,18 @@ out those version changes as a fix. [LiteLLM's custom-app experiment](https://gi
 reported a larger catalog with the SDK's integration ID on a different grant. That
 is evidence for client-specific routing, not permission to use another client's ID.
 
+A second same-grant comparison passed one fresh Urd OAuth token to both Urd's
+`/models` request and the official [`@microsoft/copilot-sdk` 2.0.4](https://www.npmjs.com/package/@microsoft/copilot-sdk/v/2.0.4)
+`listModels()` in an isolated process with stored-account fallback disabled. Urd's
+request again returned `200`, eight entries with the picker flag false, no advertised
+inference endpoints, and zero selectable models. The SDK returned 28 models: 18 with
+policy `enabled`, none with policy `disabled`, and 10 with another or absent policy
+state. No client identity was overridden, no Copilot session was created, and no
+inference was sent. This establishes different discovery results with the same grant,
+not which headers, routing, or SDK processing produced the difference. The SDK result
+is not evidence that the raw route permits any of those models. Keep Urd's model
+checks and runtime unchanged; a standalone route needs a provider-supported contract.
+
 Official documentation below was inspected **2026-11-04**; mutable docs are not
 version-pinned. Library/source pins are research evidence, not selected packages.
 

@@ -32,5 +32,6 @@ internal static class SharedAgentGuidance {
       - Verify your work before calling it done. Scale verification to the risk: targeted checks of what you changed usually suffice (for example, the affected tests); run a wide suite or full build only when the change is broad or touches shared behavior.
       - Do not use background tool calls for calls that do not take a notable amount of time. For example, file reads and edits.
       - Consider style. For example, relative paths versus full paths, naming, design. Stylistic concerns should not be neglected. A pr containing poor naming, messy tests, illogical grouping or data flows, is less likely to get merged.
+      - Do not use background tool calls for things such as dev servers or any long running tasks, this is the wrong tool for the job, these should be new processes or be background bash calls via '&'
       """;
 }

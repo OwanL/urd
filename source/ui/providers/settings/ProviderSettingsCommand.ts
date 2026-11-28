@@ -18,12 +18,20 @@ export function commandFailureNotice(
   error: unknown,
 ): Exclude<ProviderSettingsNotice, { outcome: "succeeded" }> {
   const httpStatus = error instanceof RequestError ? error.status : undefined;
-  return {
-    operation,
-    outcome:
-      httpStatus !== undefined && [400, 404, 409, 415, 422].includes(httpStatus)
-        ? "rejected"
-        : "uncertain",
-    ...(httpStatus !== undefined ? { httpStatus } : {}),
-  };
+  const body = error instanceof RequestError ? error.responseBody : undefined;
+  if (httpStatus !== undefined && [400, 404, 409, 415, 422].includes(httpStatus)) {
+    const copilotNotConfigured =
+      operation === "beginSignIn" &&
+      body &&
+      typeof body === "object" &&
+      "error" in body &&
+      body.error === "copilotNotConfigured";
+    return {
+      operation,
+      outcome: "rejected",
+      httpStatus,
+      ...(copilotNotConfigured ? { errorCode: "copilotNotConfigured" } : {}),
+    };
+  }
+  return { operation, outcome: "uncertain", ...(httpStatus !== undefined ? { httpStatus } : {}) };
 }

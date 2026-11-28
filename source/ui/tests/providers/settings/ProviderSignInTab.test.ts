@@ -76,3 +76,49 @@ void test("blocked sign-in exposes fallback; rejected start closes reserved tab"
     Reflect.deleteProperty(globalThis, "window");
   }
 });
+
+void test("GitHub Copilot creation starts device sign-in without opening a popup", async () => {
+  const copilot: ProviderConnection = { ...connection, id: "copilot", route: "gitHubCopilot" };
+  const attempt = { ...pending, connectionId: copilot.id, userCode: "ABCD-EFGH" };
+  let opens = 0;
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      open: () => {
+        opens++;
+        return null;
+      },
+    },
+  });
+  try {
+    let listed = false;
+    const { state } = setup({
+      list: async () => (listed ? [copilot] : []),
+      createGitHubCopilot: async (name) => {
+        assert.equal(name, "GitHub Copilot");
+        return copilot;
+      },
+      beginSignIn: async () => attempt,
+      getSignIn: async () => attempt,
+      cancelSignIn: async () => ({ ...attempt, status: "cancelled", userCode: null }),
+    });
+    state.setActivity(true, true);
+    await flush();
+    state.select(null);
+    state.editAdd({ route: "gitHubCopilot" });
+    listed = true;
+    await state.createAndSignIn();
+    assert.equal(opens, 0);
+    assert.equal(state.snapshot.signIns[copilot.id]?.userCode, "ABCD-EFGH");
+    assert.equal(state.snapshot.blockedSignIns[copilot.id], false);
+    await state.cancelSignIn(attempt);
+    assert.equal(state.snapshot.signIns[copilot.id]?.status, "cancelled");
+    assert.equal(state.snapshot.signIns[copilot.id]?.userCode, null);
+    await state.beginSignIn(copilot, true);
+    assert.equal(state.snapshot.signIns[copilot.id]?.status, "pending");
+    assert.equal(opens, 0);
+    state.setActivity(false, false);
+  } finally {
+    Reflect.deleteProperty(globalThis, "window");
+  }
+});

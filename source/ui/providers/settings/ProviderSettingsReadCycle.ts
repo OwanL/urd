@@ -61,6 +61,13 @@ export async function readProviderSettings(client: ReadClient, cycle: ReadCycle)
       if (isCurrent()) setError(key, readFailure(error));
     }
   };
+  const observeCatalog = (id: string) =>
+    observe(
+      `models:${id}`,
+      () => client.getModels(id, signal),
+      (catalog) =>
+        publish({ catalogs: { ...snapshot().catalogs, [catalog.connectionId]: catalog } }),
+    );
   const observeSignIn = async (previous: ProviderSignIn) => {
     const key = `signIn:${previous.connectionId}`;
     let next: ProviderSignIn;
@@ -92,6 +99,17 @@ export async function readProviderSettings(client: ReadClient, cycle: ReadCycle)
       if (!isCurrent()) return;
       setError(`credentials:${next.connectionId}`, readFailure(error));
     }
+    if (
+      next.status === "completed" &&
+      snapshot().selectedId === next.connectionId &&
+      snapshot().connections.some(
+        ({ id, route }) => id === next.connectionId && route === "gitHubCopilot",
+      )
+    ) {
+      // The catalog read earlier in this pass may have preceded Copilot's sign-in refresh.
+      await observeCatalog(next.connectionId);
+      if (!isCurrent()) return;
+    }
     storeSignIn(next);
     complete(next, credentials);
   };
@@ -112,15 +130,7 @@ export async function readProviderSettings(client: ReadClient, cycle: ReadCycle)
     ),
   ]);
   const { selectedId } = snapshot();
-  if (selectedId)
-    jobs.push(
-      observe(
-        `models:${selectedId}`,
-        () => client.getModels(selectedId, signal),
-        (catalog) =>
-          publish({ catalogs: { ...snapshot().catalogs, [catalog.connectionId]: catalog } }),
-      ),
-    );
+  if (selectedId) jobs.push(observeCatalog(selectedId));
   await Promise.all(jobs);
   if (!isCurrent()) return;
   const uncertainId = cycle.uncertainModelConnectionId();

@@ -5,8 +5,8 @@ public sealed record ProviderConnection(
     Guid Id, string Name, ProviderRoute Route, LlmApi Api, Uri Endpoint,
     AuthenticationMethod Authentication);
 
-public enum ProviderRoute { OpenAI, ChatGpt, Custom }
-public enum LlmApi { OpenAIResponses, OpenAIChatCompletions }
+public enum ProviderRoute { OpenAI, ChatGpt, Custom, GitHubCopilot }
+public enum LlmApi { OpenAIResponses, OpenAIChatCompletions, AnthropicMessages }
 public enum AuthenticationMethod { None, ApiKey, OAuth }
 
 // The editable settings of a custom API connection, without credentials.

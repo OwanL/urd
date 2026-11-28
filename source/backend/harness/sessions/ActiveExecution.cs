@@ -11,7 +11,7 @@ namespace Urd.Core.Sessions;
 
 // Owns the current driver and its registration, stop and completion lifetime.
 internal sealed class ActiveExecution(SessionBase session, UrdStore store, AsyncLock sessionLock,
-    Func<ProviderConnection, IChatClient> createChatClient, ToolCatalog tools, PendingToolCalls pending,
+    Func<ProviderConnection, LlmApi?, IChatClient> createChatClient, ToolCatalog tools, PendingToolCalls pending,
     ISubagentRunner? subagents) {
   private readonly StartingContextBuilder startingContextBuilder = new(tools, instructionDiscovery: store.InstructionDiscovery);
 

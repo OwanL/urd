@@ -31,6 +31,10 @@ export class ProviderClient {
     return requestJson(this.url("/chatgpt"), "POST", { name });
   }
 
+  createGitHubCopilot(name: string): Promise<ProviderConnection> {
+    return requestJson(this.url("/github-copilot"), "POST", { name });
+  }
+
   createOpenAI(name: string): Promise<ProviderConnection> {
     return requestJson(this.url("/openai"), "POST", { name });
   }

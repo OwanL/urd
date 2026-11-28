@@ -1,11 +1,14 @@
-using Microsoft.Extensions.AI;
+using System.Text.Json.Serialization;
 
 namespace Urd.Core.Providers;
 
 // The complete secret-free choice frozen by an initiating Send, not a live connection lookup.
 public sealed record LlmSelection(
     ProviderConnection Connection, string ModelId, string? ReasoningEffort, ModelFamily Family, bool SupportsImages,
-    int? ContextWindow = null) {
+    int? ContextWindow = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] LlmApi? ModelApi = null) {
+  internal LlmApi EffectiveApi => ModelApi ?? Connection.Api;
+
   internal void Validate() {
     if (Connection is null || Connection.Id == Guid.Empty || string.IsNullOrWhiteSpace(ModelId))
       throw new ArgumentException("An LLM selection requires a connection and model.");
@@ -16,6 +19,14 @@ public sealed record LlmSelection(
         || Connection.Endpoint is not { IsAbsoluteUri: true } endpoint
         || (endpoint.Scheme != Uri.UriSchemeHttps && endpoint.Scheme != Uri.UriSchemeHttp))
       throw new ArgumentException("The selected connection binding is invalid.");
+    if (Connection.Route == ProviderRoute.GitHubCopilot) {
+      if (Connection.Api != LlmApi.OpenAIResponses || Connection.Authentication != AuthenticationMethod.OAuth)
+        throw new ArgumentException("The selected Copilot connection binding is invalid.");
+      if (ModelApi is not { } api || !Enum.IsDefined(api))
+        throw new ArgumentException("A Copilot selection requires a valid model API.", nameof(ModelApi));
+    } else if (ModelApi is not null || Connection.Api == LlmApi.AnthropicMessages) {
+      throw new ArgumentException("Only Copilot selections can specify a model API or use Anthropic Messages.", nameof(ModelApi));
+    }
   }
 
   // These are the standard effort levels in the pinned MEAI SDK, not model capabilities.

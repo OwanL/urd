@@ -73,6 +73,14 @@ const mutations: {
     status: 201,
   },
   {
+    name: "create GitHub Copilot",
+    call: (c) => c.createGitHubCopilot("GitHub Copilot"),
+    path: "/github-copilot",
+    body: { name: "GitHub Copilot" },
+    response: { ...connection, route: "gitHubCopilot", authentication: "oAuth" },
+    status: 201,
+  },
+  {
     name: "create OpenAI",
     call: (c) => c.createOpenAI("OpenAI"),
     path: "/openai",

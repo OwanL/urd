@@ -142,7 +142,7 @@ export function ProviderSettings({
   };
   const choose = (route: ProviderRoute) => {
     actions.editAdd({ route });
-    if (route !== "custom") create(route === "chatGpt");
+    if (route !== "custom") create(route === "chatGpt" || route === "gitHubCopilot");
     else {
       actions.select(null);
       show({ screen: "custom", connectionId: null, creating: null, returnId: null });

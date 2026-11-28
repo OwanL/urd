@@ -92,6 +92,39 @@ public sealed class ModelSelectorTests {
     }
   }
 
+  [Fact]
+  public async Task CopilotSelectionsFreezeCatalogProtocolForAuxiliaryAndSubagentRuns() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var manager = new ProviderManager(store, () => new Uri("http://localhost/auth/callback"), copilotClientId: "fixture");
+    try {
+      ProviderConnection connection = await manager.AddGitHubCopilotAsync("GitHub Copilot");
+      ProviderState state = store.Providers.SetCredentials(connection.Id, 0, new("fixture", "account", null),
+          new(null, "synthetic-copilot-access", "synthetic-github-access", null, DateTimeOffset.UtcNow.AddHours(1), []));
+      Assert.True(store.Providers.SaveCatalog(connection.Id, state.Generation, new(connection.Id, DateTimeOffset.UtcNow, [
+        new("null-api", "Missing protocol"),
+        new("chat-model", "Chat", Api: LlmApi.OpenAIChatCompletions),
+        new("messages-model", "Messages", Api: LlmApi.AnthropicMessages)
+      ])));
+      var preferences = new PreferenceManager(store);
+      preferences.SetBucketModels(ModelBucket.Small, [new(connection.Id, "null-api"), new(connection.Id, "chat-model")]);
+      preferences.SetModelChoice(AuxiliaryModelPurpose.Skills, ModelChoice.ForModel(connection.Id, "messages-model"));
+      var selector = new ModelSelector(manager);
+      LlmSelection configured = await selector.ResolveAsync(AuxiliaryModelPurpose.Skills, preferences.Read());
+      LlmSelection bucket = await selector.ResolveAsync(ModelBucket.Small, preferences.Read());
+      LlmSelection subagent = await selector.ResolveSubagentAsync("small", preferences.Read(), [connection.Id]);
+
+      Assert.Equal(LlmApi.AnthropicMessages, configured.ModelApi);
+      Assert.Equal("chat-model", bucket.ModelId);
+      Assert.Equal(LlmApi.OpenAIChatCompletions, bucket.ModelApi);
+      Assert.Equal(bucket, subagent);
+      Assert.All(new[] { configured, bucket, subagent }, selection => Assert.Equal(connection, selection.Connection));
+      Assert.Equal(LlmApi.OpenAIResponses, connection.Api);
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
   private static ProviderManager CreateManager(UrdStore store, params string[] modelIds) =>
       CreateManager(store, new ScriptedOpenAIHandler(CatalogBody(modelIds), "application/json"));
 

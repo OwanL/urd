@@ -92,6 +92,58 @@ public sealed class ProviderRoutesTests {
   }
 
   [Fact]
+  public async Task CopilotConnectionCanBeSavedWithoutOAuthConfiguration() {
+    using var database = new TemporaryDatabase();
+    var handler = new ScriptedOpenAIHandler("{}", "application/json");
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
+        createProviders: (store, callbackUri) => new ProviderManager(store, callbackUri, handler));
+    await server.WaitForReadyAsync();
+
+    ProviderConnection connection = await PostAsync<ProviderConnection>(server.Client, "/api/providers/github-copilot",
+        new { name = "GitHub Copilot" }, HttpStatusCode.Created);
+    Assert.Equal(ProviderRoute.GitHubCopilot, connection.Route);
+    Assert.Equal(AuthenticationMethod.OAuth, connection.Authentication);
+    using var listed = await SendAsync(server.Client, HttpMethod.Get, PathFor(connection));
+    JsonElement binding = await listed.Content.ReadFromJsonAsync<JsonElement>(json);
+    Assert.Equal("gitHubCopilot", binding.GetProperty("route").GetString());
+    Assert.Equal("GitHub Copilot", binding.GetProperty("name").GetString());
+
+    using var rejected = await SendAsync(server.Client, HttpMethod.Post, PathFor(connection, "/sign-in"),
+        expected: HttpStatusCode.Conflict);
+    JsonElement failure = await rejected.Content.ReadFromJsonAsync<JsonElement>(json);
+    Assert.Equal("copilotNotConfigured", failure.GetProperty("error").GetString());
+    Assert.Empty(handler.Requests);
+  }
+
+  [Fact]
+  public async Task CopilotSignInExposesOnlyTheUserCodeAndClearsItWhenCancelled() {
+    using var database = new TemporaryDatabase();
+    var handler = new ScriptedOpenAIHandler($$"""
+        {"device_code":"{{Secret}}","user_code":"ABCD-EFGH","verification_uri":"https://github.com/login/device",
+        "expires_in":600,"interval":60}
+        """, "application/json");
+    await using var server = new RunningServer(RunningServer.OptionsFor(database),
+        createProviders: (store, callbackUri) => new ProviderManager(store, callbackUri, handler,
+            copilotClientId: "synthetic-client-id"));
+    await server.WaitForReadyAsync();
+    ProviderConnection connection = await PostAsync<ProviderConnection>(server.Client, "/api/providers/github-copilot",
+        new { name = "GitHub Copilot" }, HttpStatusCode.Created);
+
+    using var started = await SendAsync(server.Client, HttpMethod.Post, PathFor(connection, "/sign-in"));
+    JsonElement signIn = await started.Content.ReadFromJsonAsync<JsonElement>(json);
+    Assert.Equal("pending", signIn.GetProperty("status").GetString());
+    Assert.Equal("ABCD-EFGH", signIn.GetProperty("userCode").GetString());
+    Assert.Equal("https://github.com/login/device", signIn.GetProperty("authorizationUrl").GetString());
+    Assert.False(signIn.TryGetProperty("deviceCode", out _));
+    string signInPath = $"/api/providers/sign-ins/{signIn.GetProperty("id").GetGuid():D}";
+    ProviderSignIn cancelled = await PostAsync<ProviderSignIn>(server.Client, $"{signInPath}/cancel");
+    Assert.Equal(ProviderSignInStatus.Cancelled, cancelled.Status);
+    Assert.Null(cancelled.UserCode);
+    Assert.Null(cancelled.AuthorizationUrl);
+    Assert.Equal("https://github.com/login/device/code", Assert.Single(handler.Requests).Uri.AbsoluteUri);
+  }
+
+  [Fact]
   public async Task OAuthCallbackClosesPageOnlyAfterSuccessfulSignIn() {
     using var database = new TemporaryDatabase();
     using var identity = new FakeOpenAIIdentity();

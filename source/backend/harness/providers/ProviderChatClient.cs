@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 namespace Urd.Core.Providers;
 
 // A borrowed connection binding, not an agent/session or a credential-bearing SDK client.
-internal sealed class ProviderChatClient(ProviderRequests requests, ProviderConnection connection) : IChatClient {
+internal sealed class ProviderChatClient(ProviderRequests requests, ProviderConnection connection, LlmApi? modelApi) : IChatClient {
   private bool disposed;
 
   public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> messages, ChatOptions? options = null,
@@ -15,7 +15,7 @@ internal sealed class ProviderChatClient(ProviderRequests requests, ProviderConn
     ObjectDisposedException.ThrowIf(disposed, this);
     ArgumentNullException.ThrowIfNull(messages);
     ArgumentNullException.ThrowIfNull(options);
-    return requests.GetStreamingResponseAsync(connection, messages, options, cancellationToken);
+    return requests.GetStreamingResponseAsync(connection, modelApi, messages, options, cancellationToken);
   }
 
   public object? GetService(Type serviceType, object? serviceKey = null) {

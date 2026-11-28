@@ -73,10 +73,16 @@ export function providerSignInTabs({
   async function createAndSignIn(): Promise<void> {
     const { canMutate, setupVisible, visible } = activity();
     const { selectedId, add } = snapshot();
-    if (!canMutate || !setupVisible || !visible || selectedId !== null || add.route !== "chatGpt")
+    if (
+      !canMutate ||
+      !setupVisible ||
+      !visible ||
+      selectedId !== null ||
+      (add.route !== "chatGpt" && add.route !== "gitHubCopilot")
+    )
       return;
 
-    const tab = reserveTab();
+    const tab = add.route === "chatGpt" ? reserveTab() : null;
     const existingIds = new Set(snapshot().connections.map(({ id }) => id));
     const intent = signInIntent;
     let signIn: Promise<void> | undefined;
@@ -86,7 +92,7 @@ export function providerSignInTabs({
       const { canMutate, setupVisible, visible, setupView } = activity();
       if (
         existingIds.has(connection.id) ||
-        connection.route !== "chatGpt" ||
+        connection.route !== add.route ||
         connection.authentication !== "oAuth" ||
         !canMutate ||
         !setupVisible ||
@@ -116,7 +122,7 @@ export function providerSignInTabs({
       )
     )
       return Promise.resolve();
-    return startSignIn(connection, setup, reserveTab());
+    return startSignIn(connection, setup, connection.route === "chatGpt" ? reserveTab() : null);
   }
 
   async function startSignIn(
@@ -140,7 +146,7 @@ export function providerSignInTabs({
             closeReservation(tab);
             return;
           }
-          const blocked = finishReservation(tab, signIn);
+          const blocked = connection.route === "chatGpt" && finishReservation(tab, signIn);
           publish({ blockedSignIns: { ...snapshot().blockedSignIns, [connection.id]: blocked } });
         },
       );
@@ -181,6 +187,7 @@ export function providerSignInTabs({
       if (
         context &&
         next.status === "completed" &&
+        !next.catalogRefreshFailed &&
         credentials &&
         credentialState(context.connection, credentials) === "connected" &&
         notifyProviderReady(context.connection, context.view)

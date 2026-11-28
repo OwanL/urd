@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 46;
+  private const int SchemaVersion = 47;
 
   private const string SnoozedSessionsIndex = """
       CREATE INDEX sessions_snoozed_until ON sessions(snoozed_until_ms) WHERE snoozed_until_ms IS NOT NULL;
@@ -181,7 +181,38 @@ internal static class DatabaseSchema {
         """],
     // Prepare the index changes after SQLite has applied the column definition.
     [45] = [$"ALTER TABLE execution_runs ADD COLUMN {QueuedAfterCompactionColumn};",
-        "DROP INDEX one_active_execution;", ActiveExecutionIndexes]
+        "DROP INDEX one_active_execution;", ActiveExecutionIndexes],
+    [46] = ["""
+        CREATE TABLE next_provider_connections (
+            connection_id TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            route INTEGER NOT NULL CHECK (route IN (0, 1, 2, 3)),
+            api INTEGER NOT NULL CHECK (api IN (0, 1)),
+            endpoint TEXT NOT NULL,
+            authentication INTEGER NOT NULL CHECK (authentication IN (0, 1, 2)),
+            generation INTEGER NOT NULL CHECK (generation >= 0),
+            credential_version INTEGER NOT NULL CHECK (credential_version >= 0),
+            registration_json TEXT,
+            credentials_json TEXT,
+            disconnecting INTEGER NOT NULL CHECK (disconnecting IN (0, 1)),
+            catalog_json TEXT,
+            CHECK (route <> 2 OR authentication IN (0, 1))
+        ) STRICT;
+        INSERT INTO next_provider_connections SELECT * FROM provider_connections ORDER BY rowid;
+        CREATE TABLE next_model_settings (
+            connection_id TEXT NOT NULL REFERENCES next_provider_connections(connection_id) ON DELETE CASCADE,
+            model_id TEXT NOT NULL,
+            family INTEGER NOT NULL CHECK (family IN (0, 1, 2, 3)),
+            supports_images INTEGER NOT NULL CHECK (supports_images IN (0, 1)),
+            context_window INTEGER CHECK (context_window IS NULL OR context_window > 0),
+            PRIMARY KEY (connection_id, model_id)
+        ) STRICT;
+        INSERT INTO next_model_settings SELECT * FROM model_settings;
+        DROP TABLE model_settings;
+        DROP TABLE provider_connections;
+        ALTER TABLE next_provider_connections RENAME TO provider_connections;
+        ALTER TABLE next_model_settings RENAME TO model_settings;
+        """]
   };
 
   internal static void Initialize(SqliteConnection connection) {
@@ -626,7 +657,7 @@ internal static class DatabaseSchema {
       CREATE TABLE provider_connections (
           connection_id TEXT PRIMARY KEY NOT NULL,
           name TEXT NOT NULL,
-          route INTEGER NOT NULL CHECK (route IN (0, 1, 2)),
+          route INTEGER NOT NULL CHECK (route IN (0, 1, 2, 3)),
           api INTEGER NOT NULL CHECK (api IN (0, 1)),
           endpoint TEXT NOT NULL,
           authentication INTEGER NOT NULL CHECK (authentication IN (0, 1, 2)),

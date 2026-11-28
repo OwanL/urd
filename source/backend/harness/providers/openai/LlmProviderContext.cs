@@ -94,6 +94,25 @@ internal static class LlmProviderContext {
     return Freeze(scope, envelope);
   }
 
+  internal static LlmProviderResponse CaptureAnthropic(LlmProviderScope scope, IReadOnlyList<JsonElement> blocks) {
+    ValidateScope(scope);
+    Require(scope.Api == LlmApi.AnthropicMessages);
+    using var stream = new MemoryStream();
+    using (var writer = new Utf8JsonWriter(stream)) {
+      writer.WriteStartObject();
+      writer.WriteNumber("version", 1);
+      writer.WriteStartArray("blocks");
+      foreach (JsonElement block in blocks) {
+        block.WriteTo(writer);
+        writer.Flush();
+        CheckSize(stream.Length);
+      }
+      writer.WriteEndArray();
+      writer.WriteEndObject();
+    }
+    return Freeze(scope, stream);
+  }
+
   private static LlmProviderResponse Freeze(LlmProviderScope scope, MemoryStream stream) {
     CheckSize(stream.Length);
     var response = new LlmProviderResponse(scope, Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length));
@@ -122,6 +141,11 @@ internal static class LlmProviderContext {
             ExtractResponseItem(item, message.Contents);
           }
         }
+      } else if (response.Scope.Api == LlmApi.AnthropicMessages) {
+        JsonElement blocks = root.GetProperty("blocks");
+        foreach (JsonElement block in blocks.EnumerateArray())
+          AnthropicContentBlock.Restore(block, message.Contents);
+        if (nativeReplay) message.RawRepresentation = blocks.Clone();
       } else {
         Require(response.Scope.Api == LlmApi.OpenAIChatCompletions);
         JsonElement item = root.GetProperty("message");
@@ -246,7 +270,7 @@ internal static class LlmProviderContext {
 
   internal static void ValidateScope(LlmProviderScope scope) {
     Require(scope.Generation >= 0 && scope.ConnectionId != Guid.Empty);
-    Require(scope.Api is LlmApi.OpenAIResponses or LlmApi.OpenAIChatCompletions);
+    Require(scope.Api is LlmApi.OpenAIResponses or LlmApi.OpenAIChatCompletions or LlmApi.AnthropicMessages);
     Require(!string.IsNullOrWhiteSpace(scope.ModelId) && scope.ModelId.Length <= 256 && !scope.ModelId.Any(char.IsControl));
   }
 

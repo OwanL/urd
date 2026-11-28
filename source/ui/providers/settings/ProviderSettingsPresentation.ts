@@ -14,9 +14,28 @@ import type { ProviderSettingsState } from "./useProviderSettings.ts";
 
 export const providerNames = {
   chatGpt: "ChatGPT",
+  gitHubCopilot: "GitHub Copilot",
   openAI: "OpenAI",
   custom: "Custom",
 } as const;
+
+const copilotConfigurationMessage =
+  "GitHub Copilot is not configured for this Urd installation. Ask the installer to set URD_GITHUB_COPILOT_CLIENT_ID and restart Urd.";
+
+export function copilotSignInError(error: string | null): string | null {
+  switch (error) {
+    case "CopilotNotConfigured":
+      return copilotConfigurationMessage;
+    case "PlanAccessDenied":
+      return "GitHub denied Copilot access for this account or OAuth app.";
+    case "SignInRejected":
+      return "GitHub didn't authorize this sign-in. Try again.";
+    case "ProviderUnavailable":
+      return "GitHub sign-in is unavailable. Try again later.";
+    default:
+      return null;
+  }
+}
 
 const credentialStateLabels: Record<ProviderCredentialState, string> = {
   unknown: "Checking…",
@@ -89,6 +108,9 @@ export function noticeText(notice: ProviderSettingsNotice): string | null {
           : "not confirmed";
     return `Local credentials ${localCredentialsCleared ? "cleared" : "not confirmed cleared"}. Remote revocation: ${remoteRevocation}.`;
   }
+
+  if (notice.outcome === "rejected" && notice.errorCode === "copilotNotConfigured")
+    return copilotConfigurationMessage;
 
   const label = operationLabels[notice.operation];
   const detail = notice.httpStatus === undefined ? "" : ` (HTTP ${notice.httpStatus})`;

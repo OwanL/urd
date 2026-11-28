@@ -17,7 +17,7 @@ namespace Urd.Core.Execution;
 internal sealed class SessionExecution : IDisposable {
   private readonly SessionBase session;
   private readonly SessionExecutionRecorder recorder;
-  private readonly Func<ProviderConnection, IChatClient> createChatClient; // Returns borrowed clients.
+  private readonly Func<ProviderConnection, LlmApi?, IChatClient> createChatClient; // Returns borrowed clients.
   private readonly LlmSelection selection;
   private readonly StartingContextBuilder startingContextBuilder;
   private readonly HashSet<string> runtimeToolNames;
@@ -44,7 +44,7 @@ internal sealed class SessionExecution : IDisposable {
   private const string UnexpectedCompactionError = "History compaction failed unexpectedly. Previous context kept.";
 
   internal SessionExecution(SessionExecutionRecorder recorder, SessionBase session,
-      Func<ProviderConnection, IChatClient> createChatClient, LlmSelection selection,
+      Func<ProviderConnection, LlmApi?, IChatClient> createChatClient, LlmSelection selection,
       StartingContextBuilder startingContextBuilder, IReadOnlyList<AgentTool>? tools = null,
       PendingToolCalls? pendingToolCalls = null, ManualCompactionRequest? compaction = null, string? compactionSkipReason = null,
       IRemoteMcpTools? remoteMcpTools = null) {
@@ -213,8 +213,8 @@ internal sealed class SessionExecution : IDisposable {
       LlmSelection? small = await session.ResolveCompactionModelAsync(stop.Token);
       LlmSelection summarySelection = small ?? selection;
       IChatClient summaryClient = small is null
-          ? chatClient ??= createChatClient(selection.Connection)
-          : createChatClient(summarySelection.Connection);
+          ? chatClient ??= createChatClient(selection.Connection, selection.ModelApi)
+          : createChatClient(summarySelection.Connection, summarySelection.ModelApi);
       return await HistoryCompactor.GenerateSummaryAsync(summaryClient, summarySelection, plan, stop.Token,
           new UsageContext(session.Id, ExecutionId, "compaction"));
     } catch (OperationCanceledException) when (IsStopping) {
@@ -403,7 +403,7 @@ internal sealed class SessionExecution : IDisposable {
             currentHistory: request.Context, stamp: request.Stamp) ?? request;
       await PrepareStartingContextAsync(request);
       await PrepareRemoteMcpToolsAsync();
-      client = chatClient ??= createChatClient(selection.Connection);
+      client = chatClient ??= createChatClient(selection.Connection, selection.ModelApi);
       StartingContext context = startingContext!;
       await StartRequestAsync(request.RequestId, context);
       (bool presented, ChatMessage? reminder) = session.Questions.ReadQuestionForRequest(request);

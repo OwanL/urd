@@ -144,15 +144,25 @@ public sealed class SessionSnapshotStorageTests {
   }
 
   [Theory]
-  [InlineData(false)]
-  [InlineData(true)]
-  public void RunningAndStoppedRequestsKeepOnlyCompatibleMeasurements(bool switchModel) {
+  [InlineData(false, false)]
+  [InlineData(false, true)]
+  [InlineData(true, false)]
+  [InlineData(true, true)]
+  public void RunningAndStoppedRequestsKeepOnlyCompatibleMeasurements(bool copilot, bool changed) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
-    RecordAttempt(store, session, new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 });
-    LlmSelection selection = switchModel ? TestLlmSelection.Default with { ModelId = "other" } : TestLlmSelection.Default;
-    SessionContextUsage? expected = switchModel ? null : new(12, SessionContextUsageSource.LastMeasured);
+    LlmSelection selection = TestLlmSelection.Default;
+    if (copilot) {
+      selection = selection with {
+        Connection = selection.Connection with { Route = ProviderRoute.GitHubCopilot, Authentication = AuthenticationMethod.OAuth },
+        ModelApi = LlmApi.OpenAIChatCompletions
+      };
+    }
+    RecordAttempt(store, session, new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 }, selection);
+    if (changed)
+      selection = copilot ? selection with { ModelApi = LlmApi.AnthropicMessages } : selection with { ModelId = "other" };
+    SessionContextUsage? expected = changed ? null : new(12, SessionContextUsageSource.LastMeasured);
     Guid execution = Admit(store, session, selection);
     var identity = new ExecutionIdentity(session, execution, 0);
     LlmRequest request = store.Executions.CreateNextRequest(identity)!;
@@ -206,8 +216,9 @@ public sealed class SessionSnapshotStorageTests {
         store.Snapshots.ReadPersisted(session).ContextUsage);
   }
 
-  private static (Guid Execution, Guid Request) RecordAttempt(UrdStore store, Guid session, UsageDetails? usage) {
-    Guid execution = Admit(store, session);
+  private static (Guid Execution, Guid Request) RecordAttempt(UrdStore store, Guid session, UsageDetails? usage,
+      LlmSelection? selection = null) {
+    Guid execution = Admit(store, session, selection);
     var identity = new ExecutionIdentity(session, execution, 0);
     LlmRequest request = store.Executions.CreateNextRequest(identity)!;
     Assert.True(store.Executions.StartRequest(identity, request.RequestId));

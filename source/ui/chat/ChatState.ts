@@ -231,13 +231,22 @@ export function isSelection(value: unknown): value is LlmSelection | null {
   if (value === null) return true;
   if (!isRecord(value) || !isRecord(value.connection)) return false;
   const connection = value.connection;
+  const copilot = connection.route === "gitHubCopilot";
   return (
     isId(connection.id) &&
     typeof connection.name === "string" &&
     (connection.route === "openAI" ||
       connection.route === "chatGpt" ||
+      connection.route === "gitHubCopilot" ||
       connection.route === "custom") &&
-    (connection.api === "openAIResponses" || connection.api === "openAIChatCompletions") &&
+    (copilot
+      ? connection.api === "openAIResponses" &&
+        connection.authentication === "oAuth" &&
+        (value.modelApi === "openAIResponses" ||
+          value.modelApi === "openAIChatCompletions" ||
+          value.modelApi === "anthropicMessages")
+      : (connection.api === "openAIResponses" || connection.api === "openAIChatCompletions") &&
+        value.modelApi == null) &&
     isId(connection.endpoint) &&
     (connection.authentication === "none" ||
       connection.authentication === "apiKey" ||
@@ -320,6 +329,7 @@ function sameSelection(left: LlmSelection | null, right: LlmSelection | null): b
   if (left === null || right === null) return left === right;
   return (
     left.modelId === right.modelId &&
+    (left.modelApi ?? null) === (right.modelApi ?? null) &&
     left.family === right.family &&
     left.supportsImages === right.supportsImages &&
     left.contextWindow === right.contextWindow &&

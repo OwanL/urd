@@ -96,6 +96,40 @@ void test("automatic discovery skips signed-out providers without losing cached 
   ]);
 });
 
+void test("Copilot automatic discovery reads the sign-in catalog without a second refresh", async () => {
+  const copilot: ProviderConnection = {
+    ...firstConnection,
+    route: "gitHubCopilot",
+    authentication: "oAuth",
+  };
+  const modelCatalog = (id: string, name: string): ProviderModelCatalog => ({
+    connectionId: id,
+    refreshedAt: null,
+    models: [{ id: name, name, api: "anthropicMessages" }],
+  });
+  let posts = 0;
+  const models = new ModelOptions({
+    list: async () => [copilot],
+    getModels: async (id) => modelCatalog(id, "from-sign-in"),
+    getModelSettings: async () => [],
+    getCredentials: async () => assert.fail("Copilot catalog reads should not check credentials"),
+    refreshModels: async (id) => {
+      posts++;
+      return modelCatalog(id, "explicit");
+    },
+  });
+  const cached = await models.readCached(new AbortController().signal);
+  const automatic = await models.discover(cached.providersToRefresh, cached.revision);
+  assert.deepEqual(
+    automatic.options?.map(({ selection }) => selection.modelId),
+    ["from-sign-in"],
+  );
+  assert.deepEqual((await models.refresh(true)).options, automatic.options);
+  assert.equal(posts, 0);
+  assert.equal((await models.refresh()).options?.[0]?.selection.modelId, "explicit");
+  assert.equal(posts, 1);
+});
+
 void test("credential failures remain visible and stale discovery does not post", async () => {
   const credentials = deferred<ProviderCredentialStatus>();
   const started = deferred<void>();

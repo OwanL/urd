@@ -17,7 +17,10 @@ public sealed class ProviderManager : IDisposable {
   private readonly HttpMessageHandler handler;
   private readonly HttpClient client;
   private readonly ChatGptAuthentication authentication;
+  private readonly GitHubCopilotAuthentication copilot;
+  private readonly string? copilotClientId;
   private readonly OpenAIModelProbe modelProbe;
+  private readonly GitHubCopilotModels copilotModels;
   private readonly ProviderSignIns signIns;
   private readonly ProviderRequests requests;
   private readonly Dictionary<Guid, Task<ProviderState>> refreshes = [];
@@ -27,14 +30,16 @@ public sealed class ProviderManager : IDisposable {
   private bool stopping, disposed;
 
   public ProviderManager(UrdStore store, Func<Uri> callbackUri, ModelPriceCatalog? prices = null,
-      Action<ProviderDiagnostic>? diagnose = null)
+      Action<ProviderDiagnostic>? diagnose = null, string? copilotClientId = null)
       : this(store, callbackUri, new SocketsHttpHandler { AllowAutoRedirect = false }, prices: prices,
-          connectSocket: ChatGptSocketRun.ConnectAsync, diagnose: diagnose) { }
+          connectSocket: ChatGptSocketRun.ConnectAsync, diagnose: diagnose,
+          copilotClientId: copilotClientId ?? Environment.GetEnvironmentVariable("URD_GITHUB_COPILOT_CLIENT_ID")) { }
 
   // The manager owns this handler; test transports cannot fall back to real network access.
   internal ProviderManager(UrdStore store, Func<Uri> callbackUri, HttpMessageHandler handler, Uri? issuer = null,
       ModelPriceCatalog? prices = null, Func<string, Guid, CancellationToken, Task<WebSocket>>? connectSocket = null,
-      Action<ProviderDiagnostic>? diagnose = null, TimeProvider? retryClock = null) {
+      Action<ProviderDiagnostic>? diagnose = null, TimeProvider? retryClock = null,
+      string? copilotClientId = null, TimeProvider? copilotClock = null) {
     ArgumentNullException.ThrowIfNull(store);
     ArgumentNullException.ThrowIfNull(callbackUri);
     ArgumentNullException.ThrowIfNull(handler);
@@ -43,19 +48,24 @@ public sealed class ProviderManager : IDisposable {
     this.handler = handler;
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
+    this.copilotClientId = copilotClientId?.Trim();
+    copilot = new(client, this.copilotClientId, copilotClock);
     modelProbe = new(client, store.Usage, prices);
-    requests = new(gate, storage, modelSettings, new(client, connectSocket: connectSocket, diagnose: diagnose), GetCredentialsAsync,
-        ThrowIfStopping, EnsureAvailable, RequireCurrentGrant, store.Usage, prices, retryClock ?? TimeProvider.System);
-    signIns = new(storage, authentication, gate, callbackUri, id => requests.Cancel(id));
+    copilotModels = new(client);
+    requests = new(gate, storage, modelSettings, new(client, connectSocket: connectSocket, diagnose: diagnose), new(client),
+        GetCredentialsAsync, ThrowIfStopping, EnsureAvailable, RequireCurrentGrant, store.Usage, prices, retryClock ?? TimeProvider.System);
+    signIns = new(storage, authentication, gate, callbackUri, id => requests.Cancel(id), copilot, RefreshModelCatalogAsync);
   }
 
   // The client borrows this manager. Construction performs no network or credential access.
-  public IChatClient CreateChatClient(ProviderConnection expectedBinding) {
+  public IChatClient CreateChatClient(ProviderConnection expectedBinding, LlmApi? modelApi = null) {
     ArgumentNullException.ThrowIfNull(expectedBinding);
     if (expectedBinding.Id == Guid.Empty)
       throw new ArgumentException("A saved provider connection is required.", nameof(expectedBinding));
+    if (expectedBinding.Route == ProviderRoute.GitHubCopilot ? modelApi is null || !Enum.IsDefined(modelApi.Value) : modelApi is not null)
+      throw new ArgumentException("A model API is required for Copilot and not used by other providers.", nameof(modelApi));
     ObjectDisposedException.ThrowIf(disposed, this);
-    return new ProviderChatClient(requests, expectedBinding);
+    return new ProviderChatClient(requests, expectedBinding, modelApi);
   }
 
   public async Task<IReadOnlyList<ProviderConnection>> ListAsync(CancellationToken cancellationToken = default) {
@@ -75,6 +85,9 @@ public sealed class ProviderManager : IDisposable {
 
   public Task<ProviderConnection> AddChatGptAsync(string name) => AddAsync(new(Guid.NewGuid(), ValidateName(name),
       ProviderRoute.ChatGpt, LlmApi.OpenAIResponses, OpenAIEndpoint, AuthenticationMethod.OAuth));
+
+  public Task<ProviderConnection> AddGitHubCopilotAsync(string name) => AddAsync(new(Guid.NewGuid(), ValidateName(name),
+      ProviderRoute.GitHubCopilot, LlmApi.OpenAIResponses, GitHubCopilotAuthentication.DefaultEndpoint, AuthenticationMethod.OAuth));
 
   public Task<ProviderConnection> AddCustomAsync(CustomProviderSettings settings) {
     settings = ValidateCustom(settings);
@@ -255,9 +268,14 @@ public sealed class ProviderManager : IDisposable {
     return modelSettings.Save(settings);
   }
 
-  public Task<ProviderModelCatalog> RefreshModelCatalogAsync(Guid connectionId) => requests.RunRequestAsync(connectionId,
-      async (state, token) => {
-        IReadOnlyList<ProviderModel> fetched = await modelProbe.GetModelsAsync(state.Connection, state.Credentials, token);
+  public Task<ProviderModelCatalog> RefreshModelCatalogAsync(Guid connectionId) =>
+      RefreshModelCatalogAsync(connectionId, CancellationToken.None);
+
+  private Task<ProviderModelCatalog> RefreshModelCatalogAsync(Guid connectionId, CancellationToken cancellationToken) =>
+      requests.RunRequestAsync(connectionId, async (state, token) => {
+        IReadOnlyList<ProviderModel> fetched = state.Connection.Route == ProviderRoute.GitHubCopilot
+            ? await copilotModels.GetModelsAsync(state.Credentials!, token)
+            : await modelProbe.GetModelsAsync(state.Connection, state.Credentials, token);
         var catalog = new ProviderModelCatalog(connectionId, DateTimeOffset.UtcNow, fetched);
         using var held = await gate.AcquireAsync(token);
         token.ThrowIfCancellationRequested();
@@ -265,14 +283,16 @@ public sealed class ProviderManager : IDisposable {
         if (!storage.SaveCatalog(connectionId, state.Generation, catalog))
           throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
         return catalog;
-      }, CancellationToken.None);
+      }, cancellationToken);
 
   public Task<ProviderModelTestResult> TestModelAsync(Guid connectionId, string modelId,
       CancellationToken cancellationToken = default) {
     if (string.IsNullOrWhiteSpace(modelId) || modelId.Length > 256 || modelId.Any(char.IsControl))
       throw new ArgumentException("A model ID must be nonempty and at most 256 characters.", nameof(modelId));
     return requests.RunRequestAsync(connectionId,
-        (state, token) => modelProbe.TestModelAsync(state.Connection, state.Credentials, modelId, token), cancellationToken);
+        (state, token) => state.Connection.Route == ProviderRoute.GitHubCopilot
+            ? requests.TestCopilotModelAsync(state, modelId, token)
+            : modelProbe.TestModelAsync(state.Connection, state.Credentials, modelId, token), cancellationToken);
   }
 
   public async Task ShutdownAsync() {
@@ -326,7 +346,7 @@ public sealed class ProviderManager : IDisposable {
         throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
       if (state.Connection.Authentication == AuthenticationMethod.ApiKey)
         return state;
-      if (!HasPlanAccess(credentials))
+      if (!HasPlanAccess(state))
         throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
       bool refreshRequired = !(credentials.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1));
       if (!refreshRequired)
@@ -350,7 +370,7 @@ public sealed class ProviderManager : IDisposable {
     EnsureAvailable(state);
     if (state.Credentials?.RequiresSignIn != false)
       throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
-    if (!HasPlanAccess(state.Credentials))
+    if (!HasPlanAccess(state))
       throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
     ProviderState current = storage.Get(state.Connection.Id);
     EnsureAvailable(current);
@@ -363,7 +383,9 @@ public sealed class ProviderManager : IDisposable {
     Guid id = state.Connection.Id;
     try {
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-      ProviderCredentials credentials = await authentication.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token);
+      ProviderCredentials credentials = state.Connection.Route == ProviderRoute.GitHubCopilot
+          ? await copilot.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token)
+          : await authentication.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token);
       using var held = await gate.AcquireAsync();
       if (!storage.SaveRefresh(id, state.Generation, state.CredentialVersion, credentials))
         throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
@@ -371,7 +393,10 @@ public sealed class ProviderManager : IDisposable {
     } catch (Exception failure) {
       // A lost refresh acknowledgement may have rotated the remote token; require explicit recovery.
       using var held = await gate.AcquireAsync();
-      if (failure is not ProviderOperationException { Failure: ProviderFailure.ProviderUnavailable or ProviderFailure.ConnectionChanged }) {
+      bool requireSignIn = state.Connection.Route == ProviderRoute.GitHubCopilot
+          ? failure is ProviderOperationException { Failure: ProviderFailure.AuthenticationRequired }
+          : failure is not ProviderOperationException { Failure: ProviderFailure.ProviderUnavailable or ProviderFailure.ConnectionChanged };
+      if (requireSignIn) {
         signInRequired[id] = state.Generation;
         try {
           storage.SaveRefresh(id, state.Generation, state.CredentialVersion, state.Credentials! with { RequiresSignIn = true });
@@ -394,7 +419,8 @@ public sealed class ProviderManager : IDisposable {
       using (await gate.AcquireAsync())
         state = storage.Get(id);
       bool? revoked = null;
-      if (state.Registration is not null && !string.IsNullOrEmpty(state.Credentials?.RefreshToken)) {
+      if (state.Connection.Route == ProviderRoute.ChatGpt && state.Registration is not null &&
+          !string.IsNullOrEmpty(state.Credentials?.RefreshToken)) {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         try {
           revoked = await authentication.RevokeAsync(state.Registration, state.Credentials, timeout.Token);
@@ -443,7 +469,7 @@ public sealed class ProviderManager : IDisposable {
 
     return state.Connection.Authentication switch {
       AuthenticationMethod.ApiKey => !string.IsNullOrWhiteSpace(credentials.ApiKey),
-      AuthenticationMethod.OAuth => HasPlanAccess(credentials) && (credentials.ExpiresAt > freshAfter
+      AuthenticationMethod.OAuth => HasPlanAccess(state) && (credentials.ExpiresAt > freshAfter
           ? !string.IsNullOrWhiteSpace(credentials.AccessToken)
           : state.Registration is not null && !string.IsNullOrEmpty(credentials.RefreshToken)),
       _ => false
@@ -466,7 +492,7 @@ public sealed class ProviderManager : IDisposable {
       return;
     if (current.Credentials is null || current.Credentials.RequiresSignIn)
       throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
-    if (!HasPlanAccess(current.Credentials))
+    if (!HasPlanAccess(current))
       throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
     if (!current.Credentials.Scopes.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Credentials!.Scopes))
       throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
@@ -477,16 +503,19 @@ public sealed class ProviderManager : IDisposable {
       state.Credentials?.RequiresSignIn == true || RequiresSignIn(state) ||
           (state.Connection.Authentication == AuthenticationMethod.OAuth && state.Credentials is null),
       state.Registration?.Email, state.Credentials?.ExpiresAt,
-      state.Connection.Authentication == AuthenticationMethod.OAuth
-          ? state.Credentials is not null && HasPlanAccess(state.Credentials) : null,
+      state.Connection.Authentication == AuthenticationMethod.OAuth ? HasPlanAccess(state) : null,
       state.Disconnecting);
 
-  private bool RequiresSignIn(ProviderState state) => signInRequired.TryGetValue(state.Connection.Id, out long generation)
-      && generation == state.Generation;
+  private bool RequiresSignIn(ProviderState state) =>
+      signInRequired.TryGetValue(state.Connection.Id, out long generation) && generation == state.Generation ||
+      state.Connection.Route == ProviderRoute.GitHubCopilot && state.Registration is { } registration &&
+      !string.Equals(copilotClientId, registration.ClientId, StringComparison.Ordinal);
 
-  private static bool HasPlanAccess(ProviderCredentials credentials) =>
-      credentials.Scopes.Contains("resource.invoke", StringComparer.Ordinal) &&
-      credentials.Scopes.Contains("chatgpt.tokens.use.direct", StringComparer.Ordinal);
+  private static bool HasPlanAccess(ProviderState state) => state.Credentials is { } credentials &&
+      (state.Connection.Route == ProviderRoute.GitHubCopilot
+          ? state.Registration is not null && !string.IsNullOrWhiteSpace(credentials.RefreshToken)
+          : credentials.Scopes.Contains("resource.invoke", StringComparer.Ordinal) &&
+            credentials.Scopes.Contains("chatgpt.tokens.use.direct", StringComparer.Ordinal));
 
   private static async Task ObserveCompletion(Task? task) {
     if (task is null)
@@ -512,7 +541,8 @@ public sealed class ProviderManager : IDisposable {
 
   private static CustomProviderSettings ValidateCustom(CustomProviderSettings settings) {
     ArgumentNullException.ThrowIfNull(settings);
-    if (!Enum.IsDefined(settings.Api) || settings.Authentication is not (AuthenticationMethod.None or AuthenticationMethod.ApiKey))
+    if (settings.Api is not (LlmApi.OpenAIResponses or LlmApi.OpenAIChatCompletions) ||
+        settings.Authentication is not (AuthenticationMethod.None or AuthenticationMethod.ApiKey))
       throw new ArgumentException("Select a supported API and either an API key or no authentication.", nameof(settings));
     Uri endpoint = settings.Endpoint;
     if (endpoint is null || !endpoint.IsAbsoluteUri || endpoint.Scheme is not ("http" or "https") ||

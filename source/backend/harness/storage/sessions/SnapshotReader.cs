@@ -228,7 +228,8 @@ internal sealed class SnapshotReader {
         ? new(earlier, SessionContextUsageSource.LastMeasured) : compacted;
 
     bool CanReuse(Guid run) => run == latestExecution || (ReadLatestSelection(transaction, sessionId, run) is { } earlierSelection
-        && earlierSelection.ModelId == selection.ModelId && ProviderManager.SameBinding(earlierSelection.Connection, selection.Connection));
+        && earlierSelection.ModelId == selection.ModelId && earlierSelection.EffectiveApi == selection.EffectiveApi
+        && ProviderManager.SameBinding(earlierSelection.Connection, selection.Connection));
   }
 
   private (Guid Run, long? Tokens) RecentMeasurement(SqliteTransaction transaction, Guid sessionId, long revision, Guid? boundary) {

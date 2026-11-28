@@ -33,7 +33,7 @@ public abstract partial class SessionBase {
   private bool needsAttention;
   private bool? hasAcceptedInput;
 
-  private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
+  private protected SessionBase(SessionRecord record, SessionKind kind, UrdStore store, Func<ProviderConnection, LlmApi?, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
       PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null,
       int subagentDepth = 0) {

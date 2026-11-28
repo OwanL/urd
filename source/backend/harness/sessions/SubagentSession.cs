@@ -12,7 +12,10 @@ namespace Urd.Core.Sessions;
 public sealed class SubagentSession : SessionBase {
   internal Guid ParentSessionId { get; }
 
-  internal SubagentSession(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
+  internal SubagentSession(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient)
+      : this(record, store, (connection, _) => createChatClient(connection)) { }
+
+  internal SubagentSession(SessionRecord record, UrdStore store, Func<ProviderConnection, LlmApi?, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
       PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null,
       int depth = 1)

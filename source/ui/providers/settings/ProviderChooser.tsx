@@ -10,6 +10,11 @@ const choices = [
     hint: "Use the Codex access included in your ChatGPT plan.",
   },
   {
+    route: "gitHubCopilot",
+    label: "Sign in with GitHub Copilot",
+    hint: "Use Copilot access provided by your GitHub account or organization.",
+  },
+  {
     route: "openAI",
     label: "Use an OpenAI API key",
     hint: "Pay for API usage separately from your ChatGPT plan.",

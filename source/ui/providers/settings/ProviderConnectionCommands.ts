@@ -17,7 +17,13 @@ type ConnectionState = Pick<
 export function connectionCommands(
   client: Pick<
     ProviderSettingsClient,
-    "createChatGpt" | "createOpenAI" | "createCustom" | "updateCustom" | "remove" | "disconnect"
+    | "createChatGpt"
+    | "createGitHubCopilot"
+    | "createOpenAI"
+    | "createCustom"
+    | "updateCustom"
+    | "remove"
+    | "disconnect"
   >,
   command: RunProviderCommand,
   snapshot: () => ConnectionState,
@@ -34,6 +40,7 @@ export function connectionCommands(
       "add",
       () => {
         if (route === "chatGpt") return client.createChatGpt(settings.name);
+        if (route === "gitHubCopilot") return client.createGitHubCopilot("GitHub Copilot");
         if (route === "openAI") return client.createOpenAI(settings.name);
         return client.createCustom(settings);
       },

@@ -47,7 +47,7 @@ public sealed class SubagentSessionTests {
     SaveActiveSelection(database, parentId, "inherited");
     var session = new SubagentSession(store.Sessions.CreateSubagent(Guid.NewGuid(),
         parentId, "owning-call", Path.GetDirectoryName(database.Path)),
-        store, _ => executionClient, new ToolCatalog([Tool("inherited"), Tool("dropped")]),
+        store, (_, _) => executionClient, new ToolCatalog([Tool("inherited"), Tool("dropped")]),
         modelSelector: new ModelSelector(providers));
     try {
       Guid execution = await session.StartAssignmentAsync(AssignmentTask, ParentContextBlock,

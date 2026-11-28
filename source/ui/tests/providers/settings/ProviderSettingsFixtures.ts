@@ -60,6 +60,7 @@ const defaultClient: ProviderSettingsClient = {
   getBucketSuggestions: unsupported("getBucketSuggestions"),
   confirmBucketSuggestions: unsupported("confirmBucketSuggestions"),
   createChatGpt: unsupported("createChatGpt"),
+  createGitHubCopilot: unsupported("createGitHubCopilot"),
   createOpenAI: unsupported("createOpenAI"),
   createCustom: unsupported("createCustom"),
   updateCustom: unsupported("updateCustom"),

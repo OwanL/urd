@@ -1,7 +1,54 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelSettings } from "../../../providers/ModelSettings.ts";
-import { connection, emptyCatalog, flush, setup } from "./ProviderSettingsFixtures.ts";
+import type { ProviderConnection } from "../../../providers/ProviderConnection.ts";
+import type { ProviderModelCatalog } from "../../../providers/ProviderModels.ts";
+import type { ProviderSignIn } from "../../../providers/ProviderSignIn.ts";
+import {
+  connection,
+  credential,
+  emptyCatalog,
+  flush,
+  pending,
+  setup,
+} from "./ProviderSettingsFixtures.ts";
+
+void test("Copilot catalog failure retains sign-in and clears only after an acknowledged retry", async (context) => {
+  const copilot: ProviderConnection = { ...connection, route: "gitHubCopilot" };
+  const completed: ProviderSignIn = {
+    ...pending,
+    status: "completed",
+    authorizationUrl: null,
+    catalogRefreshFailed: true,
+  };
+  const refreshedCatalog = { ...emptyCatalog, refreshedAt: "2026-11-28T01:00:00Z" };
+  let currentCatalog: ProviderModelCatalog = emptyCatalog;
+  let refreshes = 0;
+  const { state } = setup({
+    list: async () => [copilot],
+    beginSignIn: async () => pending,
+    getSignIn: async () => completed,
+    getCredentials: async () => ({ ...credential, hasCredentials: true, requiresSignIn: false }),
+    getModels: async () => currentCatalog,
+    refreshModels: async () => {
+      refreshes++;
+      currentCatalog = refreshedCatalog;
+      return currentCatalog;
+    },
+  });
+  context.after(() => state.dispose());
+  state.setActivity(true, true);
+  await flush();
+  await state.beginSignIn(copilot, true);
+  assert.equal(state.snapshot.signIns[copilot.id]?.status, "completed");
+  assert.equal(state.snapshot.signIns[copilot.id]?.catalogRefreshFailed, true);
+  assert.equal(state.snapshot.credentials[copilot.id]?.hasCredentials, true);
+  assert.equal(refreshes, 0);
+  await state.refreshModels(copilot);
+  assert.equal(refreshes, 1);
+  assert.equal(state.snapshot.signIns[copilot.id]?.status, "completed");
+  assert.equal(state.snapshot.signIns[copilot.id]?.catalogRefreshFailed, false);
+});
 
 void test("model metadata drafts survive reads, refresh and disconnect; saves are explicit and removal clears them", async (context) => {
   let records: readonly ModelSettings[] = [

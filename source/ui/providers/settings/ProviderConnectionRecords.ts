@@ -20,7 +20,7 @@ function draftOf(connection: ProviderConnection): ConnectionDraft {
   return {
     name: connection.name,
     endpoint: connection.endpoint,
-    api: connection.api,
+    api: connection.api === "openAIChatCompletions" ? "openAIChatCompletions" : "openAIResponses",
     authentication: connection.authentication === "none" ? "none" : "apiKey",
   };
 }

@@ -16,7 +16,7 @@ namespace Urd.Core.Sessions;
 public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, IAgentQuestions, IUserQuestions {
   public ValueTask DisposeAsync() => new(ShutdownSessionsAsync());
   private readonly UrdStore store;
-  private readonly Func<ProviderConnection, IChatClient> createChatClient;
+  private readonly Func<ProviderConnection, LlmApi?, IChatClient> createChatClient;
   private readonly AgentToolSettings? toolSettings;
   private readonly PreferenceManager preferences;
   private readonly ModelSelector? modelSelector;
@@ -65,15 +65,29 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
   public SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null, ModelSelector? modelSelector = null,
       IRemoteMcpTools? remoteMcpTools = null)
+      : this(store, IgnoreModelApi(createChatClient), toolSettings, preferences, modelSelector, remoteMcpTools) { }
+
+  internal SessionManager(UrdStore store, Func<ProviderConnection, LlmApi?, IChatClient> createChatClient,
+      AgentToolSettings? toolSettings = null, PreferenceManager? preferences = null, ModelSelector? modelSelector = null,
+      IRemoteMcpTools? remoteMcpTools = null)
       : this(store, createChatClient, toolSettings, preferences, modelSelector, remoteMcpTools, [],
           Path.GetPathRoot(Environment.CurrentDirectory)) { }
 
   // Focused execution tests supply Urd-owned tools without composing Windows processes.
   internal SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       IReadOnlyList<AgentTool> tools, string workingDirectory, ModelSelector? modelSelector = null)
+      : this(store, IgnoreModelApi(createChatClient), tools, workingDirectory, modelSelector) { }
+
+  internal SessionManager(UrdStore store, Func<ProviderConnection, LlmApi?, IChatClient> createChatClient,
+      IReadOnlyList<AgentTool> tools, string workingDirectory, ModelSelector? modelSelector = null)
       : this(store, createChatClient, null, null, modelSelector, null, tools, Path.GetFullPath(workingDirectory)) { }
 
-  private SessionManager(UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
+  private static Func<ProviderConnection, LlmApi?, IChatClient> IgnoreModelApi(Func<ProviderConnection, IChatClient> createChatClient) {
+    ArgumentNullException.ThrowIfNull(createChatClient);
+    return (connection, _) => createChatClient(connection);
+  }
+
+  private SessionManager(UrdStore store, Func<ProviderConnection, LlmApi?, IChatClient> createChatClient,
       AgentToolSettings? toolSettings, PreferenceManager? preferences, ModelSelector? modelSelector,
       IRemoteMcpTools? remoteMcpTools, IReadOnlyList<AgentTool> injectedTools, string? fallbackWorkingDirectory) {
     ArgumentNullException.ThrowIfNull(store);

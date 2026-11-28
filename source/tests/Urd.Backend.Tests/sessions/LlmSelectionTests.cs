@@ -13,8 +13,10 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Sessions;
 
 public sealed class LlmSelectionTests {
-  [Fact]
-  public async Task ChangedSelectionCannotRetryOrSteer() {
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ChangedSelectionCannotRetryOrSteer(bool copilot) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     using var client = new ScriptedChatClient(Complete);
@@ -22,16 +24,18 @@ public sealed class LlmSelectionTests {
     PrimarySession session = await manager.CreatePrimaryAsync();
     // Admit through storage so the active execution stays held without a provider task.
     Guid execution = Guid.NewGuid();
-    var original = new UserMessageSubmission(Guid.NewGuid(), 0, "original", TestLlmSelection.Default);
+    LlmSelection selection = copilot ? CopilotSelection : TestLlmSelection.Default;
+    var original = new UserMessageSubmission(Guid.NewGuid(), 0, "original", selection);
     UserMessageReceipt accepted = store.UserMessages.Submit(session.Id, 0, original, true, execution).Receipt;
-    LlmSelection selection = original.LlmSelection!;
     ProviderConnection connection = selection.Connection;
-    LlmSelection[] changed = [
+    List<LlmSelection> changed = [
       selection with { ModelId = "another-model" },
       selection with { Family = ModelFamily.Anthropic },
       selection with { SupportsImages = !selection.SupportsImages },
       selection with { Connection = connection with { Endpoint = new Uri("https://changed.invalid/v1/") } }
     ];
+    if (copilot)
+      changed.Add(selection with { ModelApi = LlmApi.OpenAIChatCompletions });
     foreach (LlmSelection choice in changed) {
       await Assert.ThrowsAsync<UserMessageConflictException>(() => session.SubmitUserMessageAsync(original with { LlmSelection = choice }));
       var steering = original with { SubmissionId = Guid.NewGuid(), LlmSelection = choice };
@@ -49,15 +53,37 @@ public sealed class LlmSelectionTests {
     await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
   }
 
+  [Fact]
+  public void FrozenProtocolValidatesAndRoundTripsWithoutChangingLegacyJson() {
+    LlmSelection legacy = TestLlmSelection.Default;
+    string json = LlmSelectionJson.Write(legacy)!;
+    Assert.DoesNotContain("ModelApi", json);
+    LlmSelection restored = Assert.IsType<LlmSelection>(LlmSelectionJson.Read(json));
+    Assert.Equal(legacy, restored);
+    Assert.Null(restored.ModelApi);
+    Assert.Equal(legacy.Connection.Api, restored.EffectiveApi);
+    restored.Validate();
+    Assert.Throws<ArgumentException>((legacy with { ModelApi = LlmApi.OpenAIResponses }).Validate);
+
+    LlmSelection copilot = Assert.IsType<LlmSelection>(LlmSelectionJson.Read(LlmSelectionJson.Write(CopilotSelection)));
+    Assert.Equal(CopilotSelection, copilot);
+    Assert.Equal(LlmApi.OpenAIResponses, copilot.Connection.Api);
+    Assert.Equal(LlmApi.AnthropicMessages, copilot.EffectiveApi);
+    copilot.Validate();
+    Assert.Throws<ArgumentException>((copilot with { ModelApi = null }).Validate);
+    Assert.Throws<ArgumentException>((copilot with { ModelApi = (LlmApi)99 }).Validate);
+  }
+
   [Theory]
-  [InlineData(null, ReasoningEffort.High)]
-  [InlineData("low", ReasoningEffort.Low)]
-  [InlineData("high", ReasoningEffort.High)]
-  [InlineData("none", ReasoningEffort.None)]
-  [InlineData("medium", ReasoningEffort.Medium)]
-  [InlineData("extraHigh", ReasoningEffort.ExtraHigh)]
+  [InlineData(null, ReasoningEffort.High, false)]
+  [InlineData("low", ReasoningEffort.Low, false)]
+  [InlineData("high", ReasoningEffort.High, false)]
+  [InlineData("none", ReasoningEffort.None, false)]
+  [InlineData("medium", ReasoningEffort.Medium, false)]
+  [InlineData("extraHigh", ReasoningEffort.ExtraHigh, false)]
+  [InlineData("high", ReasoningEffort.High, true)]
   public async Task LazyBorrowedFactoryCanReenterAndAllToolRequestsKeepTheInitiatingOptions(
-      string? reasoningEffort, ReasoningEffort expectedEffort) {
+      string? reasoningEffort, ReasoningEffort expectedEffort, bool copilot) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     int round = 0, factories = 0;
@@ -65,10 +91,13 @@ public sealed class LlmSelectionTests {
         ? ToolBatch(token, new FunctionCallContent("call", "step", new Dictionary<string, object?> { ["number"] = 1 }))
         : Complete(token));
     PrimarySession? session = null;
-    LlmSelection selection = TestLlmSelection.Default with { ModelId = "chosen-model", ReasoningEffort = reasoningEffort };
-    var manager = new SessionManager(store, binding => {
+    LlmSelection selection = (copilot ? CopilotSelection : TestLlmSelection.Default) with {
+      ModelId = "chosen-model", ReasoningEffort = reasoningEffort
+    };
+    var manager = new SessionManager(store, (binding, api) => {
       Interlocked.Increment(ref factories);
       Assert.Equal(selection.Connection, binding);
+      Assert.Equal(selection.ModelApi, api);
       Assert.Equal(selection, session!.ReadSnapshotAsync().WaitAsync(TestTimeout).GetAwaiter().GetResult().LatestLlmSelection);
       return client;
     }, [new TestAgentTool(AIFunctionFactory.Create((int number) => number, name: "step"))], Path.GetDirectoryName(database.Path)!);
@@ -97,9 +126,9 @@ public sealed class LlmSelectionTests {
     var transport = new ScriptedOpenAIHandler(ProviderModelStreams.Responses([ProviderModelStreams.Message]));
     using var providers = new ProviderManager(store, () => new Uri("http://127.0.0.1:1234/auth/callback"), transport);
     int factories = 0;
-    var manager = new SessionManager(store, binding => {
+    var manager = new SessionManager(store, (binding, api) => {
       Interlocked.Increment(ref factories);
-      return providers.CreateChatClient(binding);
+      return providers.CreateChatClient(binding, api);
     });
     Guid sessionId;
     UserMessageReceipt accepted, failed;
@@ -142,4 +171,10 @@ public sealed class LlmSelectionTests {
     }
   }
 
+  private static LlmSelection CopilotSelection => TestLlmSelection.Default with {
+    Connection = TestLlmSelection.Default.Connection with {
+      Route = ProviderRoute.GitHubCopilot, Authentication = AuthenticationMethod.OAuth
+    },
+    ModelApi = LlmApi.AnthropicMessages
+  };
 }

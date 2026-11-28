@@ -3,7 +3,13 @@ import test from "node:test";
 import type { ProviderConnection } from "../../../providers/ProviderConnection.ts";
 import type { ProviderCredentialStatus } from "../../../providers/ProviderCredentials.ts";
 import type { ProviderSignIn } from "../../../providers/ProviderSignIn.ts";
-import { connectionAttention } from "../../../providers/settings/ProviderSettingsPresentation.ts";
+import { RequestError } from "../../../http/RequestError.ts";
+import { commandFailureNotice } from "../../../providers/settings/ProviderSettingsCommand.ts";
+import {
+  connectionAttention,
+  copilotSignInError,
+  noticeText,
+} from "../../../providers/settings/ProviderSettingsPresentation.ts";
 
 const connection: ProviderConnection = {
   id: "provider",
@@ -38,6 +44,21 @@ void test("provider attention distinguishes healthy credentials, unknown status 
     ),
     "Sign-in required",
   );
+});
+
+void test("missing Copilot OAuth configuration rejects sign-in with installation guidance", () => {
+  const notice = commandFailureNotice(
+    "beginSignIn",
+    new RequestError(409, { error: "copilotNotConfigured" }),
+  );
+  assert.equal(notice.outcome, "rejected");
+  assert.match(noticeText(notice)!, /URD_GITHUB_COPILOT_CLIENT_ID.*restart Urd/);
+});
+
+void test("Copilot authorization failures show actionable copy rather than provider codes", () => {
+  assert.match(copilotSignInError("PlanAccessDenied")!, /denied Copilot access.*OAuth app/);
+  assert.match(copilotSignInError("SignInRejected")!, /didn't authorize/);
+  assert.equal(copilotSignInError("UnknownProviderCode"), null);
 });
 
 void test("pending sign-in and failed credential reads remain visible over healthy credentials", () => {

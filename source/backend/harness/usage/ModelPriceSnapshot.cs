@@ -73,6 +73,8 @@ internal sealed class ModelPriceSnapshot {
       !string.IsNullOrWhiteSpace(value) && value.Length <= 256 && !value.Any(char.IsControl);
 
   private static string? ProviderScope(ProviderConnection connection) {
+    if (connection.Route == ProviderRoute.GitHubCopilot)
+      return "github-copilot";
     Uri endpoint = connection.Endpoint;
     if (endpoint is not { IsAbsoluteUri: true, Scheme: "https", IsDefaultPort: true, UserInfo.Length: 0 } ||
         !string.IsNullOrEmpty(endpoint.Query) || !string.IsNullOrEmpty(endpoint.Fragment)) return null;

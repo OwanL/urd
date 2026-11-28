@@ -13,12 +13,12 @@ public sealed class DatabaseSchemaTests {
     using var database = new TemporaryDatabase();
     Guid primary = Guid.NewGuid();
     using (UrdStore store = UrdStore.Open(database.Path)) {
-      Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: fresh open must initialize the current schema version
+      Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: fresh open must initialize the current schema version
       store.Sessions.CreatePrimary(primary);
     }
 
     using UrdStore reopened = UrdStore.Open(database.Path);
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: reopening must retain the current schema version
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: reopening must retain the current schema version
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sessions;")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Equal(1L, database.Scalar("SELECT \"notnull\" FROM pragma_table_info('execution_runs') WHERE name = 'created_at';")); // raw-sql: current schema creation, rejection or constraint is the subject under test
     Assert.Contains("strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
@@ -59,7 +59,7 @@ public sealed class DatabaseSchemaTests {
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
     Assert.True(upgraded.IsSetupComplete());
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful migrations must advance to the current version
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful migrations must advance to the current version
     Assert.Equal(1L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id = '{session:D}';")); // raw-sql: existing data survives
   }
 
@@ -101,7 +101,7 @@ public sealed class DatabaseSchemaTests {
     database.Execute("DROP VIEW closed_session_usage;");
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry must advance the schema version
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry must advance the schema version
     Assert.False(upgraded.IsSetupComplete());
     Assert.True(upgraded.DeletePrimarySession(sender));
     Assert.Equal(sender.ToString("D"), database.Scalar($"SELECT sender_session_id FROM execution_inputs WHERE input_id = '{input:D}';")); // raw-sql: sender attribution must survive deletion across the migrated foreign key
@@ -127,7 +127,7 @@ public sealed class DatabaseSchemaTests {
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
     Assert.False(upgraded.IsSetupComplete());
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: schema 38 upgrade must advance to the current schema
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: schema 38 upgrade must advance to the current schema
     Assert.Equal(2L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id IN ('{legacyOne:D}', '{legacyTwo:D}') AND owning_request_id IS NULL;")); // raw-sql: migration must not infer legacy request identities
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_list('sessions') WHERE \"from\" = 'owning_request_id';")); // raw-sql: request identity must not depend on transcript/request retention
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'index' AND name = 'sessions_owning_request';")); // raw-sql: migration must create the exact-association index
@@ -169,7 +169,7 @@ public sealed class DatabaseSchemaTests {
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'user_images';")); // raw-sql: failed upgrade rolls back the image table
     database.Execute("ALTER TABLE input_decisions DROP COLUMN image_ids_json;");
     using UrdStore upgraded = UrdStore.Open(database.Path);
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry advances to the current version
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry advances to the current version
     Assert.Equal(1L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id = '{session:D}';"));
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'user_images';")); // raw-sql: successful retry creates the image table
   }
@@ -191,7 +191,7 @@ public sealed class DatabaseSchemaTests {
     database.Execute("DROP VIEW mcp_servers;");
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry advances to the current version
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry advances to the current version
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE type = 'table' AND name = 'mcp_servers';")); // raw-sql: successful retry creates the MCP server table
     Assert.Equal(1L, database.Scalar($"SELECT COUNT(*) FROM sessions WHERE session_id = '{session:D}';")); // raw-sql: upgrade preserves application data
   }
@@ -235,7 +235,7 @@ public sealed class DatabaseSchemaTests {
     database.Execute("ALTER TABLE preferences DROP COLUMN lan_hosting_enabled;");
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: retry upgrades the schema
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: retry upgrades the schema
     Assert.Equal(0L, database.Scalar("SELECT lan_hosting_enabled FROM preferences;")); // raw-sql: existing preferences default to disabled
     Assert.Equal(4096L, database.Scalar("SELECT compaction_trigger_token_count FROM preferences;")); // raw-sql: migration retains preferences
     Assert.Throws<SqliteException>(() => database.Execute("UPDATE preferences SET lan_hosting_enabled = 2;")); // raw-sql: boolean constraint
@@ -257,7 +257,7 @@ public sealed class DatabaseSchemaTests {
     database.Execute("ALTER TABLE preferences DROP COLUMN source_ignores_json;");
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry advances to the current version
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: successful retry advances to the current version
     Assert.Equal(1L, database.Scalar("SELECT source_ignores_json IS NULL FROM preferences;")); // raw-sql: existing rows get the nullable column without a data rewrite
     UserPreferences saved = new PreferenceManager(upgraded).Read();
     Assert.True(saved.LanHostingEnabled);
@@ -284,7 +284,7 @@ public sealed class DatabaseSchemaTests {
     database.Execute("ALTER TABLE sessions DROP COLUMN snoozed_until_ms;");
 
     using UrdStore upgraded = UrdStore.Open(database.Path);
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: removing the conflict permits upgrade
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: removing the conflict permits upgrade
     Assert.Null(upgraded.Sessions.Read(sessionId)!.SnoozedUntil);
     Assert.Equal("snoozed_until_ms", database.Scalar("SELECT name FROM pragma_index_info('sessions_snoozed_until');")); // raw-sql: the migration indexes the actual deadline
   }
@@ -301,7 +301,7 @@ public sealed class DatabaseSchemaTests {
     Assert.Equal(4096L, database.Scalar("SELECT compaction_trigger_token_count FROM preferences;")); // raw-sql: failed migration retains data
     database.Execute("ALTER TABLE preferences DROP COLUMN max_subagent_depth;");
     using UrdStore upgraded = UrdStore.Open(database.Path);
-    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: retry succeeds
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: retry succeeds
     Assert.Equal(4, new PreferenceManager(upgraded).Read().MaxSubagentDepth);
     Assert.Equal(4096, new PreferenceManager(upgraded).Read().CompactionTriggerTokenCount);
     Assert.Throws<SqliteException>(() => database.Execute("UPDATE preferences SET max_subagent_depth = -1;"));
@@ -337,7 +337,7 @@ public sealed class DatabaseSchemaTests {
       Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM execution_runs WHERE run_id = 'compaction';")); // raw-sql: failure preserves saved work
       database.Execute("CREATE UNIQUE INDEX one_active_execution ON execution_runs(session_id) WHERE outcome IS NULL;");
       using UrdStore upgraded = UrdStore.Open(database.Path);
-      Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: retry upgrades the same profile
+      Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: retry upgrades the same profile
     }
 
     Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_list('execution_runs') WHERE \"from\" = 'queued_after_compaction' AND \"table\" = 'execution_runs' AND \"to\" = 'run_id' AND on_delete = 'NO ACTION';")); // raw-sql: verify the queue relationship is enforced
@@ -367,6 +367,65 @@ public sealed class DatabaseSchemaTests {
       DELETE FROM execution_runs WHERE run_id IN ('compaction', 'queued1', 'queued2');
       """);
     Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_check;")); // raw-sql: closure can remove the entire linked pair
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void ProviderRouteAndApiConstraintsApplyToFreshAndMigratedSchemas(bool migrate) {
+    using var database = new TemporaryDatabase();
+    UrdStore.Open(database.Path).Dispose();
+    if (migrate) {
+      RecreateSchema46(database);
+      using UrdStore upgraded = UrdStore.Open(database.Path);
+    }
+
+    database.Execute("""
+      INSERT INTO provider_connections
+          (connection_id, name, route, api, endpoint, authentication, generation, credential_version, disconnecting)
+      VALUES ('copilot', 'Copilot', 3, 0, 'https://example.invalid', 0, 0, 0, 0);
+      """); // raw-sql: route 3 is accepted on fresh and upgraded databases
+    Assert.Throws<SqliteException>(() => database.Execute("UPDATE provider_connections SET route = 4 WHERE connection_id = 'copilot';"));
+    Assert.Throws<SqliteException>(() => database.Execute("UPDATE provider_connections SET api = 2 WHERE connection_id = 'copilot';"));
+    database.Execute("UPDATE provider_connections SET api = 1 WHERE connection_id = 'copilot';");
+    Assert.Equal(1L, database.Scalar("SELECT api FROM provider_connections WHERE connection_id = 'copilot';")); // raw-sql: verify the existing API constraint is unchanged
+  }
+
+  [Fact]
+  public void Schema46UpgradePreservesProviderDataAndRecoversFromFailure() {
+    using var database = new TemporaryDatabase();
+    UrdStore.Open(database.Path).Dispose();
+    RecreateSchema46(database);
+    database.Execute("""
+      INSERT INTO provider_connections VALUES
+          ('connection', 'Provider', 2, 1, 'https://example.invalid', 1, 7, 8,
+           'registration', 'credentials', 1, 'catalog');
+      INSERT INTO model_settings VALUES ('connection', 'model', 3, 1, 12345);
+      CREATE VIEW next_model_settings AS SELECT 'preserved' AS value;
+      """); // raw-sql: seed every connection field and a dependent model, then fail after the copy begins
+
+    Assert.Throws<SqliteException>(() => UrdStore.Open(database.Path));
+    Assert.Equal(46L, database.Scalar("PRAGMA user_version;")); // raw-sql: the failed upgrade retains the prior version
+    Assert.Equal("preserved", database.Scalar("SELECT value FROM next_model_settings;")); // raw-sql: the preexisting obstruction survives rollback
+    Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM sqlite_schema WHERE name = 'next_provider_connections';")); // raw-sql: the replacement table rolls back
+    Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM model_settings WHERE connection_id = 'connection' AND model_id = 'model';")); // raw-sql: a failed migration retains the seeded model row
+    database.Execute("DROP VIEW next_model_settings;");
+
+    using UrdStore upgraded = UrdStore.Open(database.Path);
+    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: retry advances the same profile
+    const string retainedConnection = """
+        SELECT COUNT(*) FROM provider_connections WHERE connection_id = 'connection' AND name = 'Provider'
+            AND route = 2 AND api = 1 AND endpoint = 'https://example.invalid' AND authentication = 1
+            AND generation = 7 AND credential_version = 8 AND registration_json = 'registration'
+            AND credentials_json = 'credentials' AND disconnecting = 1 AND catalog_json = 'catalog';
+        """;
+    Assert.Equal(1L, database.Scalar(retainedConnection)); // raw-sql: compare every column of the deliberately opaque migration fixture
+    Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM model_settings WHERE connection_id = 'connection' AND model_id = 'model' AND family = 3 AND supports_images = 1 AND context_window = 12345;")); // raw-sql: migration retains the dependent row and its values
+    Assert.Equal(1L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_list('model_settings') WHERE \"from\" = 'connection_id' AND \"table\" = 'provider_connections' AND \"to\" = 'connection_id' AND on_delete = 'CASCADE';")); // raw-sql: SQLite must bind the foreign key to the renamed table
+    Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM pragma_foreign_key_check;")); // raw-sql: verify foreign-key integrity on the migrated profile
+    Assert.Throws<SqliteException>(() => database.Execute("PRAGMA foreign_keys = ON; INSERT INTO model_settings VALUES ('missing', 'model', 0, 0, NULL);"));
+    database.Execute("PRAGMA foreign_keys = ON; DELETE FROM provider_connections WHERE connection_id = 'connection';");
+    Assert.Equal(0L, database.Scalar("SELECT COUNT(*) FROM model_settings;")); // raw-sql: the migrated foreign key still cascades deletion
   }
 
   [Fact]
@@ -467,13 +526,13 @@ public sealed class DatabaseSchemaTests {
   [Fact]
   public void NewerDatabaseIsRejectedWithoutDowngrade() {
     using var database = new TemporaryDatabase();
-    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 47;");
+    database.Execute("CREATE TABLE retained (value TEXT NOT NULL); INSERT INTO retained VALUES ('preserved'); PRAGMA user_version = 48;");
 
     NotSupportedException error = Assert.Throws<NotSupportedException>(() => UrdStore.Open(database.Path));
 
     Assert.Contains("newer Urd build", error.Message, StringComparison.OrdinalIgnoreCase);
     Assert.DoesNotContain("delete", error.Message, StringComparison.OrdinalIgnoreCase);
-    Assert.Equal(47L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
+    Assert.Equal(48L, database.Scalar("PRAGMA user_version;")); // raw-sql: newer schema must not be downgraded
     Assert.Equal("preserved", database.Scalar("SELECT value FROM retained;")); // raw-sql: rejection must preserve newer database contents
   }
 
@@ -572,6 +631,20 @@ public sealed class DatabaseSchemaTests {
       DROP TABLE closed_session_usage;
       PRAGMA user_version = 37;
       """);
+  }
+
+  private static void RecreateSchema46(TemporaryDatabase database) {
+    string connections = Assert.IsType<string>(database.Scalar("SELECT sql FROM sqlite_schema WHERE name = 'provider_connections';")); // raw-sql: recover the DDL to reconstruct the version 46 route constraint
+    string models = Assert.IsType<string>(database.Scalar("SELECT sql FROM sqlite_schema WHERE name = 'model_settings';")); // raw-sql: retain the original dependent-table DDL in the fixture
+    string legacyConnections = connections.Replace("route IN (0, 1, 2, 3)", "route IN (0, 1, 2)", StringComparison.Ordinal);
+    Assert.NotEqual(connections, legacyConnections);
+    database.Execute($"""
+      DROP TABLE model_settings;
+      DROP TABLE provider_connections;
+      {legacyConnections};
+      {models};
+      PRAGMA user_version = 46;
+      """); // raw-sql: reconstruct the previous provider schema before seeding its data
   }
 
   private static void RecreateSchema45(TemporaryDatabase database) =>

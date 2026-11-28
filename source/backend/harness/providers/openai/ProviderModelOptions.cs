@@ -51,7 +51,9 @@ internal static class ProviderModelOptions {
           """{"store":false,"stream":true,"include":["reasoning.encrypted_content"]}"""))!;
       if (isChatGpt && options.Tools is { Count: > 0 }) result.Tools = [CreateNamespacedTools(options.Tools).AsAITool()];
     } else {
-      result.RawRepresentationFactory = _ => new ChatCompletionOptions { StoredOutputEnabled = false };
+      // The Copilot Completions proxy does not implement the optional OpenAI store field.
+      result.RawRepresentationFactory = _ => connection.Route == ProviderRoute.GitHubCopilot
+          ? new ChatCompletionOptions() : new ChatCompletionOptions { StoredOutputEnabled = false };
     }
     return result;
   }

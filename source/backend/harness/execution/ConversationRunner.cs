@@ -13,8 +13,12 @@ namespace Urd.Core.Execution;
 // admission, stopping, settlement or pending-tool registry; the caller owns the run task
 // and must join it before the parent execution settles.
 internal sealed class ConversationRunner(SessionExecutionRecorder parent,
-    Func<ProviderConnection, IChatClient> createChatClient, IReadOnlyList<AgentTool> tools,
+    Func<ProviderConnection, LlmApi?, IChatClient> createChatClient, IReadOnlyList<AgentTool> tools,
     string? workingDirectory) {
+  internal ConversationRunner(SessionExecutionRecorder parent, Func<ProviderConnection, IChatClient> createChatClient,
+      IReadOnlyList<AgentTool> tools, string? workingDirectory)
+      : this(parent, (connection, _) => createChatClient(connection), tools, workingDirectory) { }
+
   // Runs one auxiliary conversation and returns its accepted final answer. validateResult
   // returns null for an accepted answer or corrective user input; one corrected final
   // answer is permitted (tool turns are not counted), a second rejected one throws.
@@ -43,7 +47,7 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
     AIFunctionDeclaration[] offered = [.. allowed.Select(AgentToolDeclaration.Create)];
     List<ChatMessage> messages = [.. input]; // Isolated copy; the caller's history is never mutated.
     AuxiliaryConversationRecorder recorder = await CreateConversationAsync(purpose, model, messages, offered, cancellation);
-    IChatClient client = createChatClient(selection.Connection); // Borrowed; disposal stays with its owner.
+    IChatClient client = createChatClient(selection.Connection, selection.ModelApi); // Borrowed; disposal stays with its owner.
     int answers = 0;
     string? answer = null;
 

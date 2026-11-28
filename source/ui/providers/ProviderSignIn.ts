@@ -4,6 +4,8 @@ export interface ProviderSignIn {
   readonly connectionId: string;
   readonly status: ProviderSignInStatus;
   readonly authorizationUrl: string | null;
+  readonly userCode?: string | null;
+  readonly catalogRefreshFailed?: boolean;
   readonly expiresAt: string;
   readonly error: string | null;
 }

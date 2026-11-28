@@ -350,7 +350,7 @@ public sealed class SubagentRunTests {
 
     SubagentSession CreateChild(SessionRecord record, int depth) {
       chat.StartBash("exec sleep 60", fixture.DatabaseDirectory, new Dictionary<string, string>(), _ => { });
-      return new SubagentSession(record, fixture.Store, _ => client, processes: chat, depth: depth);
+      return new SubagentSession(record, fixture.Store, (_, _) => client, processes: chat, depth: depth);
     }
 
     async Task KillJobAsync(SafeFileHandle job) {

@@ -89,7 +89,9 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
           if (turnClient is not null)
             progress.Transport = "websocket";
         }
-        client = CreateClient(state, options.ModelId!, progress, turnClient ?? httpClient);
+        GitHubCopilotRequest? copilotRequest = state.Connection.Route == ProviderRoute.GitHubCopilot
+            ? new(history) : null;
+        client = CreateClient(state, options.ModelId!, progress, turnClient ?? httpClient, copilotRequest);
         if (estimate is not null && input is not null)
           estimate.Prepare(ContextEstimateInput(history, input, scope), options);
       } catch (Exception error) when (CanClassify(error, cancellationToken)) {
@@ -243,7 +245,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
   }
 
   private static IChatClient CreateClient(ProviderState state, string model, InferenceStreamProgress progress,
-      HttpClient httpClient) {
+      HttpClient httpClient, GitHubCopilotRequest? copilotRequest) {
     var connection = state.Connection;
     var authentication = ProviderSdkAuthentication.Create(connection, state.Credentials);
     return connection.Api switch {
@@ -259,6 +261,8 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       options.RetryPolicy = new ClientRetryPolicy(0);
       options.NetworkTimeout = Timeout.InfiniteTimeSpan;
       options.AddPolicy(progress, PipelinePosition.BeforeTransport);
+      if (copilotRequest is not null)
+        options.AddPolicy(copilotRequest, PipelinePosition.BeforeTransport);
       return options;
     }
   }

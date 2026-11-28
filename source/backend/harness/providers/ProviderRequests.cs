@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 using Microsoft.Extensions.AI;
 using Urd.Core.Concurrency;
 using Urd.Core.Storage;
@@ -9,7 +10,7 @@ namespace Urd.Core.Providers;
 // Tracks provider requests and drains cancellation before releasing borrowed transport and storage.
 internal sealed class ProviderRequests(
     AsyncLock gate, ProviderStorage storage, ModelSettingsStorage modelSettings, OpenAIInferenceClient inference,
-    Func<Guid, long, CancellationToken, Task<ProviderState>> getCredentials,
+    AnthropicInferenceClient anthropic, Func<Guid, long, CancellationToken, Task<ProviderState>> getCredentials,
     Action throwIfStopping, Action<ProviderState> ensureAvailable, Action<ProviderState> requireCurrentGrant,
     UsageStorage usage, ModelPriceCatalog? prices, TimeProvider retryClock) {
   private readonly List<ProviderRequest> requests = [];
@@ -31,7 +32,7 @@ internal sealed class ProviderRequests(
   }
 
   internal async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-      ProviderConnection expectedBinding, IEnumerable<ChatMessage> messages, ChatOptions options,
+      ProviderConnection expectedBinding, LlmApi? modelApi, IEnumerable<ChatMessage> messages, ChatOptions options,
       [EnumeratorCancellation] CancellationToken cancellationToken) {
     var (request, generation) = await BeginRequestAsync(expectedBinding.Id, cancellationToken,
         Timeout.InfiniteTimeSpan, expectedBinding);
@@ -52,8 +53,8 @@ internal sealed class ProviderRequests(
         RequireImagesAllowed(state, imageModel);
         ProviderOperationException? throttled = null;
         bool observed = false;
-        await using (var stream = UsageStream.Observe(ct => inference.GetStreamingResponseAsync(state, input, prepared, ct)
-            .GetAsyncEnumerator(ct), usage, expectedBinding, input, prepared, context, prices).GetAsyncEnumerator(token)) {
+        var (transport, wireOptions) = SelectInference(state, prepared, modelApi);
+        await using (var stream = ObserveInference(transport, input, wireOptions, context).GetAsyncEnumerator(token)) {
           while (true) {
             var (hasUpdate, failure) = await ReadUpdateAsync(stream, state, imageModel, observed, token);
             if (!hasUpdate) {
@@ -88,6 +89,67 @@ internal sealed class ProviderRequests(
     // No executable calls or native-context completion escape before the manager accepts the result.
     yield return completion;
   }
+
+  internal async Task<ProviderModelTestResult> TestCopilotModelAsync(ProviderState state, string modelId, CancellationToken token) {
+    const int previewLimit = 4096;
+    ChatMessage[] input = [new(ChatRole.User, "Reply with one short greeting.")];
+    var (transport, options) = SelectInference(state, new() { ModelId = modelId }, null);
+    var preview = new StringBuilder();
+    UsageDetails? counts = null;
+    bool truncated = false, completed = false;
+    await foreach (ChatResponseUpdate update in ObserveInference(transport, input, options, new(null, null, "provider test"))
+        .WithCancellation(token).ConfigureAwait(false)) {
+      if (completed)
+        throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
+      if (update.FinishReason is { } finish) {
+        if (finish != ChatFinishReason.Stop)
+          throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
+        completed = true;
+      }
+      foreach (string text in update.Contents.OfType<TextContent>().Select(part => part.Text)) {
+        int length = Math.Min(previewLimit - preview.Length, text.Length);
+        preview.Append(text.AsSpan(0, length));
+        truncated |= length < text.Length;
+      }
+      foreach (UsageContent reported in update.Contents.OfType<UsageContent>())
+        (counts ??= new()).Add(reported.Details);
+    }
+    if (!completed)
+      throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
+    return new(state.Connection.Id, modelId, preview.ToString(), truncated,
+        counts is null ? null : ProviderTokenUsage.ToProviderUsage(counts));
+  }
+
+  private UsageStream ObserveInference(ProviderState state, IReadOnlyList<ChatMessage> input, ChatOptions options,
+      UsageContext context) => UsageStream.Observe(ct => (state.Connection.Api == LlmApi.AnthropicMessages
+          ? anthropic.GetStreamingResponseAsync(state, input, options, ct)
+          : inference.GetStreamingResponseAsync(state, input, options, ct)).GetAsyncEnumerator(ct),
+          usage, state.Connection, input, options, context, prices);
+
+  private static (ProviderState State, ChatOptions Options) SelectInference(ProviderState state, ChatOptions options,
+      LlmApi? expectedModelApi) {
+    if (state.Connection.Route != ProviderRoute.GitHubCopilot)
+      return (state, options);
+
+    ProviderModel? model = state.Catalog?.Models.FirstOrDefault(candidate => candidate.Id == options.ModelId);
+    if (model?.Api is not { } api || expectedModelApi is { } expected && expected != api)
+      throw new ProviderOperationException(ProviderFailure.ConnectionChanged,
+          "This Copilot model or its protocol changed. Refresh the catalog and reselect the model.");
+    ProviderConnection connection = state.Connection with {
+      Api = api, Endpoint = GitHubCopilotAuthentication.GetEndpoint(state.Credentials!)
+    };
+#pragma warning disable MEAI001 // Match the selected effort to the account catalog before serialization.
+    if (options.Reasoning?.Effort is { } effort && !SupportsEffort(model, effort)) {
+      options = options.Clone();
+      options.Reasoning = null;
+    }
+#pragma warning restore MEAI001
+    return (state with { Connection = connection }, options);
+  }
+
+  private static bool SupportsEffort(ProviderModel model, ReasoningEffort effort) =>
+      model.ReasoningEfforts?.Contains(effort == ReasoningEffort.ExtraHigh ? "xhigh" : effort.ToString().ToLowerInvariant(),
+          StringComparer.Ordinal) == true;
 
   private async ValueTask<(bool HasUpdate, ProviderOperationException? Throttled)> ReadUpdateAsync(
       IAsyncEnumerator<ChatResponseUpdate> stream, ProviderState state, string? imageModel, bool observed,

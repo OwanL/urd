@@ -63,7 +63,7 @@ public sealed class ModelSelector {
     var candidates = new List<(ProviderConnection Connection, ProviderModel Model, ConfiguredModel Assignment)>();
     foreach (var (connection, catalog) in catalogs) {
       foreach (ConfiguredModel assignment in modelsByConnection[connection.Id]) {
-        if (FindModel(catalog, assignment.ModelId) is { } model)
+        if (FindModel(connection, catalog, assignment.ModelId) is { } model)
           candidates.Add((connection, model, assignment));
       }
     }
@@ -89,7 +89,7 @@ public sealed class ModelSelector {
       throw ProviderUnavailable(failure);
     }
 
-    ProviderModel model = FindModel(catalog, configured.ModelId)
+    ProviderModel model = FindModel(connection, catalog, configured.ModelId)
         ?? throw new AuxiliaryModelUnavailableException("The configured model is unavailable; select a different model.");
     return await BuildSelectionAsync(connection, model, configured.ReasoningEffort, cancellationToken);
   }
@@ -106,11 +106,13 @@ public sealed class ModelSelector {
     ModelSettings? modelSettings = settings.FirstOrDefault(candidate =>
         string.Equals(candidate.ModelId, model.Id, StringComparison.Ordinal));
     return new LlmSelection(connection, model.Id, reasoningEffort ?? "high", modelSettings?.Family ?? ModelFamily.Other,
-        modelSettings?.SupportsImages ?? true, modelSettings?.ContextWindow ?? model.ContextWindow);
+        modelSettings?.SupportsImages ?? true, modelSettings?.ContextWindow ?? model.ContextWindow,
+        connection.Route == ProviderRoute.GitHubCopilot ? model.Api : null);
   }
 
-  private static ProviderModel? FindModel(ProviderModelCatalog catalog, string modelId) =>
-      catalog.Models.FirstOrDefault(candidate => string.Equals(candidate.Id, modelId, StringComparison.Ordinal));
+  private static ProviderModel? FindModel(ProviderConnection connection, ProviderModelCatalog catalog, string modelId) =>
+      catalog.Models.FirstOrDefault(candidate => string.Equals(candidate.Id, modelId, StringComparison.Ordinal)
+          && (connection.Route != ProviderRoute.GitHubCopilot || candidate.Api is { } api && Enum.IsDefined(api)));
 
   private static AuxiliaryModelUnavailableException ProviderUnavailable(KeyNotFoundException failure) =>
       new("The configured model provider is unavailable; select a different model.", failure);

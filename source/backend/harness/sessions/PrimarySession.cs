@@ -12,6 +12,12 @@ public sealed partial class PrimarySession : SessionBase {
   internal PrimarySession(SessionRecord record, UrdStore store, Func<ProviderConnection, IChatClient> createChatClient,
       ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
       PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null)
+      : this(record, store, (connection, _) => createChatClient(connection), tools, processes, pending,
+          preferences, modelSelector, subagents) { }
+
+  internal PrimarySession(SessionRecord record, UrdStore store, Func<ProviderConnection, LlmApi?, IChatClient> createChatClient,
+      ToolCatalog? tools = null, ChatProcesses? processes = null, PendingToolCalls? pending = null,
+      PreferenceManager? preferences = null, ModelSelector? modelSelector = null, ISubagentRunner? subagents = null)
       : base(record, SessionKind.Primary, store, createChatClient, tools, processes, pending, preferences,
           modelSelector, subagents) {
   }

@@ -19,6 +19,7 @@ export type ProviderSettingsClient = Pick<
   | "getBucketSuggestions"
   | "confirmBucketSuggestions"
   | "createChatGpt"
+  | "createGitHubCopilot"
   | "createOpenAI"
   | "createCustom"
   | "updateCustom"
@@ -59,6 +60,7 @@ export type ProviderSettingsNotice =
       readonly operation: ProviderSettingsOperation;
       readonly outcome: "rejected";
       readonly httpStatus?: number;
+      readonly errorCode?: "copilotNotConfigured";
     }
   | {
       readonly operation: ProviderSettingsOperation;

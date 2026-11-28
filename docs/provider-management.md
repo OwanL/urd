@@ -1,26 +1,26 @@
 # Provider management
 
-The local server manages saved **ChatGPT subscription**, **OpenAI API-key** and
-**custom OpenAI-compatible** connections. ChatGPT uses Responses; custom endpoints
-choose Responses or Chat Completions, with an API key or no authentication. The shared
-request client powers chat execution and history compaction; the provider settings UI is integrated
-into the browser workspace. Pruning and title generation remain future request-client consumers.
-This adds no discovery tools, other subscription providers or native Ollama/Anthropic adapters.
+The local server manages saved **ChatGPT subscription**, **GitHub Copilot**,
+**OpenAI API-key** and **custom OpenAI-compatible** connections. ChatGPT uses Responses;
+Copilot uses Responses, Chat Completions or Anthropic Messages per model. Custom endpoints
+use Responses or Chat Completions, with an API key or no authentication. Urd owns chat
+history and tool execution for every connection.
 
 ## Source responsibilities
 
 Under `source/backend/harness/providers/`:
 - The root holds connection/model contracts and `ProviderManager`, which owns admission,
   credential fencing and shutdown. Model selections remain frozen execution inputs.
-- `authentication/` holds sign-in attempt ownership and ChatGPT OAuth validation/exchanges.
+- `authentication/` holds sign-in attempt ownership and provider-specific OAuth flows.
+- `copilot/` reads the account's selectable model catalog and supplies request metadata.
+- `anthropic/` implements Anthropic Messages streaming for Copilot, not standalone Anthropic accounts.
 - `openai/` holds SDK-specific adapters and native response preservation. `OpenAIModelProbe`
   discovers catalogs and sends diagnostic test prompts; `OpenAIInferenceClient` sends ordinary
   model requests. Both use `ProviderTokenUsage` for optional native token counts; absent counts
   remain unknown rather than becoming zero.
 
-These are source organisation boundaries, not a new provider framework. Public namespaces,
-wire records and database shapes are unchanged. Shared async locking lives in
-`source/backend/concurrency/`, not in the session or provider domain.
+These are source organisation boundaries, not a new provider framework. Shared async locking
+lives outside the session and provider domains.
 
 ## Storage and ownership
 
@@ -28,8 +28,8 @@ wire records and database shapes are unchanged. Shared async locking lives in
 [`DatabaseSchema.cs`](../source/backend/harness/storage/DatabaseSchema.cs) owns the current schema
 and supported version. Provider connections, host identity, model settings, native context,
 frozen selections and transcript/request facts share that schema; there is no second database
-or lease. Schema 36 is the baseline for future database upgrades; no migration is needed
-at that version today.
+or lease. Schema 36 is the durable-data baseline; the server upgrades supported older schemas
+before loading provider data.
 `ProviderManager` borrows the store, owns its HTTP transport, and drains requests,
 sign-ins and refresh/revocation work before disposal. The host joins this drain with
 its existing HTTP/session shutdown barrier.
@@ -61,6 +61,7 @@ Paths below start with `/api/providers`:
 | --- | --- |
 | GET `/` | Saved `ProviderConnection[]` |
 | POST `/chatgpt` | `{name}` → 201 connection |
+| POST `/github-copilot` | `{name}` → 201 connection |
 | POST `/openai` | `{name}` → 201 connection |
 | POST `/custom` | `{name, api, endpoint, authentication}` → 201 connection |
 | GET `/{id}` | Connection |
@@ -86,6 +87,8 @@ A connection is `{id, name, route, api, endpoint, authentication}`. Custom `api`
 Endpoints are HTTP(S) base URLs without credentials, query or fragment. Prefix paths
 are retained and the trailing slash is normalized. API-key input includes the complete
 connection view read by the caller: a stale binding is rejected, while a rename is safe.
+Copilot connections use the canonical `openAIResponses` binding. Each catalog item declares its
+actual `api`, which a frozen model selection carries separately as `modelApi`.
 
 ## Bucket suggestions
 
@@ -102,7 +105,28 @@ and changes nothing. Catalog refreshes, provider changes, chat startup and runti
 selection never apply or replace bucket choices implicitly. Suggestions are not a
 runtime fallback.
 
-## ChatGPT-first flow
+## GitHub Copilot device sign-in
+
+Set `URD_GITHUB_COPILOT_CLIENT_ID` in the server process environment to the client ID of
+an OAuth app configured for device flow and authorized for the Copilot service. Urd
+ships no shared client ID and does not act as VS Code. A valid GitHub login alone does
+not prove that GitHub grants that app or account access to Copilot inference.
+
+1. Add `/github-copilot`, then POST its `/sign-in`. Open `authorizationUrl` and enter
+   the displayed `userCode` on GitHub. Urd polls only while that attempt is active.
+2. Urd verifies the GitHub account, exchanges the grant for a Copilot token, then fetches
+   `/models` automatically. A successful sign-in with `catalogRefreshFailed: true`
+   keeps the credentials; retry via `/{id}/models/refresh`. Sign-in does not send a test prompt.
+3. The account catalog controls model availability. Urd does not enable models or change
+   policy. It lists selectable models with a supported transport, regardless of reported
+   tool support. A frozen selection keeps its protocol; if discovery changes the model or
+   protocol, reselect it. Urd does not switch protocols in response to an inference error.
+
+The default inference origin is `https://api.individual.githubcopilot.com/`. Urd only
+honors token routing hints for known GitHub Copilot hosts. Disconnect clears local tokens
+and catalog; revoke the OAuth app's grant in GitHub if remote revocation is needed.
+
+## ChatGPT flow
 
 1. Add `/chatgpt`, then POST its `/sign-in`. Open the returned `authorizationUrl`
    yourself; the backend does not launch a browser. Repeated begin joins the same
@@ -255,7 +279,7 @@ recognizable provider name and custom connections display their hostname. Existi
 names are not migrated. Successful creation opens authentication; rejected custom creation
 retains its draft.
 
-The page supports ChatGPT, OpenAI API-key and custom compatible connections: create,
+The page supports ChatGPT, GitHub Copilot, OpenAI API-key and custom compatible connections: create,
 custom binding changes, replace-only keys, sign-in/status/cancel, disconnect,
 local removal and explicit model refresh. Binding changes, disconnect and removal require
 inline confirmation because they may cancel active work. Removal does not promise remote

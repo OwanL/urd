@@ -76,6 +76,24 @@ public sealed class ProviderOperationException : Exception {
     };
   }
 
+  internal static ProviderOperationException FromHttpError(int status, string? type, string? code, string? message,
+      string? requestId, TimeSpan? retryAfter, ProviderCredentials? credentials) {
+    ProviderFailure failure = status switch {
+      401 => ProviderFailure.AuthenticationRequired,
+      403 => ProviderFailure.PlanAccessDenied,
+      429 when !IsQuotaError(type) && !IsQuotaError(code) => ProviderFailure.RateLimited,
+      400 or 413 or 422 when IsContextWindowExceededCode(code ?? type) ||
+          message?.StartsWith("prompt is too long:", StringComparison.OrdinalIgnoreCase) == true => ProviderFailure.ContextWindowExceeded,
+      400 or 422 when IsModelImageRejection(code, message) => ProviderFailure.ImageInputUnsupported,
+      _ => ProviderFailure.ProviderUnavailable
+    };
+    return new(failure, FormatMessage(failure, message, code ?? type, null, requestId, status, null, credentials), null) {
+      DiagnosticCause = ProviderDiagnostic.Describe(new HttpRequestException(), status),
+      IsRetryableRateLimit = failure == ProviderFailure.RateLimited,
+      RetryAfter = failure == ProviderFailure.RateLimited ? retryAfter : null
+    };
+  }
+
   internal static ProviderOperationException FromProviderStreamError(string? code, string? message,
       string? param, ProviderCredentials? credentials) {
     ProviderFailure failure = ProviderFailure.ProviderUnavailable;
@@ -223,5 +241,6 @@ public enum ProviderFailure {
   DiscoveryUnsupported,
   ContextWindowExceeded,
   ImageInputUnsupported,
-  RateLimited
+  RateLimited,
+  CopilotNotConfigured
 }

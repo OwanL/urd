@@ -3,6 +3,7 @@ import { useState } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import { providerReady, signInPending } from "./ProviderConnectionStatus.ts";
 import { authorizationLink } from "./ProviderSignInTab.ts";
+import { copilotSignInError } from "./ProviderSettingsPresentation.ts";
 import { ProviderApiKeyForm } from "./ProviderApiKeyForm.tsx";
 import { ProviderModelCatalog } from "./ProviderModelCatalog.tsx";
 import { ProviderConnectionConfirmation } from "./ProviderConnectionConfirmation.tsx";
@@ -30,11 +31,16 @@ export function ProviderConnectionDetail({
   const connected = hasCredentials && !credential?.requiresSignIn && !missingPlanAccess;
   const showDisconnect = hasCredentials || !!credential?.isDisconnecting;
   const catalog = state.catalogs[connection.id];
-  const needsModels =
-    catalog &&
-    !catalog.models.length &&
-    credential?.planAccessGranted !== false &&
-    providerReady(connection, credential);
+  const copilot = connection.route === "gitHubCopilot";
+  const oauth = copilot || connection.route === "chatGpt";
+  const url = authorizationLink(signIn?.authorizationUrl ?? null);
+  const signInError = copilot ? copilotSignInError(signIn?.error ?? null) : signIn?.error;
+  const catalogRefreshFailed = signIn?.status === "completed" && signIn.catalogRefreshFailed;
+  const ready = providerReady(connection, credential) && (!copilot || !pendingSignIn);
+  const needsModels = ready && catalog && !catalog.models.length;
+  const canLoadCopilotModels =
+    copilot && ready && (catalogRefreshFailed || !catalog?.models.length);
+  const showLoadModels = canLoadCopilotModels || (!inSetup && needsModels);
   const disconnect = (
     <button
       type="button"
@@ -68,56 +74,72 @@ export function ProviderConnectionDetail({
             inSetup={inSetup}
           />
         ))}
-      {connection.route === "chatGpt" && credential && (
+      {oauth && credential && (
         <div class="provider-settings-auth">
-          {signIn?.error && <p class="provider-settings-error">{signIn.error}</p>}
-          {signIn && ["expired", "failed", "cancelled"].includes(signIn.status) && (
-            <p
-              class={
-                signIn.status === "cancelled"
-                  ? "provider-settings-secondary"
-                  : "provider-settings-error"
-              }
-            >
-              {signIn.status === "expired"
-                ? "Sign-in expired."
-                : signIn.status === "cancelled"
-                  ? "Sign-in cancelled."
-                  : "Sign-in failed."}
-            </p>
-          )}
+          {signInError && <p class="provider-settings-error">{signInError}</p>}
+          {signIn &&
+            !(copilot && signInError) &&
+            ["expired", "failed", "cancelled"].includes(signIn.status) && (
+              <p
+                class={
+                  signIn.status === "cancelled"
+                    ? "provider-settings-secondary"
+                    : "provider-settings-error"
+                }
+              >
+                {signIn.status === "expired"
+                  ? "Sign-in expired."
+                  : signIn.status === "cancelled"
+                    ? "Sign-in cancelled."
+                    : "Sign-in failed."}
+              </p>
+            )}
           {state.errors[`signIn:${connection.id}`] && (
             <p class="provider-settings-error">{state.errors[`signIn:${connection.id}`]}</p>
           )}
-          {missingPlanAccess && !pendingSignIn && (
+          {connection.route === "chatGpt" && missingPlanAccess && !pendingSignIn && (
             <p>
               This sign-in did not grant Codex access. Sign in with a ChatGPT account that has it.
             </p>
           )}
           {pendingSignIn ? (
-            <div class="provider-settings-actions">
-              {state.blockedSignIns[connection.id] &&
-                signIn.status === "pending" &&
-                authorizationLink(signIn.authorizationUrl) && (
-                  <a
-                    class="provider-settings-action"
-                    href={authorizationLink(signIn.authorizationUrl)!}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    Continue in browser ↗
-                  </a>
-                )}
-              <button
-                type="button"
-                disabled={disabled}
-                onClick={() => {
-                  void actions.cancelSignIn(signIn);
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+            <>
+              {copilot && signIn.status === "pending" && signIn.userCode && (
+                <label class="provider-settings-field provider-settings-device-code">
+                  Code to enter on GitHub
+                  <input
+                    type="text"
+                    value={signIn.userCode}
+                    size={signIn.userCode.length}
+                    readOnly
+                    onFocus={(event) => event.currentTarget.select()}
+                  />
+                </label>
+              )}
+              <div class="provider-settings-actions">
+                {(copilot || state.blockedSignIns[connection.id]) &&
+                  signIn.status === "pending" &&
+                  url && (
+                    <a
+                      class="provider-settings-action"
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {copilot ? "Open GitHub ↗" : "Continue in browser ↗"}
+                    </a>
+                  )}
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => {
+                    void actions.cancelSignIn(signIn);
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
           ) : (
             !connected && (
               <button
@@ -127,21 +149,23 @@ export function ProviderConnectionDetail({
                   void actions.beginSignIn(connection, inSetup);
                 }}
               >
-                Sign in with ChatGPT
+                {copilot ? "Sign in with GitHub" : "Sign in with ChatGPT"}
               </button>
             )
           )}
           {showDisconnect && disconnect}
         </div>
       )}
-      {connection.authentication !== "apiKey" &&
-        connection.route !== "chatGpt" &&
-        showDisconnect &&
-        disconnect}
+      {connection.authentication !== "apiKey" && !oauth && showDisconnect && disconnect}
       {connection.authentication === "apiKey" && !hasCredentials && showDisconnect && disconnect}
-      {needsModels && (
+      {(needsModels || showLoadModels || catalogRefreshFailed) && (
         <div class="provider-settings-auth">
-          {!inSetup && (
+          {catalogRefreshFailed && (
+            <p role="status" class="provider-settings-error">
+              Signed in, but models could not be refreshed.
+            </p>
+          )}
+          {showLoadModels && (
             <button
               type="button"
               disabled={disabled}
@@ -149,7 +173,7 @@ export function ProviderConnectionDetail({
                 void actions.refreshModels(connection);
               }}
             >
-              Load models
+              {catalog?.models.length ? "Refresh models" : "Load models"}
             </button>
           )}
           {state.errors[`models:${connection.id}`] && (
@@ -175,7 +199,7 @@ export function ProviderConnectionDetail({
               state={state}
               connection={connection}
               disabled={disabled}
-              inSetup={inSetup}
+              inSetup={inSetup || canLoadCopilotModels}
             />
             {(credential?.accountLabel || credential?.expiresAt || pendingSignIn) && (
               <div class="provider-settings-group provider-settings-secondary">

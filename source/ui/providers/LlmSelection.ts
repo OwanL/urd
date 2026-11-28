@@ -1,4 +1,4 @@
-import type { ProviderConnection } from "./ProviderConnection.ts";
+import type { LlmApi, ProviderConnection } from "./ProviderConnection.ts";
 import type { ModelFamily } from "./ModelSettings.ts";
 
 // The initiating choice bound to an execution, not just a mutable connection ID.
@@ -9,6 +9,7 @@ export interface LlmSelection {
   readonly family: ModelFamily;
   readonly supportsImages: boolean;
   readonly contextWindow: number | null;
+  readonly modelApi?: LlmApi | null;
 }
 
 export function sameContextModel(left: LlmSelection | null, right: LlmSelection | null): boolean {
@@ -19,6 +20,7 @@ export function sameContextModel(left: LlmSelection | null, right: LlmSelection 
     a.id === b.id &&
     a.route === b.route &&
     a.api === b.api &&
+    (left.modelApi ?? a.api) === (right.modelApi ?? b.api) &&
     a.endpoint === b.endpoint &&
     a.authentication === b.authentication
   );

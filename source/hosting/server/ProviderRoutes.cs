@@ -17,6 +17,7 @@ internal static class ProviderRoutes {
     routes.MapGet("", (Delegate)(async (HttpContext http) => Results.Ok(await providers.ListAsync(http.RequestAborted))));
     routes.MapPost("/openai", (Delegate)((HttpContext http) => AddAsync(http, providers.AddOpenAIAsync)));
     routes.MapPost("/chatgpt", (Delegate)((HttpContext http) => AddAsync(http, providers.AddChatGptAsync)));
+    routes.MapPost("/github-copilot", (Delegate)((HttpContext http) => AddAsync(http, providers.AddGitHubCopilotAsync)));
     routes.MapPost("/custom", async (HttpContext http) => {
       CustomProviderSettings settings = await ReadAsync<CustomProviderSettings>(http);
       ProviderConnection connection = await providers.AddCustomAsync(settings);
@@ -98,7 +99,8 @@ internal static class ProviderRoutes {
   private static IResult MapProviderFailure(ProviderOperationException failure) {
     int status = failure.Failure switch {
       ProviderFailure.ConnectionChanged or ProviderFailure.Disconnecting or
-          ProviderFailure.AuthenticationRequired or ProviderFailure.PlanAccessDenied => StatusCodes.Status409Conflict,
+          ProviderFailure.AuthenticationRequired or ProviderFailure.PlanAccessDenied or
+          ProviderFailure.CopilotNotConfigured => StatusCodes.Status409Conflict,
       ProviderFailure.SignInRejected => StatusCodes.Status400BadRequest,
       ProviderFailure.DiscoveryUnsupported => StatusCodes.Status422UnprocessableEntity,
       _ => StatusCodes.Status502BadGateway

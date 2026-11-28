@@ -112,7 +112,7 @@ internal static class Program {
           : null;
       mcp = new McpConnections(store, () => new Uri(Volatile.Read(ref servedOrigin)
           ?? throw new InvalidOperationException("The server is not ready."), "/mcp/auth/callback"), options.DataRoot);
-      manager = new SessionManager(store, client is { } supplied ? _ => supplied : providers.CreateChatClient,
+      manager = new SessionManager(store, client is { } supplied ? (_, _) => supplied : providers.CreateChatClient,
           tools, preferences, new ModelSelector(providers), mcp);
       manager.ConfigureBrowser(options.DataRoot);
       eventHub = new SessionEventHub(manager);

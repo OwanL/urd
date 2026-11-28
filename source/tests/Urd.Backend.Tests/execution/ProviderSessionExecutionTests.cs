@@ -348,7 +348,7 @@ public sealed class ProviderSessionExecutionTests {
       session = null;
       SessionRecord childRecord = store.Sessions.CreateSubagent(Guid.NewGuid(), record.Id, "owning-call");
       Assert.NotEqual(record.Id, childRecord.Id);
-      child = new(Assert.IsType<SessionRecord>(store.Sessions.Read(childRecord.Id)), store, _ => activeClient, tools);
+      child = new(Assert.IsType<SessionRecord>(store.Sessions.Read(childRecord.Id)), store, (_, _) => activeClient, tools);
       Guid childExecution = await child.StartAssignmentAsync("child task", null, selection).WaitAsync(TestTimeout);
       Assert.Equal(ExecutionOutcome.Completed,
           (await child.WaitForExecutionFinishAsync(childExecution).WaitAsync(TestTimeout)).Outcome);

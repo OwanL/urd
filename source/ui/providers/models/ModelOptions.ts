@@ -142,13 +142,17 @@ export class ModelOptions {
     const results = await Promise.all(
       providers.map(async (provider) => {
         try {
-          if (automatic) {
+          // Copilot refreshes its catalog during sign-in; retrying discovery is explicit.
+          const readOnly = automatic && provider.route === "gitHubCopilot";
+          if (automatic && !readOnly) {
             const status = await this.client.getCredentials(provider.id, signal);
             if (!this.isCurrent(revision) || signal?.aborted || !providerReady(provider, status))
               return { provider, options: [], succeeded: false };
           }
           const [catalog, settings] = await Promise.all([
-            this.client.refreshModels(provider.id),
+            readOnly
+              ? this.client.getModels(provider.id, signal)
+              : this.client.refreshModels(provider.id),
             this.client.getModelSettings(provider.id, signal),
           ]);
           return { provider, options: mapModels(provider, catalog, settings), succeeded: true };
@@ -195,9 +199,13 @@ function mapModels(
       .filter((setting) => setting.connectionId === connection.id)
       .map((setting) => [setting.modelId, setting] as const),
   );
-  return catalog.models.map((model) => {
+  const copilot = connection.route === "gitHubCopilot";
+  const options: ModelOption[] = [];
+  for (const model of catalog.models) {
+    const modelApi = copilot ? model.api : null;
+    if (copilot && modelApi == null) continue;
     const modelSettings = settingsByModel.get(model.id);
-    return {
+    options.push({
       key: `${connection.id}/${model.id}`,
       modelLabel: model.name,
       providerLabel: connection.name,
@@ -208,7 +216,9 @@ function mapModels(
         supportsImages: modelSettings?.supportsImages ?? true,
         contextWindow: modelSettings?.contextWindow ?? model.contextWindow ?? null,
         reasoningEffort: "high",
+        ...(modelApi == null ? {} : { modelApi }),
       },
-    };
-  });
+    });
+  }
+  return options;
 }

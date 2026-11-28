@@ -3,7 +3,10 @@ import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { RunProviderCommand } from "./ProviderSettingsCommand.ts";
 import type { ProviderSettingsClient, ProviderSettingsSnapshot } from "./ProviderSettingsTypes.ts";
 
-type ModelState = Pick<ProviderSettingsSnapshot, "catalogs" | "modelSettings" | "modelDrafts">;
+type ModelState = Pick<
+  ProviderSettingsSnapshot,
+  "catalogs" | "modelSettings" | "modelDrafts" | "signIns"
+>;
 
 export type ModelSettingsEdit = Partial<
   Pick<ModelSettings, "family" | "supportsImages" | "contextWindow">
@@ -66,8 +69,17 @@ export function modelCommands(
     await command(
       "refreshModels",
       () => client.refreshModels(connection.id),
-      (catalog) =>
-        publish({ catalogs: { ...snapshot().catalogs, [catalog.connectionId]: catalog } }),
+      (catalog) => {
+        const { catalogs, signIns } = snapshot();
+        const id = catalog.connectionId;
+        const attempt = signIns[id];
+        publish({
+          catalogs: { ...catalogs, [id]: catalog },
+          ...(attempt?.status === "completed" && attempt.catalogRefreshFailed
+            ? { signIns: { ...signIns, [id]: { ...attempt, catalogRefreshFailed: false } } }
+            : {}),
+        });
+      },
     );
   }
 

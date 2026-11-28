@@ -45,6 +45,9 @@ internal sealed class LauncherPipe : IAsyncDisposable {
             // A client may disconnect before reading the response.
           }
         }
+        // Stopped while serving: the served listener is disposed, so no idle replacement is needed.
+        if (stopping.IsCancellationRequested)
+          return;
         listener = CreateListener(name);
       }
       // The stop can win between connections; dispose the idle listener.

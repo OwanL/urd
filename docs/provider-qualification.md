@@ -261,8 +261,11 @@ completed text/tool continuation for the selected `gpt-6-luna`, not every accoun
 On **2026-11-28**, Urd's OAuth app signed in to a Copilot Business account.
 The separate token exchange returned `403`. A later discovery-only check used the
 original OAuth grant and the origin advertised by `/copilot_internal/user`:
-`/models` returned `200`, but Urd found no selectable models. This verifies the
-catalog HTTP path, not usable model access, billing, or inference.
+`/models` returned `200`. A repeat with catalog counts showed eight entries;
+GitHub flagged all eight `model_picker_enabled: false` and supplied no
+`supported_endpoints` for any. Urd correctly exposed none. This verifies the
+catalog HTTP path, not why GitHub marked those entries unselectable, usable model
+access, billing, or inference.
 
 Official documentation below was inspected **2026-11-04**; mutable docs are not
 version-pinned. Library/source pins are research evidence, not selected packages.

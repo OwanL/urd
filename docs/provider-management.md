@@ -205,6 +205,11 @@ credential or binding replacement, disconnect and shutdown cancel a retry wait. 
 shows the countdown for its conversation request as live state; it is not saved or resumed after
 restart. Retries do not replay tool calls or switch providers.
 
+A prepass model request that receives an explicit HTTP 503 before any stream event gets one
+retry after a random delay of 500–999 ms, or longer if `Retry-After` requires it. If
+`Retry-After` exceeds two seconds or the retry also returns a 503, prepass uses its existing
+fallback. Main conversation requests, connection failures and other HTTP errors gain no new retries.
+
 ChatGPT maps system instructions to `developer` messages at the request boundary; the plan
 Responses endpoint rejects `system` messages. Saved starting context and other routes keep
 their original roles.

@@ -1,5 +1,4 @@
 using System.ClientModel.Primitives;
-using System.Net;
 
 namespace Urd.Core.Providers;
 
@@ -10,8 +9,7 @@ internal sealed class InferenceStreamProgress(ProviderCancellation stop, TimeSpa
   private bool receivedUpdate;
 
   internal CancellationToken Token => stop.Token;
-  internal bool CanRetryRateLimit => httpStatus == (int)HttpStatusCode.TooManyRequests && !receivedUpdate
-      && Transport is "http" or "https";
+  internal int? PreStreamHttpStatus => !receivedUpdate && Transport is "http" or "https" ? httpStatus : null;
   internal string Transport { get; set; } = "https";
   internal ProviderStreamTerminal? WireTerminal { get; set; }
   internal ProviderStreamTerminalKind? SdkTerminal { get; set; }

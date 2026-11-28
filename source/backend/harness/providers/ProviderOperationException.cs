@@ -26,11 +26,12 @@ public sealed class ProviderOperationException : Exception {
   public string? Reason { get; }
   internal TimeSpan? RetryAfter { get; private init; }
   internal bool IsRetryableRateLimit { get; private init; }
+  internal bool IsPreStreamServiceUnavailable { get; private init; }
   internal ProviderDiagnostic.Cause? DiagnosticCause { get; private init; }
 
   internal static ProviderOperationException FromProviderError(Exception error,
       bool discovery = false, bool contextWindow = false, ProviderCredentials? credentials = null,
-      bool socketTransport = false, bool allowRateLimitRetry = false) {
+      bool socketTransport = false, int? preStreamHttpStatus = null) {
     ProviderErrorDetails? details = error is ClientResultException clientError ? ReadErrorDetails(clientError) : null;
     ProviderFailure failure = error switch {
       ClientResultException { Status: 401 } => ProviderFailure.AuthenticationRequired,
@@ -60,13 +61,18 @@ public sealed class ProviderOperationException : Exception {
     if (details is not null && status is null)
       return new(failure, "No HTTP response received from the provider.") { DiagnosticCause = cause };
 
-    if (details is not null)
+    if (details is not null) {
+      bool rejectedBeforeStream = !socketTransport && status == preStreamHttpStatus;
+      bool serviceUnavailable = rejectedBeforeStream && status == (int)HttpStatusCode.ServiceUnavailable;
       return new(failure, FormatMessage(failure, details.Message, details.Code, details.Param, details.RequestId,
           status, null, credentials), null) {
         DiagnosticCause = cause,
-        IsRetryableRateLimit = failure == ProviderFailure.RateLimited && allowRateLimitRetry && !socketTransport,
-        RetryAfter = failure == ProviderFailure.RateLimited ? ReadRetryAfter(((ClientResultException)error).GetRawResponse()?.Headers) : null
+        IsRetryableRateLimit = rejectedBeforeStream && failure == ProviderFailure.RateLimited,
+        IsPreStreamServiceUnavailable = serviceUnavailable,
+        RetryAfter = failure == ProviderFailure.RateLimited || serviceUnavailable
+            ? ReadRetryAfter(((ClientResultException)error).GetRawResponse()?.Headers) : null
       };
+    }
 
     if (error is ResponsesSocketStream.ReceiveException receiveError)
       return new(failure, receiveError.Message) { DiagnosticCause = cause };
@@ -87,10 +93,12 @@ public sealed class ProviderOperationException : Exception {
       400 or 422 when IsModelImageRejection(code, message) => ProviderFailure.ImageInputUnsupported,
       _ => ProviderFailure.ProviderUnavailable
     };
+    bool serviceUnavailable = status == (int)HttpStatusCode.ServiceUnavailable;
     return new(failure, FormatMessage(failure, message, code ?? type, null, requestId, status, null, credentials), null) {
       DiagnosticCause = ProviderDiagnostic.Describe(new HttpRequestException(), status),
       IsRetryableRateLimit = failure == ProviderFailure.RateLimited,
-      RetryAfter = failure == ProviderFailure.RateLimited ? retryAfter : null
+      IsPreStreamServiceUnavailable = serviceUnavailable,
+      RetryAfter = failure == ProviderFailure.RateLimited || serviceUnavailable ? retryAfter : null
     };
   }
 

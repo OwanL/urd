@@ -14,10 +14,10 @@ Unattributed calls use purpose `model` and still appear in global totals. Provid
 model tests use their separate native-stream observation path.
 
 Conversation exchanges, tool-loop follow-ups, overflow retries and compaction
-summaries have separate attempt IDs. Each provider rate-limit retry also gets its own
-attempt ID, without creating a new conversation request. Waiting does not create a usage
-record. Streaming checkpoints replace their own amount; final provider usage replaces the
-estimate rather than adding another charge.
+summaries have separate attempt IDs. Each provider retry also gets its own attempt ID,
+without creating a new conversation request. Waiting does not create a usage record.
+Streaming checkpoints replace their own amount; final provider usage replaces the estimate
+rather than adding another charge.
 SDK transport retries are disabled.
 Background tool operations do not themselves consume model tokens; model follow-ups
 use the ordinary execution path. This does not add a subagent feature.

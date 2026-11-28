@@ -112,7 +112,7 @@ internal sealed class StartingResourcePruner(
       cancellation.ThrowIfCancellationRequested();
       try {
         string answer = await runner.RunAsync($"pruning.{category.Name}", model,
-            SelectorInput(category, submitted), null, cancellation);
+            SelectorInput(category, submitted), null, cancellation, retryServiceUnavailable: true);
         cancellation.ThrowIfCancellationRequested();
         return PruningAnswer.ReadKeptIds(answer, submitted.Select(candidate => candidate.ModelId));
       } catch (ProviderOperationException failure) when (category.Size is { } size

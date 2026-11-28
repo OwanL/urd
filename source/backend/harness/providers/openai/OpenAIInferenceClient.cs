@@ -107,7 +107,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
         } catch (Exception error) when (CanClassify(error, cancellationToken)) {
           cancellationToken.ThrowIfCancellationRequested();
           throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials,
-              socketTransport: progress.Transport == "websocket", allowRateLimitRetry: progress.CanRetryRateLimit);
+              socketTransport: progress.Transport == "websocket", preStreamHttpStatus: progress.PreStreamHttpStatus);
         }
         try {
           while (await MoveNextAsync(stream, progress, state.Credentials, cancellationToken).ConfigureAwait(false)) {
@@ -285,7 +285,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       if (progress.Token.IsCancellationRequested)
         throw progress.TimeoutFailure();
       throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: credentials,
-          socketTransport: progress.Transport == "websocket", allowRateLimitRetry: progress.CanRetryRateLimit);
+          socketTransport: progress.Transport == "websocket", preStreamHttpStatus: progress.PreStreamHttpStatus);
     }
   }
 

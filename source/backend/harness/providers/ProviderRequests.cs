@@ -43,24 +43,25 @@ internal sealed class ProviderRequests(
       IReadOnlyList<ChatMessage> input = messages as IReadOnlyList<ChatMessage> ?? messages.ToArray();
       ChatOptions prepared = UsageStream.PrepareOptions(options, out UsageContext context);
       Func<DateTimeOffset?, Task>? publishRetry = TakeRetryStatus(prepared);
+      bool canRetryPrepass = prepared.AdditionalProperties?.Remove(PrepassRetry.PropertyName) == true;
       string? imageModel = options.ModelId is { Length: > 0 and <= 256 } modelId && !modelId.Any(char.IsControl)
           && input.Any(message => message.Contents.Any(ContainsImage)) ? modelId : null;
-      RateLimitRetry? retry = null;
+      RateLimitRetry? rateLimitRetry = null;
       while (true) {
         ProviderState state = await getCredentials(expectedBinding.Id, generation, token);
         token.ThrowIfCancellationRequested();
-        retry?.CheckDeadline();
+        rateLimitRetry?.CheckDeadline();
         RequireImagesAllowed(state, imageModel);
-        ProviderOperationException? throttled = null;
+        ProviderOperationException? rejected = null;
         bool observed = false;
         var (transport, wireOptions) = SelectInference(state, prepared, modelApi);
         await using (var stream = ObserveInference(transport, input, wireOptions, context).GetAsyncEnumerator(token)) {
           while (true) {
-            var (hasUpdate, failure) = await ReadUpdateAsync(stream, state, imageModel, observed, token);
+            var (hasUpdate, failure) = await ReadUpdateAsync(stream, state, imageModel, observed, canRetryPrepass, token);
             if (!hasUpdate) {
-              throttled = failure;
-              if (throttled is not null)
-                retry ??= new(retryClock);
+              rejected = failure;
+              if (rejected?.IsRetryableRateLimit == true)
+                rateLimitRetry ??= new(retryClock);
               break;
             }
             ChatResponseUpdate update = stream.Current;
@@ -74,14 +75,19 @@ internal sealed class ProviderRequests(
           }
         }
         token.ThrowIfCancellationRequested();
-        if (throttled is null) {
+        if (rejected is null) {
           if (completion is null)
             throw new ProviderOperationException(ProviderFailure.IncompleteResponse);
           completedState = state;
           break;
         }
         // Keep the original provider reservation through backoff; Stop and provider changes cancel it.
-        await retry!.WaitAsync(throttled.RetryAfter, publishRetry, token);
+        if (rejected.IsRetryableRateLimit) {
+          await rateLimitRetry!.WaitAsync(rejected.RetryAfter, publishRetry, token);
+        } else {
+          canRetryPrepass = false;
+          await PrepassRetry.WaitAsync(rejected.RetryAfter, retryClock, token);
+        }
       }
     } finally {
       await FinishRequestAsync(request, completedState, cancellationToken);
@@ -151,12 +157,13 @@ internal sealed class ProviderRequests(
       model.ReasoningEfforts?.Contains(effort == ReasoningEffort.ExtraHigh ? "xhigh" : effort.ToString().ToLowerInvariant(),
           StringComparer.Ordinal) == true;
 
-  private async ValueTask<(bool HasUpdate, ProviderOperationException? Throttled)> ReadUpdateAsync(
+  private async ValueTask<(bool HasUpdate, ProviderOperationException? Rejected)> ReadUpdateAsync(
       IAsyncEnumerator<ChatResponseUpdate> stream, ProviderState state, string? imageModel, bool observed,
-      CancellationToken cancellationToken) {
+      bool canRetryPrepass, CancellationToken cancellationToken) {
     try {
       return (await stream.MoveNextAsync(), null);
-    } catch (ProviderOperationException failure) when (failure.IsRetryableRateLimit && !observed) {
+    } catch (ProviderOperationException failure) when (!observed &&
+        (failure.IsRetryableRateLimit || canRetryPrepass && PrepassRetry.CanRetry(failure))) {
       return (false, failure);
     } catch (ProviderOperationException failure) when (imageModel is not null && failure.Failure == ProviderFailure.ImageInputUnsupported) {
       using var held = await gate.AcquireAsync(cancellationToken);

@@ -46,7 +46,8 @@ internal static class TitleGenerator {
     string answer = await runner.RunAsync("title", model, [
       new(ChatRole.System, TitleGuidance.System),
       new(ChatRole.User, prompt)
-    ], title => IsValid(TrimLineEndings(title)) ? null : TitleGuidance.Correction, cancellation);
+    ], title => IsValid(TrimLineEndings(title)) ? null : TitleGuidance.Correction, cancellation,
+        retryServiceUnavailable: true);
     return TrimLineEndings(answer);
   }
 

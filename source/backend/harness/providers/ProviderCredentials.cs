@@ -3,7 +3,7 @@ namespace Urd.Core.Providers;
 // Backend-private tokens; never return or log this value.
 internal sealed record ProviderCredentials(
     string? ApiKey, string? AccessToken, string? RefreshToken, string? IdToken,
-    DateTimeOffset? ExpiresAt, string[] Scopes, bool RequiresSignIn = false, string? Nonce = null) {
+    DateTimeOffset? ExpiresAt, string[] Scopes, bool RequiresSignIn = false, string? Nonce = null, Uri? CopilotEndpoint = null) {
   public override string ToString() => "[provider credentials]";
 }
 

@@ -144,10 +144,10 @@ public sealed class UrdStore : IDisposable {
     bool completed = database.Scalar<long>(transaction,
         "SELECT EXISTS(SELECT 1 FROM setup_completion WHERE singleton = 1);") != 0;
     AuxiliaryModelPreferences models = preferences.ModelChoices;
-    DateTimeOffset freshAfter = DateTimeOffset.UtcNow.AddMinutes(1);
+    DateTimeOffset now = DateTimeOffset.UtcNow;
     var available = Providers.ListWithCatalog(transaction)
         .Where(state => state.Catalog is { Models.Count: > 0 }
-            && ProviderManager.CanUsePersistedState(state, freshAfter))
+            && ProviderManager.CanUsePersistedState(state, now))
         .ToDictionary(state => state.Connection.Id,
             state => state.Catalog!.Models.Select(model => model.Id).ToHashSet(StringComparer.Ordinal));
     bool hasProvider = available.Count > 0;

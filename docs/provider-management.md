@@ -114,17 +114,21 @@ not prove that GitHub grants that app or account access to Copilot inference.
 
 1. Add `/github-copilot`, then POST its `/sign-in`. Open `authorizationUrl` and enter
    the displayed `userCode` on GitHub. Urd polls only while that attempt is active.
-2. Urd verifies the GitHub account, exchanges the grant for a Copilot token, then fetches
-   `/models` automatically. A successful sign-in with `catalogRefreshFailed: true`
+2. Urd verifies the GitHub account and reads the Copilot API origin from `/copilot_internal/user`.
+   It uses the original OAuth bearer token at that origin, without a separate token exchange,
+   and fetches `/models` automatically. This is an undocumented GitHub interface, not a
+   supported inference contract. A successful sign-in with `catalogRefreshFailed: true`
    keeps the credentials; retry via `/{id}/models/refresh`. Sign-in does not send a test prompt.
 3. The account catalog controls model availability. Urd does not enable models or change
    policy. It lists selectable models with a supported transport, regardless of reported
    tool support. A frozen selection keeps its protocol; if discovery changes the model or
    protocol, reselect it. Urd does not switch protocols in response to an inference error.
 
-The default inference origin is `https://api.individual.githubcopilot.com/`. Urd only
-honors token routing hints for known GitHub Copilot hosts. Disconnect clears local tokens
-and catalog; revoke the OAuth app's grant in GitHub if remote revocation is needed.
+The saved connection's canonical endpoint is `https://api.individual.githubcopilot.com/`.
+Actual requests use the bare HTTPS origin advertised by GitHub, limited to the known Copilot
+API hosts. Missing or invalid routing metadata fails sign-in. Old exchanged credentials and
+expired OAuth grants require sign-in again. Disconnect clears local tokens and catalog;
+revoke the OAuth app's grant in GitHub if remote revocation is needed.
 
 ## ChatGPT flow
 

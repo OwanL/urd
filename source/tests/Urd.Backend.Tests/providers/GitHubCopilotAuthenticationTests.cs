@@ -12,7 +12,6 @@ namespace Urd.Backend.Tests.Providers;
 public sealed class GitHubCopilotAuthenticationTests {
   private const string clientId = "urd-fixture-client";
   private const string githubToken = "synthetic-github-credential";
-  private const string copilotToken = "tid=fixture;proxy-ep=proxy.business.githubcopilot.com;example";
   private const string deviceCode = "synthetic-device-credential";
   private const string userCode = "URDF-TEST";
   private const string verificationUrl = "https://github.com/login/device";
@@ -46,9 +45,9 @@ public sealed class GitHubCopilotAuthenticationTests {
         case "/user":
           AssertGitHubRequest(request, "https://api.github.com/user");
           return Account();
-        case "/copilot_internal/v2/token":
-          AssertGitHubRequest(request, "https://api.github.com/copilot_internal/v2/token");
-          return Copilot();
+        case "/copilot_internal/user":
+          AssertGitHubRequest(request, "https://api.github.com/copilot_internal/user");
+          return Metadata();
         default:
           throw new InvalidOperationException("Unexpected request.");
       }
@@ -72,11 +71,13 @@ public sealed class GitHubCopilotAuthenticationTests {
     ProviderAuthentication? result = await completion.WaitAsync(TestTimeout);
     Assert.NotNull(result);
     Assert.Equal(new ProviderRegistration(clientId, "43210", "new-login"), result.Registration);
-    Assert.Equal(githubToken, result.Credentials.RefreshToken);
-    Assert.Equal(copilotToken, result.Credentials.AccessToken);
+    Assert.Null(result.Credentials.RefreshToken);
+    Assert.Equal(githubToken, result.Credentials.AccessToken);
+    Assert.Null(result.Credentials.ExpiresAt);
+    Assert.Equal(new Uri("https://api.business.githubcopilot.com/"), result.Credentials.CopilotEndpoint);
     Assert.Equal(new Uri("https://api.business.githubcopilot.com/"), GitHubCopilotAuthentication.GetEndpoint(result.Credentials));
     Assert.Equal(["/login/device/code", "/login/oauth/access_token", "/login/oauth/access_token", "/login/oauth/access_token",
-        "/user", "/copilot_internal/v2/token"], steps);
+        "/user", "/copilot_internal/user"], steps);
   }
 
   [Fact]
@@ -174,77 +175,141 @@ public sealed class GitHubCopilotAuthenticationTests {
   }
 
   [Theory]
+  [InlineData(HttpStatusCode.Unauthorized, ProviderFailure.AuthenticationRequired)]
   [InlineData(HttpStatusCode.Forbidden, ProviderFailure.PlanAccessDenied)]
   [InlineData(HttpStatusCode.ServiceUnavailable, ProviderFailure.ProviderUnavailable)]
   [InlineData(HttpStatusCode.Redirect, ProviderFailure.ProviderUnavailable)]
-  public async Task UnsuccessfulRefreshIsClassifiedWithoutRetainingUntrustedDetails(HttpStatusCode status, ProviderFailure failure) {
-    using var client = Client((request, _) => {
-      AssertGitHubRequest(request, "https://api.github.com/copilot_internal/v2/token");
-      HttpResponseMessage response = Json($$"""{"message":"do not retain {{githubToken}}"}""", status);
-      if (status == HttpStatusCode.Redirect)
-        response.Headers.Location = new("https://untrusted.invalid/redirect");
-      return Task.FromResult(response);
-    });
-    var authentication = new GitHubCopilotAuthentication(client, clientId, new DeviceClock());
-    ProviderOperationException error = await Assert.ThrowsAsync<ProviderOperationException>(() => authentication.RefreshAsync(
-        new(clientId, "43210", null), OldCredentials(), CancellationToken.None));
+  public async Task MetadataFailureIsClassifiedWithoutUntrustedDetails(HttpStatusCode status, ProviderFailure failure) {
+    using var response = Json($$"""{"message":"do not retain {{githubToken}}"}""", status);
+    if (status == HttpStatusCode.Redirect)
+      response.Headers.Location = new("https://untrusted.invalid/redirect");
+    ProviderOperationException error = await Assert.ThrowsAsync<ProviderOperationException>(() => CompleteWithMetadataAsync(response));
     Assert.Equal(failure, error.Failure);
     Assert.Equal(failure.ToString(), error.Message);
     Assert.Null(error.InnerException);
   }
 
-  [Fact]
-  public async Task RefreshUnauthorizedSignalsSignInButRetainsKnownCredentials() {
-    using var client = Client((request, _) => {
-      AssertGitHubRequest(request, "https://api.github.com/copilot_internal/v2/token");
-      return Task.FromResult(Json("{}", HttpStatusCode.Unauthorized));
-    });
-    var authentication = new GitHubCopilotAuthentication(client, clientId, new DeviceClock());
-    ProviderCredentials previous = OldCredentials();
-    ProviderCredentials rejected = await authentication.RefreshAsync(new(clientId, "43210", null), previous, CancellationToken.None);
-    Assert.Equal(previous with { RequiresSignIn = true }, rejected);
-  }
-
-  [Fact]
-  public async Task ChangedClientIdRequiresSignInWithoutSendingTheStoredGitHubToken() {
-    using var client = Client((_, _) => throw new InvalidOperationException("Do not exchange credentials for an old client."));
-    var authentication = new GitHubCopilotAuthentication(client, clientId);
-    ProviderCredentials previous = OldCredentials();
-    ProviderCredentials revised = await authentication.RefreshAsync(new("old-client", "43210", null), previous, CancellationToken.None);
-    Assert.Equal(previous with { RequiresSignIn = true }, revised);
-  }
-
-  [Fact]
-  public async Task RefreshExchangesOnlyTheGitHubTokenAndRejectsOversizedBodies() {
-    int attempts = 0;
-    using var client = Client((request, _) => {
-      AssertGitHubRequest(request, "https://api.github.com/copilot_internal/v2/token");
-      return Task.FromResult(++attempts == 1 ? Copilot() : Json(new string(' ', 65_537)));
-    });
-    var authentication = new GitHubCopilotAuthentication(client, clientId, new DeviceClock());
-    var registration = new ProviderRegistration(clientId, "43210", null);
-    ProviderCredentials refreshed = await authentication.RefreshAsync(registration, OldCredentials(), CancellationToken.None);
-    Assert.Equal(copilotToken, refreshed.AccessToken);
-    Assert.Equal(githubToken, refreshed.RefreshToken);
-    ProviderOperationException error = await Assert.ThrowsAsync<ProviderOperationException>(() => authentication.RefreshAsync(
-        registration, refreshed, CancellationToken.None));
+  [Theory]
+  [InlineData("https://api.business.githubcopilot.com.attacker.invalid")]
+  [InlineData("https://api.business.githubcopilot.com:444")]
+  [InlineData("https://user@api.business.githubcopilot.com")]
+  [InlineData("http://api.business.githubcopilot.com")]
+  [InlineData("https://api.business.githubcopilot.com/path")]
+  [InlineData("https://api.business.githubcopilot.com/path/..")]
+  [InlineData("https://@api.business.githubcopilot.com")]
+  [InlineData("https://api.business.githubcopilot.com/?query=value")]
+  [InlineData("https://api.business.githubcopilot.com/#fragment")]
+  [InlineData("not a uri")]
+  public async Task MetadataRejectsUntrustedEndpoints(string endpoint) {
+    using var response = Json(System.Text.Json.JsonSerializer.Serialize(new { endpoints = new { api = endpoint } }));
+    ProviderOperationException error = await Assert.ThrowsAsync<ProviderOperationException>(() => CompleteWithMetadataAsync(response));
     Assert.Equal(ProviderFailure.InvalidProviderResponse, error.Failure);
+    Assert.Equal(ProviderFailure.InvalidProviderResponse.ToString(), error.Message);
+    Assert.Null(error.InnerException);
   }
-
-  [Fact]
-  public void InferenceEndpointDefaultsToTheIndividualRouteWithoutAProxyEndpoint() =>
-      Assert.Equal(new Uri("https://api.individual.githubcopilot.com/"), GitHubCopilotAuthentication.GetEndpoint(OldCredentials()));
 
   [Theory]
-  [InlineData("proxy.business.githubcopilot.com.attacker.invalid")]
-  [InlineData("proxy.business.githubcopilot.com:444")]
-  [InlineData("proxy.business.githubcopilot.com@attacker.invalid")]
-  [InlineData("https://proxy.business.githubcopilot.com/")]
-  [InlineData("proxy.business.githubcopilot.com;proxy-ep=proxy.githubcopilot.com")]
-  public void InferenceEndpointRejectsHostConfusionAndDuplicateFields(string proxy) {
-    ProviderOperationException error = Assert.Throws<ProviderOperationException>(() =>
-        GitHubCopilotAuthentication.GetEndpoint(OldCredentials() with { AccessToken = $"tid=fixture;proxy-ep={proxy};" }));
+  [InlineData("{}")]
+  [InlineData("{\"endpoints\":{}}")]
+  [InlineData("{\"endpoints\":{\"api\":null}}")]
+  [InlineData("{\"endpoints\":{\"api\":42}}")]
+  [InlineData("not json")]
+  public async Task MetadataRejectsMissingOrMalformedPayload(string body) {
+    using var response = Json(body);
+    ProviderOperationException error = await Assert.ThrowsAsync<ProviderOperationException>(() => CompleteWithMetadataAsync(response));
     Assert.Equal(ProviderFailure.InvalidProviderResponse, error.Failure);
+  }
+
+  [Fact]
+  public async Task MetadataRejectsOversizedPayload() {
+    using var response = Json(new string(' ', 65_537));
+    ProviderOperationException error = await Assert.ThrowsAsync<ProviderOperationException>(() => CompleteWithMetadataAsync(response));
+    Assert.Equal(ProviderFailure.InvalidProviderResponse, error.Failure);
+  }
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData(120)]
+  public async Task DeviceTokenExpiryIsStoredOnlyWhenPositive(int? expires) {
+    using var response = Metadata();
+    ProviderAuthentication result = await CompleteWithMetadataAsync(response, expires);
+    Assert.Equal(expires > 0 ? DateTimeOffset.UnixEpoch.AddSeconds(2 + expires.Value) : null, result.Credentials.ExpiresAt);
+    Assert.Equal(githubToken, result.Credentials.AccessToken);
+    Assert.Null(result.Credentials.RefreshToken);
+  }
+
+  [Theory]
+  [InlineData("0")]
+  [InlineData("-1")]
+  [InlineData("null")]
+  [InlineData("\"invalid\"")]
+  public async Task DeviceTokenRejectsInvalidExpiry(string expires) {
+    var clock = new DeviceClock();
+    var paths = new List<string>();
+    using var client = Client((request, _) => {
+      string path = request.RequestUri!.AbsolutePath;
+      paths.Add(path);
+      return Task.FromResult(path switch {
+        "/login/device/code" => Device(),
+        "/login/oauth/access_token" => Json($$"""{"access_token":"{{githubToken}}","token_type":"bearer","expires_in":{{expires}}}"""),
+        _ => throw new InvalidOperationException("Invalid expiry must stop sign-in.")
+      });
+    });
+    var authentication = new GitHubCopilotAuthentication(client, clientId, clock);
+    GitHubCopilotDeviceFlow flow = await authentication.BeginAsync(CancellationToken.None);
+    Task<ProviderAuthentication?> completion = authentication.CompleteAsync(flow, null, CancellationToken.None);
+    await clock.WaitForDelayAsync(2);
+    clock.Advance(2);
+    ProviderOperationException error = await Assert.ThrowsAsync<ProviderOperationException>(() => completion.WaitAsync(TestTimeout));
+    Assert.Equal(ProviderFailure.InvalidProviderResponse, error.Failure);
+    Assert.Equal(["/login/device/code", "/login/oauth/access_token"], paths);
+  }
+
+  [Fact]
+  public void InferenceEndpointRequiresStoredEndpointAndAccessToken() {
+    var credentials = new ProviderCredentials(null, githubToken, null, null, null, []) {
+      CopilotEndpoint = new Uri("https://api.business.githubcopilot.com/")
+    };
+    Assert.Equal(credentials.CopilotEndpoint, GitHubCopilotAuthentication.GetEndpoint(credentials));
+    foreach (ProviderCredentials invalid in new[] {
+      credentials with { CopilotEndpoint = null },
+      credentials with { AccessToken = null },
+      credentials with { AccessToken = " " },
+      credentials with { CopilotEndpoint = new Uri("https://attacker.invalid/") }
+    }) {
+      ProviderOperationException error = Assert.Throws<ProviderOperationException>(() => GitHubCopilotAuthentication.GetEndpoint(invalid));
+      Assert.Equal(ProviderFailure.InvalidProviderResponse, error.Failure);
+    }
+  }
+
+  private static async Task<ProviderAuthentication> CompleteWithMetadataAsync(HttpResponseMessage metadata, int? expires = null) {
+    var clock = new DeviceClock();
+    var paths = new List<string>();
+    using var client = Client((request, _) => {
+      string path = request.RequestUri!.AbsolutePath;
+      paths.Add(path);
+      switch (path) {
+        case "/login/device/code": return Task.FromResult(Device());
+        case "/login/oauth/access_token": return Task.FromResult(OAuthToken(expires));
+        case "/user":
+          AssertGitHubRequest(request, "https://api.github.com/user");
+          return Task.FromResult(Account());
+        case "/copilot_internal/user":
+          AssertGitHubRequest(request, "https://api.github.com/copilot_internal/user");
+          return Task.FromResult(metadata);
+        default: throw new InvalidOperationException("Unexpected request.");
+      }
+    });
+    var authentication = new GitHubCopilotAuthentication(client, clientId, clock);
+    GitHubCopilotDeviceFlow flow = await authentication.BeginAsync(CancellationToken.None);
+    Task<ProviderAuthentication?> completion = authentication.CompleteAsync(flow, null, CancellationToken.None);
+    await clock.WaitForDelayAsync(2);
+    clock.Advance(2);
+    try {
+      return (await completion.WaitAsync(TestTimeout))!;
+    } finally {
+      Assert.Equal(["/login/device/code", "/login/oauth/access_token", "/user", "/copilot_internal/user"], paths);
+    }
   }
 
   [Theory]
@@ -259,7 +324,7 @@ public sealed class GitHubCopilotAuthenticationTests {
       "/login/device/code" => Device(),
       "/login/oauth/access_token" => OAuthToken(),
       "/user" => Account(),
-      "/copilot_internal/v2/token" => Copilot(),
+      "/copilot_internal/user" => Metadata(),
       _ => throw new InvalidOperationException("Unexpected request.")
     }));
     Guid id = Guid.NewGuid();
@@ -286,7 +351,7 @@ public sealed class GitHubCopilotAuthenticationTests {
       Assert.Null(joined.UserCode);
       Assert.Null(joined.AuthorizationUrl);
       Assert.Equal(1, refreshes);
-      Assert.Equal(copilotToken, store.Providers.Get(id).Credentials!.AccessToken);
+      Assert.Equal(githubToken, store.Providers.Get(id).Credentials!.AccessToken);
 
       if (cancel) {
         Task<ProviderSignIn> stopping = signIns.CancelAsync(first.Id);
@@ -304,7 +369,7 @@ public sealed class GitHubCopilotAuthenticationTests {
         Assert.Null(done.Error);
       }
       Assert.Equal(1, store.Providers.Get(id).Generation);
-      Assert.Equal(copilotToken, store.Providers.Get(id).Credentials!.AccessToken);
+      Assert.Equal(githubToken, store.Providers.Get(id).Credentials!.AccessToken);
     } finally {
       release.TrySetResult();
       Task shutdown;
@@ -344,12 +409,13 @@ public sealed class GitHubCopilotAuthenticationTests {
   private static HttpClient Client(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) =>
       new(new DelegateHandler(respond)) { Timeout = Timeout.InfiniteTimeSpan };
 
-  private static ProviderCredentials OldCredentials() => new(null, "old-synthetic-token", githubToken, null, DateTimeOffset.UnixEpoch, []);
   private static HttpResponseMessage Device(int expires = 60, string verification = verificationUrl) =>
       Json($$"""{"device_code":"{{deviceCode}}","user_code":"{{userCode}}","verification_uri":"{{verification}}","interval":2,"expires_in":{{expires}}}""");
-  private static HttpResponseMessage OAuthToken() => Json($$"""{"access_token":"{{githubToken}}","token_type":"bearer"}""");
+  private static HttpResponseMessage OAuthToken(int? expires = null) => expires is null
+      ? Json($$"""{"access_token":"{{githubToken}}","token_type":"bearer"}""")
+      : Json(System.Text.Json.JsonSerializer.Serialize(new { access_token = githubToken, token_type = "bearer", expires_in = expires }));
   private static HttpResponseMessage Account() => Json("""{"id":43210,"login":"new-login"}""");
-  private static HttpResponseMessage Copilot() => Json($$"""{"token":"{{copilotToken}}","expires_at":900}""");
+  private static HttpResponseMessage Metadata() => Json("""{"endpoints":{"api":"https://api.business.githubcopilot.com/"}}""");
   private static HttpResponseMessage Json(string body, HttpStatusCode status = HttpStatusCode.OK) => new(status) { Content = new StringContent(body) };
 
   private sealed class DelegateHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond) : HttpMessageHandler {

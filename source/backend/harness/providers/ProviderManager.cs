@@ -17,7 +17,6 @@ public sealed class ProviderManager : IDisposable {
   private readonly HttpMessageHandler handler;
   private readonly HttpClient client;
   private readonly ChatGptAuthentication authentication;
-  private readonly GitHubCopilotAuthentication copilot;
   private readonly string? copilotClientId;
   private readonly OpenAIModelProbe modelProbe;
   private readonly GitHubCopilotModels copilotModels;
@@ -49,7 +48,7 @@ public sealed class ProviderManager : IDisposable {
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
     this.copilotClientId = copilotClientId?.Trim();
-    copilot = new(client, this.copilotClientId, copilotClock);
+    var copilot = new GitHubCopilotAuthentication(client, this.copilotClientId, copilotClock);
     modelProbe = new(client, store.Usage, prices);
     copilotModels = new(client);
     requests = new(gate, storage, modelSettings, new(client, connectSocket: connectSocket, diagnose: diagnose), new(client),
@@ -230,7 +229,7 @@ public sealed class ProviderManager : IDisposable {
   }
 
   private ProviderModelCatalog SuggestionCatalog(ProviderState state) =>
-      CanUseWithoutSignIn(state, DateTimeOffset.UtcNow.AddMinutes(1)) && state.Catalog is not null
+      CanUseWithoutSignIn(state, DateTimeOffset.UtcNow) && state.Catalog is not null
           ? state.Catalog : new(state.Connection.Id, null, []);
 
   internal async Task<bool> HasSelectedProvidersAsync(IReadOnlyList<Guid>? connectionIds,
@@ -348,8 +347,7 @@ public sealed class ProviderManager : IDisposable {
         return state;
       if (!HasPlanAccess(state))
         throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
-      bool refreshRequired = !(credentials.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1));
-      if (!refreshRequired)
+      if (state.Connection.Route == ProviderRoute.GitHubCopilot || credentials.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1))
         return state;
       if (state.Registration is null || string.IsNullOrEmpty(credentials.RefreshToken))
         throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
@@ -383,9 +381,7 @@ public sealed class ProviderManager : IDisposable {
     Guid id = state.Connection.Id;
     try {
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-      ProviderCredentials credentials = state.Connection.Route == ProviderRoute.GitHubCopilot
-          ? await copilot.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token)
-          : await authentication.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token);
+      ProviderCredentials credentials = await authentication.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token);
       using var held = await gate.AcquireAsync();
       if (!storage.SaveRefresh(id, state.Generation, state.CredentialVersion, credentials))
         throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
@@ -393,9 +389,9 @@ public sealed class ProviderManager : IDisposable {
     } catch (Exception failure) {
       // A lost refresh acknowledgement may have rotated the remote token; require explicit recovery.
       using var held = await gate.AcquireAsync();
-      bool requireSignIn = state.Connection.Route == ProviderRoute.GitHubCopilot
-          ? failure is ProviderOperationException { Failure: ProviderFailure.AuthenticationRequired }
-          : failure is not ProviderOperationException { Failure: ProviderFailure.ProviderUnavailable or ProviderFailure.ConnectionChanged };
+      bool requireSignIn = failure is not ProviderOperationException {
+        Failure: ProviderFailure.ProviderUnavailable or ProviderFailure.ConnectionChanged
+      };
       if (requireSignIn) {
         signInRequired[id] = state.Generation;
         try {
@@ -451,15 +447,15 @@ public sealed class ProviderManager : IDisposable {
       return [];
 
     HashSet<Guid>? allowed = connectionIds?.ToHashSet();
-    DateTimeOffset freshAfter = DateTimeOffset.UtcNow.AddMinutes(1);
+    DateTimeOffset now = DateTimeOffset.UtcNow;
     return storage.List().Where(connection => allowed?.Contains(connection.Id) != false)
-        .Select(connection => storage.Get(connection.Id)).Where(state => CanUseWithoutSignIn(state, freshAfter));
+        .Select(connection => storage.Get(connection.Id)).Where(state => CanUseWithoutSignIn(state, now));
   }
 
-  private bool CanUseWithoutSignIn(ProviderState state, DateTimeOffset freshAfter) =>
-      !RequiresSignIn(state) && CanUsePersistedState(state, freshAfter);
+  private bool CanUseWithoutSignIn(ProviderState state, DateTimeOffset now) =>
+      !RequiresSignIn(state) && CanUsePersistedState(state, now);
 
-  internal static bool CanUsePersistedState(ProviderState state, DateTimeOffset freshAfter) {
+  internal static bool CanUsePersistedState(ProviderState state, DateTimeOffset now) {
     if (state.Disconnecting)
       return false;
     if (state.Connection.Authentication == AuthenticationMethod.None)
@@ -469,7 +465,9 @@ public sealed class ProviderManager : IDisposable {
 
     return state.Connection.Authentication switch {
       AuthenticationMethod.ApiKey => !string.IsNullOrWhiteSpace(credentials.ApiKey),
-      AuthenticationMethod.OAuth => HasPlanAccess(state) && (credentials.ExpiresAt > freshAfter
+      AuthenticationMethod.OAuth when state.Connection.Route == ProviderRoute.GitHubCopilot =>
+          state.Registration is not null && GitHubCopilotAuthentication.CanUseGrant(credentials, now),
+      AuthenticationMethod.OAuth => HasPlanAccess(state) && (credentials.ExpiresAt > now.AddMinutes(1)
           ? !string.IsNullOrWhiteSpace(credentials.AccessToken)
           : state.Registration is not null && !string.IsNullOrEmpty(credentials.RefreshToken)),
       _ => false
@@ -508,12 +506,13 @@ public sealed class ProviderManager : IDisposable {
 
   private bool RequiresSignIn(ProviderState state) =>
       signInRequired.TryGetValue(state.Connection.Id, out long generation) && generation == state.Generation ||
-      state.Connection.Route == ProviderRoute.GitHubCopilot && state.Registration is { } registration &&
-      !string.Equals(copilotClientId, registration.ClientId, StringComparison.Ordinal);
+      state.Connection.Route == ProviderRoute.GitHubCopilot &&
+      (state.Registration is { } registration && !string.Equals(copilotClientId, registration.ClientId, StringComparison.Ordinal) ||
+       state.Credentials is { } credentials && !GitHubCopilotAuthentication.CanUseGrant(credentials, DateTimeOffset.UtcNow));
 
   private static bool HasPlanAccess(ProviderState state) => state.Credentials is { } credentials &&
       (state.Connection.Route == ProviderRoute.GitHubCopilot
-          ? state.Registration is not null && !string.IsNullOrWhiteSpace(credentials.RefreshToken)
+          ? state.Registration is not null && GitHubCopilotAuthentication.HasDirectGrant(credentials)
           : credentials.Scopes.Contains("resource.invoke", StringComparer.Ordinal) &&
             credentials.Scopes.Contains("chatgpt.tokens.use.direct", StringComparer.Ordinal));
 

@@ -11,7 +11,8 @@ namespace Urd.Backend.Tests.Providers;
 
 public sealed class GitHubCopilotProviderTests {
   private const string ClientId = "fixture-client";
-  private const string AccessToken = "synthetic-copilot-access";
+  private const string AccessToken = "synthetic-github-access";
+  private static readonly Uri BusinessEndpoint = new("https://api.business.githubcopilot.com/");
   private const string Catalog = """
       {"data":[
         {"id":"fixture-responses","name":"Responses","model_picker_enabled":true,"supported_endpoints":["/responses","/chat/completions"],
@@ -33,7 +34,7 @@ public sealed class GitHubCopilotProviderTests {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
     var handler = new ControlledProviderHandler((request, _) => {
-      Assert.Equal("api.individual.githubcopilot.com", request.RequestUri!.Host);
+      Assert.Equal(BusinessEndpoint.Host, request.RequestUri!.Host);
       Assert.Equal($"Bearer {AccessToken}", request.Headers.Authorization?.ToString());
       Assert.Contains("Urd", request.Headers.UserAgent.ToString());
       Assert.DoesNotContain("VSCode", request.Headers.UserAgent.ToString(), StringComparison.OrdinalIgnoreCase);
@@ -53,8 +54,9 @@ public sealed class GitHubCopilotProviderTests {
     var manager = new ProviderManager(store, () => new Uri("http://localhost/auth/callback"), handler, copilotClientId: ClientId);
     try {
       ProviderConnection connection = await manager.AddGitHubCopilotAsync("GitHub Copilot");
+      Assert.Equal(new Uri("https://api.individual.githubcopilot.com/"), connection.Endpoint);
       store.Providers.SetCredentials(connection.Id, 0, new(ClientId, "42", "octocat"),
-          new(null, AccessToken, "synthetic-github-access", null, DateTimeOffset.UtcNow.AddHours(1), []));
+          new(null, AccessToken, null, null, null, [], CopilotEndpoint: BusinessEndpoint));
 
       ProviderModelCatalog catalog = await manager.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
       Assert.Collection(catalog.Models,
@@ -96,6 +98,40 @@ public sealed class GitHubCopilotProviderTests {
       Assert.Null(disconnected.RemoteRevocationConfirmed);
       Assert.Empty((await manager.GetModelCatalogAsync(connection.Id)).Models);
       Assert.Equal(3, handler.Requests.Count);
+    } finally {
+      await manager.ShutdownAsync().WaitAsync(TestTimeout);
+      manager.Dispose();
+    }
+  }
+
+  [Theory]
+  [InlineData(true)]
+  [InlineData(false)]
+  public async Task LegacyOrExpiredCredentialsRequireSignInWithoutRequests(bool legacy) {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    var handler = new ControlledProviderHandler((_, _) => throw new InvalidOperationException("Unexpected outbound request"));
+    var manager = new ProviderManager(store, () => new Uri("http://localhost/auth/callback"), handler, copilotClientId: ClientId);
+    try {
+      ProviderConnection connection = await manager.AddGitHubCopilotAsync("GitHub Copilot");
+      var credentials = legacy
+          ? new ProviderCredentials(null, "legacy-copilot-token", AccessToken, null, DateTimeOffset.UtcNow.AddHours(1), [])
+          : new ProviderCredentials(null, AccessToken, null, null, DateTimeOffset.UtcNow.AddHours(-1), [], CopilotEndpoint: BusinessEndpoint);
+      store.Providers.SetCredentials(connection.Id, 0, new(ClientId, "42", "octocat"), credentials);
+
+      var failure = await Assert.ThrowsAsync<ProviderOperationException>(() =>
+          manager.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout));
+      Assert.Equal(ProviderFailure.AuthenticationRequired, failure.Failure);
+      Assert.True((await manager.GetCredentialStatusAsync(connection.Id)).RequiresSignIn);
+      Assert.Empty(handler.Requests);
+
+      ProviderState saved = store.Providers.Get(connection.Id);
+      Assert.NotNull(saved.Credentials);
+      Assert.Equal(credentials.AccessToken, saved.Credentials.AccessToken);
+      Assert.Equal(credentials.RefreshToken, saved.Credentials.RefreshToken);
+      Assert.Equal(credentials.ExpiresAt, saved.Credentials.ExpiresAt);
+      Assert.Equal(credentials.CopilotEndpoint, saved.Credentials.CopilotEndpoint);
+      Assert.Equal("42", saved.Registration?.Subject);
     } finally {
       await manager.ShutdownAsync().WaitAsync(TestTimeout);
       manager.Dispose();

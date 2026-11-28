@@ -258,6 +258,12 @@ sign-in, credential use, model request, charge, or account change was authorized
 successful authentication → account/model entitlement → completed inference/tool
 round trip. The live checks above establish ChatGPT authentication, catalog access and
 completed text/tool continuation for the selected `gpt-6-luna`, not every account/model.
+On **2026-11-28**, Urd's OAuth app signed in to a Copilot Business account.
+The separate token exchange returned `403`. A later discovery-only check used the
+original OAuth grant and the origin advertised by `/copilot_internal/user`:
+`/models` returned `200`, but Urd found no selectable models. This verifies the
+catalog HTTP path, not usable model access, billing, or inference.
+
 Official documentation below was inspected **2026-11-04**; mutable docs are not
 version-pinned. Library/source pins are research evidence, not selected packages.
 

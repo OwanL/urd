@@ -22,7 +22,7 @@ before(async () => {
   });
   await server.listen();
   browser = await chromium.launch({ headless: true });
-  page = await browser.newPage({ viewport: { width: 600, height: 600 } });
+  page = await browser.newPage({ viewport: { width: 900, height: 600 } });
 });
 
 beforeEach(async () => {
@@ -44,7 +44,7 @@ void test("Enter does not choose the first model before the user moves or search
 
 void test("qualifies an ambiguous selected model with its provider", async () => {
   await trigger().click();
-  await search().press("ArrowDown");
+  await search().fill("Model A");
   await search().press("Enter");
   assert.equal(
     await page.getByRole("button", { name: "Model: Model A · Provider One" }).textContent(),
@@ -65,4 +65,51 @@ void test("Home and End navigate the filtered model list", async () => {
   await search().press("End");
   await search().press("Enter");
   assert.equal(await selection().textContent(), "two/model-c");
+});
+
+void test("shows reference prices and keeps unknown prices unknown", async () => {
+  await trigger().click();
+  assert.equal(await page.getByRole("button", { name: "Sort by In" }).isVisible(), true);
+  assert.match(
+    (await page.getByRole("option", { name: /Model A, Provider One/ }).textContent()) ?? "",
+    /\$1\.00.*\$5\.00/,
+  );
+  assert.match(
+    (await page.getByRole("option", { name: /Model A, Provider Two/ }).textContent()) ?? "",
+    /—.*—/,
+  );
+});
+
+void test("sorts by a price column while leaving unknown prices last", async () => {
+  await trigger().click();
+  const sortOutput = page.getByRole("button", { name: "Sort by Out" });
+  await sortOutput.click();
+  assert.equal(await search().evaluate((element) => element === document.activeElement), true);
+  let options = await page.getByRole("option").all();
+  assert.match((await options[0]!.getAttribute("aria-label")) ?? "", /Claude Haiku 4\.5/);
+  assert.match((await options.at(-1)!.getAttribute("aria-label")) ?? "", /Provider Two\/model-a/);
+
+  await sortOutput.click();
+  options = await page.getByRole("option").all();
+  assert.match((await options[0]!.getAttribute("aria-label")) ?? "", /Model C/);
+  assert.match((await options.at(-1)!.getAttribute("aria-label")) ?? "", /Provider Two\/model-a/);
+});
+
+void test("right-click toggles a favorite and keeps favorites first", async () => {
+  await trigger().click();
+  const modelC = page.getByRole("option", { name: /Model C/ });
+  await modelC.click({ button: "right" });
+  let options = await page.getByRole("option").all();
+  assert.match((await options[0]!.getAttribute("aria-label")) ?? "", /Model C.*favorited/);
+  assert.match((await options[0]!.textContent()) ?? "", /★/);
+  assert.equal(
+    await page.getByRole("status", { name: "Favorite models" }).textContent(),
+    "two/model-c",
+  );
+
+  await search().fill("Model C");
+  await search().press("ContextMenu");
+  options = await page.getByRole("option").all();
+  assert.doesNotMatch((await options[0]!.getAttribute("aria-label")) ?? "", /favorited/);
+  assert.equal(await page.getByRole("status", { name: "Favorite models" }).textContent(), "");
 });

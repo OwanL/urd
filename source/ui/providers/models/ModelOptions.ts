@@ -7,9 +7,15 @@ import { providerReady } from "../settings/ProviderConnectionStatus.ts";
 
 export interface ModelOption {
   key: string;
+  connectionId: string;
   modelId: string;
   modelLabel: string;
   providerLabel: string;
+  inputPrice: number | null;
+  outputPrice: number | null;
+  priceSource: string | null;
+  priceCapturedAt: string | null;
+  supportsImages: boolean;
   selection: LlmSelection;
 }
 
@@ -206,16 +212,23 @@ function mapModels(
     const modelApi = copilot ? model.api : null;
     if (copilot && modelApi == null) continue;
     const modelSettings = settingsByModel.get(model.id);
+    const supportsImages = modelSettings?.supportsImages ?? true;
     options.push({
       key: `${connection.id}/${model.id}`,
+      connectionId: connection.id,
       modelId: model.id,
       modelLabel: model.name,
       providerLabel: connection.name,
+      inputPrice: model.price?.inputPerMillion ?? null,
+      outputPrice: model.price?.outputPerMillion ?? null,
+      priceSource: model.price?.source ?? null,
+      priceCapturedAt: model.price?.capturedAt ?? null,
+      supportsImages,
       selection: {
         connection,
         modelId: model.id,
         family: modelSettings?.family ?? "other",
-        supportsImages: modelSettings?.supportsImages ?? true,
+        supportsImages,
         contextWindow: modelSettings?.contextWindow ?? model.contextWindow ?? null,
         reasoningEffort: "high",
         ...(modelApi == null ? {} : { modelApi }),

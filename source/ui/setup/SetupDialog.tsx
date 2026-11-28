@@ -12,6 +12,7 @@ import { requestJson } from "../http/Requests.ts";
 import { PreferencesClient } from "../preferences/PreferencesClient.ts";
 import { usePreferences } from "../preferences/usePreferences.ts";
 import { ProviderClient } from "../providers/ProviderClient.ts";
+import { ModelFavoritesProvider } from "../providers/models/ModelFavorites.tsx";
 import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
 import {
@@ -261,7 +262,7 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
       setBusy(false);
     }
   };
-  return (
+  const content = (
     <SetupModal title={titles[step]} progress={`${index + 1} of ${setupSteps.length}`}>
       <div class="setup-content">
         {step === "provider" && (
@@ -367,4 +368,5 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
       </footer>
     </SetupModal>
   );
+  return <ModelFavoritesProvider preferences={preferences}>{content}</ModelFavoritesProvider>;
 }

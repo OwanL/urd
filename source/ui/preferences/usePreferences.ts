@@ -6,6 +6,7 @@ import type {
   ConfiguredModel,
   ModelBucket,
   ModelChoice,
+  ModelFavorite,
   Preferences,
   PreferencesClient,
   ProtectedResourceCategory,
@@ -16,6 +17,7 @@ export type PreferenceKey =
   | "workingDirectory"
   | "compactionTriggerTokenCount"
   | "subagentProviderConnectionIds"
+  | "modelFavorites"
   | "maxSubagentDepth"
   | `modelChoice:${AuxiliaryModelPurpose}`
   | `modelBucket:${ModelBucket}`
@@ -37,6 +39,7 @@ export interface PreferencesState {
   saveModelChoice(purpose: AuxiliaryModelPurpose, choice: ModelChoice): Promise<boolean>;
   saveBucketModels(bucket: ModelBucket, models: readonly ConfiguredModel[]): Promise<boolean>;
   saveSubagentProviders(connectionIds: SubagentProviderConnectionIds): Promise<boolean>;
+  saveModelFavorites(favorites: readonly ModelFavorite[]): Promise<boolean>;
   saveMaxSubagentDepth(value: number): Promise<boolean>;
   saveBlocks(command: "create" | "execute"): boolean;
   saveProtectedItems(
@@ -172,6 +175,15 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
       ),
     [client, save],
   );
+  const saveModelFavorites = useCallback(
+    (favorites: readonly ModelFavorite[]) =>
+      save(
+        "modelFavorites",
+        () => client.setModelFavorites(favorites),
+        "Model favorites could not be saved.",
+      ),
+    [client, save],
+  );
   const saveMaxSubagentDepth = useCallback(
     (value: number) =>
       save(
@@ -213,6 +225,7 @@ export function usePreferences(client: PreferencesClient): PreferencesState {
     saveModelChoice,
     saveBucketModels,
     saveSubagentProviders,
+    saveModelFavorites,
     saveMaxSubagentDepth,
     saveBlocks,
     saveProtectedItems,

@@ -22,6 +22,7 @@ import type { TranscriptDisplay } from "../chat/transcript/TranscriptDisplay.ts"
 import type { TranscriptNavigationState } from "../chat/transcript/navigation/TranscriptNavigationStorage.ts";
 import { forgetTranscriptNavigation } from "../chat/transcript/navigation/useTranscriptNavigation.ts";
 import { usePersistedWorkspace } from "./usePersistedWorkspace.ts";
+import { ModelFavoritesProvider } from "../providers/models/ModelFavorites.tsx";
 import { useModelOptions } from "../providers/models/useModelOptions.ts";
 import { defaultModelSelection } from "./DefaultModelSelection.ts";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation.ts";
@@ -216,7 +217,7 @@ export function Workspace({
     (events.connected ? events.error : null) ||
     transcriptError;
 
-  return (
+  const content = (
     <main class="workspace">
       <header class="top-strip">
         <ChatTabs
@@ -413,4 +414,5 @@ export function Workspace({
       </SubagentNavigationContext.Provider>
     </main>
   );
+  return <ModelFavoritesProvider preferences={preferences}>{content}</ModelFavoritesProvider>;
 }

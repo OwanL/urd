@@ -6,16 +6,28 @@ import type { ModelOption } from "../../providers/models/ModelOptions.ts";
 
 const first: ModelOption = {
   key: "first",
+  connectionId: selection.connection.id,
   modelId: "first",
   modelLabel: "First",
   providerLabel: "Provider",
+  inputPrice: null,
+  outputPrice: null,
+  priceSource: null,
+  priceCapturedAt: null,
+  supportsImages: false,
   selection: { ...selection, modelId: "first", reasoningEffort: "high" },
 };
 const second: ModelOption = {
   key: "second",
+  connectionId: selection.connection.id,
   modelId: "second",
   modelLabel: "Second",
   providerLabel: "Provider",
+  inputPrice: null,
+  outputPrice: null,
+  priceSource: null,
+  priceCapturedAt: null,
+  supportsImages: true,
   selection: { ...selection, modelId: "second", supportsImages: true, reasoningEffort: "high" },
 };
 const remembered = { ...selection, modelId: "second", reasoningEffort: "medium" };

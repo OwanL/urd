@@ -19,6 +19,11 @@ export interface ModelChoice {
   readonly modelId: string | null;
 }
 
+export interface ModelFavorite {
+  readonly connectionId: string;
+  readonly modelId: string;
+}
+
 export interface AuxiliaryModelPreferences {
   readonly tools: ModelChoice;
   readonly skills: ModelChoice;
@@ -52,6 +57,7 @@ export interface Preferences {
   readonly modelChoices: AuxiliaryModelPreferences;
   readonly protectedResources: ProtectedResourcePreferences;
   readonly subagentProviderConnectionIds: SubagentProviderConnectionIds;
+  readonly modelFavorites: readonly ModelFavorite[];
   readonly maxSubagentDepth: number;
 }
 
@@ -105,6 +111,12 @@ export class PreferencesClient {
   setSubagentProviders(connectionIds: SubagentProviderConnectionIds): Promise<Preferences> {
     return requestJson(new URL("/api/preferences/subagent-providers", this.origin), "POST", {
       connectionIds,
+    });
+  }
+
+  setModelFavorites(favorites: readonly ModelFavorite[]): Promise<Preferences> {
+    return requestJson(new URL("/api/preferences/model-favorites", this.origin), "POST", {
+      favorites,
     });
   }
 

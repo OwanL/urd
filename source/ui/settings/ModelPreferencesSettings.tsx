@@ -94,16 +94,7 @@ export function ModelPreferencesSettings({
     };
   }, [active, readCachedModels]);
 
-  const models: readonly ModelPickerOption[] = useMemo(
-    () =>
-      catalog.options.map(({ key, modelId, modelLabel, providerLabel }) => ({
-        key,
-        modelId,
-        modelLabel,
-        providerLabel,
-      })),
-    [catalog.options],
-  );
+  const models: readonly ModelPickerOption[] = catalog.options;
   const modelByKey = useMemo(
     () => new Map(catalog.options.map((option) => [option.key, option] as const)),
     [catalog.options],
@@ -135,9 +126,15 @@ export function ModelPreferencesSettings({
       ...models,
       {
         key: modelKey(saved),
+        connectionId: saved.connectionId,
         modelId: saved.modelId,
         modelLabel: `${saved.modelId} (unavailable)`,
         providerLabel: provider?.name ?? saved.connectionId,
+        inputPrice: null,
+        outputPrice: null,
+        priceSource: null,
+        priceCapturedAt: null,
+        supportsImages: false,
       },
     ];
   };

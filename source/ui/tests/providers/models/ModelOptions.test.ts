@@ -130,6 +130,38 @@ void test("Copilot automatic discovery reads the sign-in catalog without a secon
   assert.equal(posts, 1);
 });
 
+void test("catalog reference pricing remains nullable in picker options", async () => {
+  const models = new ModelOptions({
+    list: async () => [firstConnection],
+    getModels: async (connectionId) => ({
+      connectionId,
+      refreshedAt: "2026-11-28T00:00:00Z",
+      models: [
+        {
+          id: "priced",
+          name: "Priced model",
+          price: {
+            inputPerMillion: 1.25,
+            outputPerMillion: null,
+            source: "Reference rates",
+            capturedAt: "2026-11-28T00:00:00Z",
+          },
+        },
+      ],
+    }),
+    getModelSettings: async () => [],
+    getCredentials: async () => assert.fail("No discovery expected"),
+    refreshModels: async () => assert.fail("No discovery expected"),
+  });
+
+  const option = (await models.readCached(new AbortController().signal)).options?.[0];
+  assert.equal(option?.connectionId, firstConnection.id);
+  assert.equal(option?.inputPrice, 1.25);
+  assert.equal(option?.outputPrice, null);
+  assert.equal(option?.priceSource, "Reference rates");
+  assert.equal(option?.priceCapturedAt, "2026-11-28T00:00:00Z");
+});
+
 void test("credential failures remain visible and stale discovery does not post", async () => {
   const credentials = deferred<ProviderCredentialStatus>();
   const started = deferred<void>();

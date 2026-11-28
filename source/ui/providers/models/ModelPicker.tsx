@@ -8,6 +8,7 @@ import "./model-picker.css";
 
 export interface ModelPickerOption {
   key: string;
+  modelId: string;
   modelLabel: string;
   providerLabel: string;
 }
@@ -29,7 +30,7 @@ export function ModelPicker({
   models,
   modelKey,
   modelLabel,
-  ariaLabel = `Model: ${modelLabel}`,
+  ariaLabel,
   onModelChange,
   loadingModels,
   refreshingModels,
@@ -46,29 +47,40 @@ export function ModelPicker({
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const expanded = open && !disabled;
 
+  const term = query.trim().toLocaleLowerCase();
   const groups = useMemo(() => {
     if (!expanded) return [];
-    const term = query.trim().toLocaleLowerCase();
     const result = new Map<string, ModelPickerOption[]>();
     for (const model of models) {
-      if (!`${model.modelLabel} ${model.providerLabel}`.toLocaleLowerCase().includes(term))
-        continue;
+      const searchable = `${model.modelLabel} ${model.modelId} ${model.providerLabel}`;
+      if (!searchable.toLocaleLowerCase().includes(term)) continue;
       const group = result.get(model.providerLabel);
       if (group) group.push(model);
       else result.set(model.providerLabel, [model]);
     }
     return [...result];
-  }, [expanded, models, query]);
+  }, [expanded, models, term]);
   const options = useMemo(() => groups.flatMap(([, group]) => group), [groups]);
   const optionIndexes = useMemo(
     () => new Map(options.map((model, index) => [model, index])),
     [options],
   );
-  const activeIndex = Math.max(
-    0,
-    options.findIndex((model) => model.key === activeKey),
-  );
-  const activeModel = options[activeIndex];
+  const keyedActiveIndex = options.findIndex((model) => model.key === activeKey);
+  const activeIndex = keyedActiveIndex >= 0 ? keyedActiveIndex : term && options.length ? 0 : -1;
+  const activeModel = activeIndex >= 0 ? options[activeIndex] : undefined;
+  const selectedModel = models.find((model) => model.key === modelKey);
+  const sameLabelModels = selectedModel
+    ? models.filter(
+        (model) => model.key !== selectedModel.key && model.modelLabel === selectedModel.modelLabel,
+      )
+    : [];
+  const selectionQualifier =
+    selectedModel && sameLabelModels.length
+      ? sameLabelModels.some((model) => model.providerLabel === selectedModel.providerLabel)
+        ? selectedModel.modelId
+        : selectedModel.providerLabel
+      : null;
+  const triggerLabel = selectionQualifier ? `${modelLabel} · ${selectionQualifier}` : modelLabel;
 
   function close(returnFocus: boolean) {
     setOpen(false);
@@ -95,11 +107,22 @@ export function ModelPicker({
       if (activeModel) choose(activeModel.key);
       return;
     }
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault();
+      const next = event.key === "Home" ? options[0] : options.at(-1);
+      if (next) setActiveKey(next.key);
+      return;
+    }
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
     if (!options.length) return;
     const direction = event.key === "ArrowDown" ? 1 : -1;
-    const next = (activeIndex + direction + options.length) % options.length;
+    const next =
+      activeIndex < 0
+        ? direction > 0
+          ? 0
+          : options.length - 1
+        : (activeIndex + direction + options.length) % options.length;
     setActiveKey(options[next]!.key);
   }
 
@@ -113,13 +136,20 @@ export function ModelPicker({
 
   return (
     <div class="model-picker">
-      <Tooltip content={modelLabel} disabled={expanded}>
+      <Tooltip
+        content={
+          selectedModel
+            ? `${selectedModel.providerLabel} · ${selectedModel.modelLabel}`
+            : modelLabel
+        }
+        disabled={expanded}
+      >
         <button
           class="selector model-picker-trigger"
           type="button"
           ref={trigger}
           disabled={disabled}
-          aria-label={ariaLabel}
+          aria-label={ariaLabel ?? `Model: ${triggerLabel}`}
           aria-haspopup="dialog"
           aria-expanded={expanded}
           aria-controls={expanded ? `${id}-popover` : undefined}
@@ -131,7 +161,7 @@ export function ModelPicker({
             }
           }}
         >
-          <span class="model-picker-label">{modelLabel}</span>
+          <span class="model-picker-label">{triggerLabel}</span>
           <Icon name="chevron" />
         </button>
       </Tooltip>
@@ -176,6 +206,11 @@ export function ModelPicker({
                 {group.map((model) => {
                   const index = optionIndexes.get(model)!;
                   const active = index === activeIndex;
+                  const visibleIdentity = `${model.modelLabel} ${model.providerLabel}`;
+                  const showModelId =
+                    term &&
+                    !visibleIdentity.toLocaleLowerCase().includes(term) &&
+                    model.modelId.toLocaleLowerCase().includes(term);
                   return (
                     <div
                       key={model.key}
@@ -189,7 +224,10 @@ export function ModelPicker({
                       onPointerDown={(event) => event.preventDefault()}
                       onClick={() => choose(model.key)}
                     >
-                      <span class="model-picker-label">{model.modelLabel}</span>
+                      <span class="model-picker-option-identity">
+                        <span class="model-picker-label">{model.modelLabel}</span>
+                        {showModelId && <span class="model-picker-model-id">{model.modelId}</span>}
+                      </span>
                       {model.key === modelKey && <Icon name="check" />}
                     </div>
                   );

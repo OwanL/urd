@@ -7,6 +7,7 @@ import { providerReady } from "../settings/ProviderConnectionStatus.ts";
 
 export interface ModelOption {
   key: string;
+  modelId: string;
   modelLabel: string;
   providerLabel: string;
   selection: LlmSelection;
@@ -207,6 +208,7 @@ function mapModels(
     const modelSettings = settingsByModel.get(model.id);
     options.push({
       key: `${connection.id}/${model.id}`,
+      modelId: model.id,
       modelLabel: model.name,
       providerLabel: connection.name,
       selection: {

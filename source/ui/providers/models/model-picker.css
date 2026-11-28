@@ -63,9 +63,14 @@
   scrollbar-color: var(--border-subtle) transparent;
 }
 .model-picker-provider {
+  position: sticky;
+  z-index: 1;
+  top: 0;
   padding: 10px 8px 5px;
+  background: var(--surface-popover);
   color: var(--text-secondary);
   font-size: 11px;
+  font-weight: 600;
 }
 .model-picker-option {
   display: flex;
@@ -82,8 +87,19 @@
   text-align: left;
   cursor: pointer;
 }
+.model-picker-option-identity {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+}
 .model-picker-option .model-picker-label {
   white-space: normal;
+  overflow-wrap: anywhere;
+}
+.model-picker-model-id {
+  color: var(--text-secondary);
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 .model-picker-option.is-active {

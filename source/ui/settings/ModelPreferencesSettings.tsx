@@ -96,8 +96,9 @@ export function ModelPreferencesSettings({
 
   const models: readonly ModelPickerOption[] = useMemo(
     () =>
-      catalog.options.map(({ key, modelLabel, providerLabel }) => ({
+      catalog.options.map(({ key, modelId, modelLabel, providerLabel }) => ({
         key,
+        modelId,
         modelLabel,
         providerLabel,
       })),
@@ -134,6 +135,7 @@ export function ModelPreferencesSettings({
       ...models,
       {
         key: modelKey(saved),
+        modelId: saved.modelId,
         modelLabel: `${saved.modelId} (unavailable)`,
         providerLabel: provider?.name ?? saved.connectionId,
       },

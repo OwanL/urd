@@ -6,12 +6,14 @@ import type { ModelOption } from "../../providers/models/ModelOptions.ts";
 
 const first: ModelOption = {
   key: "first",
+  modelId: "first",
   modelLabel: "First",
   providerLabel: "Provider",
   selection: { ...selection, modelId: "first", reasoningEffort: "high" },
 };
 const second: ModelOption = {
   key: "second",
+  modelId: "second",
   modelLabel: "Second",
   providerLabel: "Provider",
   selection: { ...selection, modelId: "second", supportsImages: true, reasoningEffort: "high" },

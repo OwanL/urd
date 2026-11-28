@@ -114,7 +114,8 @@ internal sealed class UsageStorage(Database database) {
     });
   }
 
-  internal PromptCacheSummary ReadPromptCache(Guid sessionId) {
+  internal PromptCacheSummary ReadPromptCache(Guid sessionId,
+      (ContextStamp Stamp, PromptCacheTotals Totals)? warning = null) {
     if (sessionId == Guid.Empty)
       throw new ArgumentException("Session identity cannot be empty.", nameof(sessionId));
 
@@ -136,6 +137,10 @@ internal sealed class UsageStorage(Database database) {
         FROM eligible
       )
       SELECT EXISTS(SELECT 1 FROM last_turn) AS has_turn,
+          EXISTS(SELECT 1 FROM sessions s WHERE s.session_id = $session AND s.history_revision = $warning_revision
+              AND (SELECT compaction_id FROM session_compactions
+                  WHERE session_id = s.session_id AND history_revision = s.history_revision
+                  ORDER BY ordinal DESC LIMIT 1) IS $warning_compaction) AS warning_current,
           COALESCE(SUM(input_tokens) FILTER (WHERE valid), 0) AS session_input,
           COALESCE(SUM(cached_tokens) FILTER (WHERE valid), 0) AS session_cached,
           COUNT(*) FILTER (WHERE valid) AS session_reported,
@@ -149,8 +154,10 @@ internal sealed class UsageStorage(Database database) {
           row.Bool("has_turn") ? new(row.Long("turn_input"), row.Long("turn_cached"),
               row.Long("turn_reported"), row.Long("turn_total")) : null,
           new(row.Long("session_input"), row.Long("session_cached"),
-              row.Long("session_reported"), row.Long("session_total"))),
+              row.Long("session_reported"), row.Long("session_total")),
+          row.Bool("warning_current") ? warning?.Totals : null),
           ("$session", sessionId), ("$completed", (int)ExecutionOutcome.Completed),
+          ("$warning_revision", warning?.Stamp.HistoryRevision), ("$warning_compaction", warning?.Stamp.CompactionId),
           ("$user_input", (int)ExecutionRunKind.UserInput), ("$continuation", (int)ExecutionRunKind.Continuation))
         ?? throw new InvalidDataException("Prompt cache totals are missing."));
   }

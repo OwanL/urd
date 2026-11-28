@@ -25,14 +25,14 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
 
   internal async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(ProviderState state,
       IEnumerable<ChatMessage> messages, ChatOptions options,
-      [EnumeratorCancellation] CancellationToken cancellationToken) {
+      [EnumeratorCancellation] CancellationToken cancellationToken, PromptCacheCapture? promptCache = null) {
     using var readStop = new ProviderCancellation(Timeout.InfiniteTimeSpan, cancellationToken);
     Guid? sessionId = TakeSessionId(ref options);
     ChatGptSocketRun? socketRun = TakeSocketRun(ref options);
     var progress = new InferenceStreamProgress(readStop, readTimeout ?? defaultReadTimeout,
         state.Connection.Route == ProviderRoute.ChatGpt ? sessionId : null) { Transport = state.Connection.Endpoint.Scheme };
     await using var stream = ReadExchangeAsync(state, messages, options, readStop, progress, sessionId, socketRun,
-        cancellationToken).GetAsyncEnumerator(cancellationToken);
+        promptCache, cancellationToken).GetAsyncEnumerator(cancellationToken);
     while (true) {
       try {
         if (!await stream.MoveNextAsync().ConfigureAwait(false))
@@ -56,7 +56,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
 
   private async IAsyncEnumerable<ChatResponseUpdate> ReadExchangeAsync(ProviderState state,
       IEnumerable<ChatMessage> messages, ChatOptions options, ProviderCancellation readStop,
-      InferenceStreamProgress progress, Guid? sessionId, ChatGptSocketRun? socketRun,
+      InferenceStreamProgress progress, Guid? sessionId, ChatGptSocketRun? socketRun, PromptCacheCapture? promptCache,
       [EnumeratorCancellation] CancellationToken cancellationToken) {
     HttpClient? turnClient = null;
     bool accepted = false;
@@ -91,7 +91,8 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
         }
         GitHubCopilotRequest? copilotRequest = state.Connection.Route == ProviderRoute.GitHubCopilot
             ? new(history) : null;
-        client = CreateClient(state, options.ModelId!, progress, turnClient ?? httpClient, copilotRequest);
+        client = CreateClient(state, options.ModelId!, progress, turnClient ?? httpClient, copilotRequest,
+            turnClient is null ? promptCache : null);
         if (estimate is not null && input is not null)
           estimate.Prepare(ContextEstimateInput(history, input, scope), options);
       } catch (Exception error) when (CanClassify(error, cancellationToken)) {
@@ -245,7 +246,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
   }
 
   private static IChatClient CreateClient(ProviderState state, string model, InferenceStreamProgress progress,
-      HttpClient httpClient, GitHubCopilotRequest? copilotRequest) {
+      HttpClient httpClient, GitHubCopilotRequest? copilotRequest, PromptCacheCapture? promptCache) {
     var connection = state.Connection;
     var authentication = ProviderSdkAuthentication.Create(connection, state.Credentials);
     return connection.Api switch {
@@ -260,6 +261,8 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
       options.Transport = new HttpClientPipelineTransport(httpClient);
       options.RetryPolicy = new ClientRetryPolicy(0);
       options.NetworkTimeout = Timeout.InfiniteTimeSpan;
+      if (promptCache is not null)
+        options.AddPolicy(promptCache, PipelinePosition.BeforeTransport);
       options.AddPolicy(progress, PipelinePosition.BeforeTransport);
       if (copilotRequest is not null)
         options.AddPolicy(copilotRequest, PipelinePosition.BeforeTransport);

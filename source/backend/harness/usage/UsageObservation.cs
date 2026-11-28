@@ -10,18 +10,23 @@ internal sealed class UsageObservation {
   private readonly UsageStorage storage;
   private readonly ProviderConnection connection;
   private readonly ModelPriceCatalog? prices;
+  private readonly PromptCacheCapture? promptCache;
   private readonly UsageTokenCounter counter;
   private readonly long? estimatedInput;
   private readonly Stopwatch checkpoint = Stopwatch.StartNew();
   private UsageRequest request;
   private UsageDetails? reported;
-  private bool finished, responseObserved;
+  private string? reportedModel;
+  private bool finished, responseObserved, terminalObserved, modelChanged;
+  private int usageReports;
 
   internal UsageObservation(UsageStorage storage, ProviderConnection connection, string model,
-      UsageContext context, IReadOnlyList<ChatMessage> messages, ChatOptions options, ModelPriceCatalog? prices = null) {
+      UsageContext context, IReadOnlyList<ChatMessage> messages, ChatOptions options, ModelPriceCatalog? prices,
+      PromptCacheCapture? promptCache = null) {
     this.storage = storage;
     this.connection = connection;
     this.prices = prices;
+    this.promptCache = promptCache;
     ArgumentException.ThrowIfNullOrWhiteSpace(model);
     ArgumentNullException.ThrowIfNull(context);
     ArgumentException.ThrowIfNullOrWhiteSpace(context.Purpose);
@@ -37,16 +42,20 @@ internal sealed class UsageObservation {
 
   internal void Append(ChatResponseUpdate update) {
     if (finished) throw new InvalidOperationException("Usage is already settled.");
-    if (!string.IsNullOrWhiteSpace(update.ModelId) && update.ModelId != request.Model)
-      request = request with {
-        Model = update.ModelId,
-        Rates = FindRates(update.ModelId)
-      };
-    responseObserved |= update.FinishReason is not null
+    if (!string.IsNullOrWhiteSpace(update.ModelId)) {
+      modelChanged |= reportedModel is not null && reportedModel != update.ModelId;
+      reportedModel = update.ModelId;
+      if (update.ModelId != request.Model)
+        request = request with { Model = update.ModelId, Rates = FindRates(update.ModelId) };
+    }
+    terminalObserved |= update.FinishReason is not null;
+    responseObserved |= terminalObserved
         || update.Contents.Any(content => content is TextContent or TextReasoningContent or FunctionCallContent);
     counter.Append(update);
-    foreach (UsageContent usage in update.Contents.OfType<UsageContent>())
+    foreach (UsageContent usage in update.Contents.OfType<UsageContent>()) {
+      usageReports++;
       (reported ??= new()).Add(usage.Details);
+    }
     // No per-token writes or prefix tokenization. Final observations always bypass this throttle.
     if (checkpoint.ElapsedMilliseconds >= 250 || update.Contents.Any(content => content is UsageContent)) {
       request = Snapshot(final: false);
@@ -55,13 +64,17 @@ internal sealed class UsageObservation {
     }
   }
 
-  internal void Finish() {
+  internal void Finish(bool streamEnded = false) {
     if (finished) return;
     if (request.Rates is null && prices is not null)
       request = request with { Rates = prices.FindRates(connection, request.Model, allowRefresh: false) };
     request = Snapshot(final: true) with { FinishedAt = DateTimeOffset.UtcNow };
     storage.Update(request);
     finished = true;
+    // The full-replay routes report one terminal usage snapshot, not deltas to sum for eligibility.
+    promptCache?.Complete(reported?.InputTokenCount, request.Tokens?.CachedInputTokens,
+        successful: streamEnded && terminalObserved && usageReports == 1 && !request.IsEstimate && !modelChanged,
+        reportedModel);
   }
 
   private UsageRates? FindRates(string model) => prices is null

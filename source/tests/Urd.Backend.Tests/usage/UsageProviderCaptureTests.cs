@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
+using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Storage;
 using Urd.Core.Usage;
@@ -148,6 +149,68 @@ public sealed class UsageProviderCaptureTests {
         Assert.Null(captured.Tokens.CacheWrite30mTokens);
         Assert.Null(captured.Tokens.CacheWrite12hTokens);
       }
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
+  [Fact]
+  public async Task CompatibleChatSamplesTheSerializedPrefixAndExcludesTheColdRequest() {
+    const int input = 5000;
+    const int cached = 100;
+    using var database = new TemporaryDatabase("urd-prompt-cache-wire");
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var handler = new ScriptedOpenAIHandler(ChatStream(usage: new {
+      prompt_tokens = input, completion_tokens = 2, total_tokens = input + 2,
+      prompt_tokens_details = new { cached_tokens = cached }
+    }));
+    var manager = Manager(store, handler);
+    var monitor = new PromptCacheMonitor();
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    var stamp = new ContextStamp(0, null, 0);
+    try {
+      ProviderConnection connection = await manager.AddCustomAsync(Settings(LlmApi.OpenAIChatCompletions));
+      using var client = manager.CreateChatClient(connection);
+      List<ChatMessage> messages = [new(ChatRole.System, "Stable synthetic prefix.")];
+      for (int request = 1; request <= 3; request++) {
+        messages.Add(new(ChatRole.User, $"Continuation {request}."));
+        var options = new ChatOptions { ModelId = "fixture-model" };
+        AddContext(options, new(session, Guid.NewGuid(), "conversation") { PromptCache = (monitor, stamp) });
+        await client.GetResponseAsync(messages, options);
+        if (request <= 2)
+          Assert.Null(store.Usage.ReadPromptCache(session, monitor.ReadWarning()).Warning);
+        messages.Add(new(ChatRole.Assistant, "Fixture reply."));
+      }
+
+      Assert.Equal(3, handler.Requests.Count);
+      Assert.All(handler.Requests, request => {
+        using JsonDocument wire = JsonDocument.Parse(request.Body);
+        Assert.True(wire.RootElement.GetProperty("stream_options").GetProperty("include_usage").GetBoolean());
+        Assert.Empty(request.SessionIds!);
+      });
+      PromptCacheSummary summary = store.Usage.ReadPromptCache(session, monitor.ReadWarning());
+      Assert.Equal(new PromptCacheTotals(input * 2, cached * 2, 2, 2), summary.Warning);
+      Assert.Equal(new PromptCacheTotals(input * 3, cached * 3, 3, 3), summary.Session);
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
+  [Fact]
+  public async Task CompatibleChatWithoutCacheDetailsDoesNotInventAZero() {
+    using var database = new TemporaryDatabase("urd-ollama-cache-unreported");
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var handler = new ScriptedOpenAIHandler(ChatStream(usage: new {
+      prompt_tokens = 5000, completion_tokens = 2, total_tokens = 5002
+    }));
+    var manager = Manager(store, handler);
+    try {
+      ProviderConnection connection = await manager.AddCustomAsync(Settings(LlmApi.OpenAIChatCompletions));
+      using var client = manager.CreateChatClient(connection);
+      await client.GetResponseAsync([new(ChatRole.User, "hello")], new ChatOptions { ModelId = "fixture-model" });
+      UsageRequest captured = Assert.Single(Recent(store));
+      Assert.Equal(5000, captured.Tokens!.InputTokens);
+      Assert.Null(captured.Tokens.CachedInputTokens);
     } finally {
       await CloseAsync(manager);
     }

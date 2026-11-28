@@ -262,7 +262,7 @@ internal static class Program {
     app.MapProviders(providers, preferences);
     app.MapPreferences(preferences, manager, store);
     app.MapSetup(store);
-    app.MapUsage(store);
+    app.MapUsage(store, manager);
     return app;
   }
 

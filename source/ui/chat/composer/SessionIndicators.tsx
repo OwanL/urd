@@ -3,7 +3,9 @@ import { Tooltip } from "../../controls/Tooltip.tsx";
 import { UsageControl } from "../../usage/UsageControl.tsx";
 import type { SessionContextUsage, SessionWorkingTime } from "../../sessions/SessionSnapshot.ts";
 import { formatTokenCount } from "../TokenCountFormatting.ts";
+import type { PromptCacheState } from "./usePromptCache.ts";
 import { PromptCacheDetails } from "./PromptCacheDetails.tsx";
+import { PromptCacheWarning } from "./PromptCacheWarning.tsx";
 import { formatWorkingTime, workingMilliseconds } from "./SessionWorkingTime.ts";
 
 interface SessionIndicatorsProps {
@@ -16,6 +18,7 @@ interface SessionIndicatorsProps {
   usageActive: boolean;
   usageBusy: boolean;
   usageRefresh: number | string;
+  promptCache: PromptCacheState;
   compaction?: {
     canCompact: boolean;
     status: "requesting" | "queued" | "running" | null;
@@ -37,9 +40,14 @@ export function SessionIndicators({
   usageActive,
   usageBusy,
   usageRefresh,
+  promptCache,
   compaction,
 }: SessionIndicatorsProps) {
   const [now, setNow] = useState(Date.now);
+  const warning =
+    usageActive && !promptCache.failed && !promptCache.refreshing
+      ? promptCache.summary?.warning
+      : null;
   const startedAt = workingTime?.startedAt;
   useEffect(() => {
     if (!active || !startedAt || fenced) return;
@@ -144,56 +152,53 @@ export function SessionIndicators({
         <span class="session-indicator-name" aria-hidden="true">
           Context
         </span>
-        <Tooltip
-          dismissOnClick={false}
-          disabled={
-            compactionStatus === "queued" ||
-            (!usageActive && !compactStatus && !compactionMessage && !compactionHelp)
-          }
-          content={
-            <div class="session-context-details">
-              {usageActive && (
-                <PromptCacheDetails
-                  key={sessionId}
-                  sessionId={sessionId}
-                  refreshKey={usageRefresh}
-                />
-              )}
-              {compactStatus && <span class="tooltip-detail">{compactStatus}</span>}
-              {compactionMessage && <span class="tooltip-detail">{compactionMessage}</span>}
-              {compactionHelp && <span class="tooltip-detail">{compactionHelp}</span>}
-            </div>
-          }
-        >
-          <button
-            type="button"
-            class={`session-indicator session-context-indicator ${compactionStatus ? "has-compaction-status" : actionAvailable ? "has-compaction-action" : ""} ${cancelAvailable ? "can-cancel-compaction" : ""} ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
-            aria-label={`${contextAccessibleLabel}${compactionAccessibleLabel}`}
-            aria-disabled={
-              compaction ? !cancelAvailable && compactDisabled && !actionAvailable : undefined
+        <div class="session-context-group">
+          <Tooltip
+            dismissOnClick={false}
+            disabled={
+              compactionStatus === "queued" ||
+              (!usageActive && !compactStatus && !compactionMessage && !compactionHelp)
             }
-            onClick={() => {
-              if (cancelAvailable) onCancelCompaction();
-              else if (compactionStatus !== null) return;
-              else if (onCheckCompaction) onCheckCompaction();
-              else if (!compactDisabled) compaction?.onCompact();
-            }}
+            content={
+              <div class="session-context-details">
+                {usageActive && <PromptCacheDetails {...promptCache} />}
+                {compactStatus && <span class="tooltip-detail">{compactStatus}</span>}
+                {compactionMessage && <span class="tooltip-detail">{compactionMessage}</span>}
+                {compactionHelp && <span class="tooltip-detail">{compactionHelp}</span>}
+              </div>
+            }
           >
-            <span class="session-context-value" aria-hidden="true">
-              {contextLabel}
-            </span>
-            {compaction && (
-              <span class="session-context-action" aria-hidden="true">
-                {compactAction}
+            <button
+              type="button"
+              class={`session-indicator session-context-indicator ${compactionStatus ? "has-compaction-status" : actionAvailable ? "has-compaction-action" : ""} ${cancelAvailable ? "can-cancel-compaction" : ""} ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
+              aria-label={`${contextAccessibleLabel}${compactionAccessibleLabel}`}
+              aria-disabled={
+                compaction ? !cancelAvailable && compactDisabled && !actionAvailable : undefined
+              }
+              onClick={() => {
+                if (cancelAvailable) onCancelCompaction();
+                else if (compactionStatus !== null) return;
+                else if (onCheckCompaction) onCheckCompaction();
+                else if (!compactDisabled) compaction?.onCompact();
+              }}
+            >
+              <span class="session-context-value" aria-hidden="true">
+                {contextLabel}
               </span>
-            )}
-            {cancelAvailable && (
-              <span class="session-context-cancel" aria-hidden="true">
-                Cancel
-              </span>
-            )}
-          </button>
-        </Tooltip>
+              {compaction && (
+                <span class="session-context-action" aria-hidden="true">
+                  {compactAction}
+                </span>
+              )}
+              {cancelAvailable && (
+                <span class="session-context-cancel" aria-hidden="true">
+                  Cancel
+                </span>
+              )}
+            </button>
+          </Tooltip>
+          {warning && <PromptCacheWarning key={sessionId} warning={warning} cache={promptCache} />}
+        </div>
       </div>
     </div>
   );

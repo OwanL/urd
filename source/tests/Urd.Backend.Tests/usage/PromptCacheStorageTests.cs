@@ -113,6 +113,18 @@ public sealed class PromptCacheStorageTests {
     Assert.Equal(new PromptCacheTotals(100, 80, 1, 2), summary.Session);
   }
 
+  [Fact]
+  public void SuppressesWarningFromAnOlderHistoryOrCompaction() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    Guid session = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
+    var warning = new PromptCacheTotals(10_000, 0, 2, 2);
+
+    Assert.Equal(warning, store.Usage.ReadPromptCache(session, (new(0, null, 0), warning)).Warning);
+    Assert.Null(store.Usage.ReadPromptCache(session, (new(1, null, 0), warning)).Warning);
+    Assert.Null(store.Usage.ReadPromptCache(session, (new(0, Guid.NewGuid(), 0), warning)).Warning);
+  }
+
   private static Guid StartTurn(UrdStore store, Guid session) {
     Guid execution = Guid.NewGuid();
     var admitted = store.UserMessages.Submit(session, 0,

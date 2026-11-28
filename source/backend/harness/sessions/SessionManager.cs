@@ -7,6 +7,7 @@ using Urd.Core.Harness.Mcp;
 using Urd.Core.Providers;
 using Urd.Core.Preferences;
 using Urd.Core.Tools;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Sessions;
 
@@ -56,6 +57,11 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
   internal Task<bool> CanOpenBrowserVaultAsync(Guid primaryId, CancellationToken cancellation = default) =>
       registry.RunOpenAsync(() => store.Sessions.Read(primaryId) is { Kind: SessionKind.Primary } record &&
           !(record.SnoozedUntil > DateTimeOffset.UtcNow), cancellation);
+
+  internal async Task<PromptCacheSummary> ReadPromptCacheAsync(Guid sessionId, CancellationToken cancellation) {
+    SessionBase? session = await registry.FindOpenAsync(sessionId, cancellation);
+    return store.Usage.ReadPromptCache(sessionId, session?.PromptCache.ReadWarning());
+  }
 
   public Guid BootId { get; } = Guid.NewGuid();
 

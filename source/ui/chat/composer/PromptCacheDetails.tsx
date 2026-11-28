@@ -1,38 +1,15 @@
-import { useEffect, useState } from "preact/hooks";
-import type { PromptCacheSummary, PromptCacheTotals } from "../../usage/Usage.ts";
-import { UsageClient } from "../../usage/UsageClient.ts";
+import type { PromptCacheTotals } from "../../usage/Usage.ts";
+import type { PromptCacheState } from "./usePromptCache.ts";
 import { promptCacheText } from "./PromptCachePresentation.ts";
 
-// Tooltip mounts this content only while open.
 export function PromptCacheDetails({
-  sessionId,
-  refreshKey,
-}: {
-  sessionId: string;
-  refreshKey: string | number;
-}) {
-  const [summary, setSummary] = useState<PromptCacheSummary | null>(null);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => {
-    const request = new AbortController();
-    const client = new UsageClient(new URL(window.location.href));
-    async function read() {
-      try {
-        const next = await client.getPromptCache(sessionId, request.signal);
-        if (request.signal.aborted) return;
-        setSummary(next);
-        setFailed(false);
-      } catch {
-        if (!request.signal.aborted) setFailed(true);
-      }
-    }
-    void read();
-    return () => request.abort();
-  }, [sessionId, refreshKey]);
-
+  summary,
+  failed,
+  showTitle = true,
+}: PromptCacheState & { showTitle?: boolean }) {
   return (
     <div class="prompt-cache-details">
-      <span>Cache</span>
+      {showTitle && <span>Cache</span>}
       {summary && (
         <dl class="prompt-cache-rows">
           <PromptCacheRow label="Last turn" totals={summary.lastTurn} />

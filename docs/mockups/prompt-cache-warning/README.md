@@ -74,7 +74,14 @@ miss. Do not enable the warning on that route until reporting is qualified.
 followed by two short continuations on one model/endpoint with unchanged tools
 and instructions. Check the actual request prefix, input counts, reported cache
 reads and writes, and distinguish each absent field from a reported zero. For
-Copilot Messages, compare with and without a supported cache breakpoint; for a
-confirmed local Ollama model, compare the compatible usage chunk with native
-metrics on the same installed version and resident model. Do not infer a hit
-from lower latency alone. Live third-party requests were not run.
+Copilot Messages, compare with and without a supported cache breakpoint. Do not
+infer a hit from lower latency alone. Live cloud requests were not run.
+
+**Local Ollama check (2026-11-28).** On 0.40.19, a resident `qwen3.5:9b` with
+synthetic append-only input gave the same results on native `/api/chat` and
+streaming compatible `/v1/chat/completions` with usage enabled. Each route used
+an independent stable prefix. Input/cached tokens were **3,073/0**, **3,096/3,069**,
+and **3,119/3,092**. The first zero was reported; it was not a missing field.
+This verifies local reuse on that model and route, not cloud behavior or the
+Responses API. The [0.40.19 Responses converter](https://github.com/ollama/ollama/blob/v0.40.19/openai/responses.go#L1493)
+still substitutes zero when the native cache count is missing.

@@ -80,6 +80,31 @@ usable provider count; “No completed turn” and “No recorded requests” de
 summary state, not provider cache results. These aggregates describe observed usage,
 not a prediction for the next turn.
 
+## Low-reuse warning
+
+The context indicator warns when measured cache reuse is below **60%**, weighted
+by input tokens, across at least two comparable continuations after the first
+request. Click the triangle for the sampled totals and coverage. The context
+count and Compact action are unchanged. The Last turn and Session rows do not
+use this filter.
+
+The warning requires consecutive successfully completed requests with valid
+provider input and cached-input counts. Urd compares bounded fingerprints of the
+actual full-history request: the latest request must append to the preceding
+input without changing the earlier input or request configuration. The preceding
+measured input must be large enough, and account for enough of the new request,
+to make the threshold meaningful. Urd starts over after a prefix, model, account,
+provider or context boundary change, a cold gap, or missing or uncertain data.
+The comparison state lives only in the open session and does not retain the
+prompt text. It starts cold again after reopening.
+
+Only full-history HTTP requests are compared. WebSocket continuation and routes
+with unqualified cache reporting do not trigger this warning. A custom Responses
+adapter can report a zero even when it has no native cache count. Custom Chat
+Completions and Copilot’s OpenAI-compatible routes need a positive reported cache
+count on the comparable prefix before low reported reuse is actionable. The
+warning does not identify why reuse was low.
+
 ## Usage and cost
 
 Usage records keep provider-reported input and cached-input quantities distinct.

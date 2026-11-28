@@ -80,6 +80,7 @@ export interface PromptCacheTotals {
 export interface PromptCacheSummary {
   lastTurn: PromptCacheTotals | null;
   session: PromptCacheTotals;
+  warning?: PromptCacheTotals | null;
 }
 
 export type UsageRange = "day" | "sevenDays";

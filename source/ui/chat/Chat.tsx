@@ -5,6 +5,7 @@ import type { MessageEditing } from "./message-editing/MessageEditing.ts";
 import { Composer } from "./composer/Composer.tsx";
 import { SubagentProviderControl } from "./composer/SubagentProviderControl.tsx";
 import { SessionIndicators } from "./composer/SessionIndicators.tsx";
+import { usePromptCache } from "./composer/usePromptCache.ts";
 import { sameContextModel, type LlmSelection } from "../providers/LlmSelection.ts";
 import type { SessionClient } from "../sessions/SessionClient.ts";
 import type { ToolDraftStore } from "../sessions/ToolDrafts.ts";
@@ -249,6 +250,13 @@ export function Chat({
     pendingInputRemoval || compactionBlocksSend(snapshot, compaction),
     defaultSelection,
   );
+  const usageBusy = state.active || chat.pending?.status === "sending";
+  const usageRefresh = `${refresh}:${usageBusy ? "" : (notice ?? "")}`;
+  const promptCache = usePromptCache(
+    sessionId,
+    active && visible && snapshot?.sessionId === sessionId,
+    `${usageRefresh}:${snapshot?.historyRevision ?? ""}`,
+  );
   const canCompact = Boolean(
     active &&
     visible &&
@@ -491,8 +499,9 @@ export function Chat({
             fenced={snapshot?.admissionFenced ?? true}
             sessionId={sessionId}
             usageActive={active && visible}
-            usageBusy={state.active || chat.pending?.status === "sending"}
-            usageRefresh={`${refresh}:${state.active || chat.pending?.status === "sending" ? "" : (notice ?? "")}`}
+            usageBusy={usageBusy}
+            usageRefresh={usageRefresh}
+            promptCache={promptCache}
           />
         }
         text={chat.draft}

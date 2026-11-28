@@ -8,6 +8,7 @@ using Urd.Core.Storage;
 using Urd.Core.Providers;
 using Urd.Core.Preferences;
 using Urd.Core.Tools;
+using Urd.Core.Usage;
 
 namespace Urd.Core.Sessions;
 
@@ -79,6 +80,7 @@ public abstract partial class SessionBase {
   internal int SubagentDepth { get; }
   internal bool IsClosed => closed;
   internal QuestionDelivery Questions { get; }
+  internal PromptCacheMonitor PromptCache { get; } = new();
   internal SessionExecutionRecorder Recorder => CurrentExecution?.Recorder
       ?? throw new InvalidOperationException("The session has no active execution recorder.");
 

@@ -415,13 +415,17 @@ internal sealed class SessionExecution : IDisposable {
         offeredTools = offeredTools.Where(tool => tool.Name != SubagentTool.ToolName).ToArray();
       if (presented && answerAgentDeclaration is { } answer && offeredTools.All(tool => tool.Name != answer.Name))
         offeredTools = [.. offeredTools, answer];
+      if (request.Stamp is null)
+        session.PromptCache.Reset();
       options = new() {
         ModelId = selection.ModelId,
         Reasoning = selection.ReadReasoningEffort() is { } effort
             ? new ReasoningOptions { Effort = effort } : null,
         Tools = [.. offeredTools],
         AdditionalProperties = new() {
-          [UsageContext.PropertyName] = new UsageContext(session.Id, ExecutionId, "conversation"),
+          [UsageContext.PropertyName] = new UsageContext(session.Id, ExecutionId, "conversation") {
+            PromptCache = request.Stamp is { } sentStamp ? (session.PromptCache, sentStamp) : null
+          },
           [OpenAIInferenceClient.SessionIdProperty] = session.Id,
           [RateLimitRetry.StatusProperty] = (Func<DateTimeOffset?, Task>)recorder.PublishRateLimitRetryAsync
         }
@@ -433,6 +437,7 @@ internal sealed class SessionExecution : IDisposable {
         input.Add(reminder);
       messages = LlmMessageProjection.AdaptForModel(input, selection.SupportsImages);
     } catch (Exception failure) {
+      session.PromptCache.Reset();
       return (CreateRequestResult(request.RequestId, failure), [], null);
     }
 
@@ -452,6 +457,8 @@ internal sealed class SessionExecution : IDisposable {
         (callId, name) => RecordToolCallAsync(request.RequestId, callId, name, drafts),
         stop.Token, contextEstimate: estimate);
     LlmRequestResult result = CreateRequestResult(request.RequestId, response.Failure);
+    if (result.Outcome != ExecutionOutcome.Completed)
+      session.PromptCache.Reset();
     return (result with {
       ToolCalls = result.Outcome == ExecutionOutcome.Completed ? response.ToolCalls : null,
       ProviderResponse = result.Outcome == ExecutionOutcome.Completed ? response.ProviderResponse : null,

@@ -11,7 +11,7 @@ export function promptCacheText(totals: PromptCacheTotals | null): string {
   return `${formatCacheShare(totals.cachedInputTokens, totals.inputTokens)} cached · ${formatUsageCount(uncached)} uncached${partial}`;
 }
 
-function formatCacheShare(cached: number, input: number): string {
+export function formatCacheShare(cached: number, input: number): string {
   if (cached === 0) return "0%";
   if (cached === input) return "100%";
   const percent = ((cached / input) * 100).toFixed(1);

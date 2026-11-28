@@ -10,11 +10,11 @@ internal sealed class UsageStream(
     : IAsyncEnumerable<ChatResponseUpdate> {
   internal static UsageStream Observe(Func<CancellationToken, IAsyncEnumerator<ChatResponseUpdate>> stream,
       UsageStorage storage, ProviderConnection connection, IReadOnlyList<ChatMessage> input, ChatOptions options,
-      UsageContext context, ModelPriceCatalog? prices = null) {
+      UsageContext context, ModelPriceCatalog? prices = null, PromptCacheCapture? promptCache = null) {
     string model = options.ModelId ?? throw new ArgumentException("A model ID is required.", nameof(options));
     return new(token => {
       token.ThrowIfCancellationRequested();
-      var observation = new UsageObservation(storage, connection, model, context, input, options, prices);
+      var observation = new UsageObservation(storage, connection, model, context, input, options, prices, promptCache);
       try {
         return (stream(token), observation);
       } catch {
@@ -52,7 +52,7 @@ internal sealed class UsageStream(
       if (next)
         observation.Append(updates.Current);
       else
-        observation.Finish();
+        observation.Finish(streamEnded: true);
       return next;
     }
 

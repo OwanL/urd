@@ -308,3 +308,44 @@
     outline: 1px solid Highlight;
   }
 }
+
+.session-context-group {
+  display: flex;
+  align-items: center;
+}
+.prompt-cache-warning-button {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #d5b77d;
+}
+.prompt-cache-warning-button:hover,
+.prompt-cache-warning-button:focus-visible {
+  background: #35302a;
+}
+.prompt-cache-warning-popover {
+  width: 264px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.prompt-cache-warning-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #d5b77d;
+  font-weight: 600;
+}
+.prompt-cache-warning-coverage {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+.prompt-cache-warning-popover .prompt-cache-details {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+}

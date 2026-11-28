@@ -127,10 +127,14 @@ internal sealed class ProviderRequests(
   }
 
   private UsageStream ObserveInference(ProviderState state, IReadOnlyList<ChatMessage> input, ChatOptions options,
-      UsageContext context) => UsageStream.Observe(ct => (state.Connection.Api == LlmApi.AnthropicMessages
-          ? anthropic.GetStreamingResponseAsync(state, input, options, ct)
-          : inference.GetStreamingResponseAsync(state, input, options, ct)).GetAsyncEnumerator(ct),
-          usage, state.Connection, input, options, context, prices);
+      UsageContext context) {
+    PromptCacheCapture? cache = context.PromptCache is { } scope
+        ? new(scope.Monitor, scope.Stamp, state, options.ModelId!) : null;
+    return UsageStream.Observe(ct => (state.Connection.Api == LlmApi.AnthropicMessages
+        ? anthropic.GetStreamingResponseAsync(state, input, options, ct)
+        : inference.GetStreamingResponseAsync(state, input, options, ct, cache)).GetAsyncEnumerator(ct),
+        usage, state.Connection, input, options, context, prices, cache);
+  }
 
   private static (ProviderState State, ChatOptions Options) SelectInference(ProviderState state, ChatOptions options,
       LlmApi? expectedModelApi) {

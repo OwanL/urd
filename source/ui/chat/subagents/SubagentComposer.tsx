@@ -2,6 +2,7 @@ import { useCallback, useRef } from "preact/hooks";
 import { IconButton } from "../../controls/IconButton.tsx";
 import { ComposerControls } from "../composer/ComposerControls.tsx";
 import { effortLabel } from "../composer/ReasoningPicker.tsx";
+import { usePromptCache } from "../composer/usePromptCache.ts";
 import { SessionIndicators } from "../composer/SessionIndicators.tsx";
 import type { SubagentViewSnapshot } from "../../sessions/SessionSnapshot.ts";
 
@@ -16,6 +17,14 @@ export function SubagentComposer({
 }) {
   const panel = useRef<HTMLElement>(null);
   const focusPanel = useCallback(() => panel.current?.focus({ preventScroll: true }), []);
+  const refresh = snapshot?.live ? "live" : "settled";
+  const measuredContext =
+    snapshot?.contextUsage?.source === "measured" ? snapshot.contextUsage.usedTokens : "";
+  const promptCache = usePromptCache(
+    sessionId,
+    active,
+    `${refresh}:${snapshot?.historyRevision ?? ""}:${measuredContext}`,
+  );
   const model = snapshot?.modelId;
   const effort = snapshot?.reasoningEffort;
   return (
@@ -55,7 +64,8 @@ export function SubagentComposer({
             sessionId={sessionId}
             usageActive={active}
             usageBusy={snapshot?.live ?? false}
-            usageRefresh={snapshot?.live ? "live" : "settled"}
+            usageRefresh={refresh}
+            promptCache={promptCache}
           />
         }
       />

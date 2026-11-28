@@ -294,6 +294,16 @@ no selectable models. Its production parser returned zero choices on a synthetic
 copy of Urd's eight-row, picker-disabled response shape. The empty picker is not
 explained by a filter Pie lacks. This is source and fixture evidence, not an
 observation of a live Pie account or a reason to copy its identity or policy writes.
+The published [`@earendil-works/pi-ai` 1.7.0](https://www.npmjs.com/package/@earendil-works/pi-ai/v/1.7.0)
+keeps the embedded OAuth client, VS Code Chat identity, and token exchange. Its
+picker fallback only applies on the Individual API origin and only includes
+entries with explicit `policy.state: enabled`, so it does not explain the Business
+check (no entry had that policy state).
+
+Copilot SDK 2.0.4 can discover models without a session, but its general chat
+methods send a prompt to a Copilot-owned session. The experimental stateless
+Decisions interface returns Boolean, choice, or rating results, not chat or tool
+calls. Neither is a drop-in model transport for Urd's conversation runtime.
 
 The [VS Code Language Model API](https://code.visualstudio.com/api/extension-guides/ai/language-model)
 is a separate model-only interface for extensions: it lists Copilot models with

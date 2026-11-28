@@ -70,6 +70,13 @@ public sealed class SubagentRunTests {
       Assert.True(liveView.Live);
       Assert.Equal(fixture.ParentSessionId, liveView.ParentId);
       Assert.Equal(ChildTitle, liveView.Title);
+      SessionSnapshot liveStored = fixture.Store.Snapshots.ReadPersisted(child.Id);
+      Assert.Equal(liveStored.LatestLlmSelection!.ModelId, liveView.ModelId);
+      Assert.Equal(liveStored.LatestLlmSelection.ContextWindow, liveView.ContextWindow);
+      Assert.NotNull(liveView.ReasoningEffort);
+      Assert.Equal(liveStored.WorkingTime, liveView.WorkingTime);
+      Assert.NotNull(liveView.WorkingTime!.StartedAt);
+      Assert.False(liveView.AdmissionFenced);
 
       (SessionTranscript liveTranscript, string? liveWorkingDirectory) =
           await fixture.Manager.GetTranscriptAsync(child.Id).WaitAsync(TestTimeout);
@@ -90,6 +97,15 @@ public sealed class SubagentRunTests {
     Assert.False(retainedView.Live);
     Assert.Equal(fixture.ParentSessionId, retainedView.ParentId);
     Assert.Equal(ChildTitle, retainedView.Title);
+    SessionSnapshot retainedStored = fixture.Store.Snapshots.ReadPersisted(retainedChild.Id);
+    Assert.Equal(retainedStored.LatestLlmSelection!.ModelId, retainedView.ModelId);
+    Assert.Equal(retainedStored.LatestLlmSelection.ContextWindow, retainedView.ContextWindow);
+    Assert.Equal(new SessionContextUsage(15, SessionContextUsageSource.Measured), retainedView.ContextUsage);
+    Assert.Equal(retainedStored.ContextUsage, retainedView.ContextUsage);
+    Assert.Equal(retainedStored.WorkingTime, retainedView.WorkingTime);
+    Assert.Null(retainedView.WorkingTime!.StartedAt);
+    Assert.True(retainedView.AdmissionFenced);
+    Assert.Null(await fixture.Manager.ReadSubagentViewAsync(fixture.ParentSessionId));
     (SessionTranscript retainedTranscript, string? retainedWorkingDirectory) =
         await fixture.Manager.GetTranscriptAsync(retainedChild.Id).WaitAsync(TestTimeout);
     Assert.Equal(fixture.DatabaseDirectory, retainedWorkingDirectory);
@@ -123,6 +139,7 @@ public sealed class SubagentRunTests {
       childEntered.TrySetResult();
       await childRelease.Task.WaitAsync(token);
       yield return Text(ChildReport);
+      yield return new() { Contents = [new UsageContent(new UsageDetails { InputTokenCount = 12, OutputTokenCount = 3 })] };
       yield return new() { FinishReason = ChatFinishReason.Stop };
     }
   }

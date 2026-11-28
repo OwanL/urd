@@ -438,7 +438,7 @@ void test("ask_user is offered only to the primary agent", { timeout: 90_000 }, 
     toolCall: { id: "call-child", name: "subagent", arguments: args },
   });
   f.first.enqueue({ text: "Child finished." });
-  f.second.enqueue({ text: report });
+  f.second.enqueue({ text: report, usage: { inputTokens: 23, outputTokens: 7 } });
   const id = await f.create();
   const execution = await f.submit(id, f.firstConnection, "Delegate a task.");
   await f.settle(id, execution);
@@ -473,6 +473,11 @@ void test("ask_user is offered only to the primary agent", { timeout: 90_000 }, 
   assert.equal(view.parentId, id);
   assert.equal(view.title, child.title);
   assert.equal(view.live, false);
+  assert.equal(view.modelId, "fixture-a");
+  assert.equal(view.reasoningEffort, "high");
+  assert.deepEqual(view.contextUsage, { usedTokens: 30, source: "measured" });
+  assert.equal(view.workingTime?.startedAt, null);
+  assert.equal(view.workingTime?.hasUnknownDuration, false);
   const childHistory = await f.client.getHistory(
     child.id,
     { mode: "latest", expectedHistoryRevision: view.historyRevision },

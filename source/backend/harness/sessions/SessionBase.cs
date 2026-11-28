@@ -378,6 +378,22 @@ public abstract partial class SessionBase {
   internal SessionSnapshot ReadCurrentSnapshot() =>
       status.WithLiveState(store.Snapshots.ReadPersisted(Id), IsAcceptingWork, CurrentExecution);
 
+  // Caller holds the session lock. Reuse the normal live fence and estimate without reading a full snapshot.
+  internal SubagentView? ReadSubagentView() {
+    var (view, unsettled, stopping) = store.Snapshots.ReadSubagentView(Id, live: true);
+    if (view is null)
+      return null;
+    var stored = new SessionSnapshot(Id, view.HistoryRevision, true, false, unsettled, stopping,
+        null, null, [], ContextUsage: view.ContextUsage);
+    SessionSnapshot current = status.WithLiveState(stored, IsAcceptingWork, CurrentExecution);
+    return view with {
+      AdmissionFenced = current.AdmissionFenced,
+      ContextUsage = !current.AdmissionFenced && !current.StopRequested
+          && CurrentExecution is { IsCompacting: false, ContextEstimate.UsedTokens: long tokens }
+          ? new(tokens, SessionContextUsageSource.Estimated) : view.ContextUsage
+    };
+  }
+
   // Caller holds the session lock. LastMeasured describes an older context and cannot gate work.
   internal string? CompactionHistoryReason(SessionSnapshot snapshot) {
     if (snapshot.FirstUserPreview is null && !HasAcceptedInput())

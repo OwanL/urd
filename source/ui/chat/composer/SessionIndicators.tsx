@@ -16,13 +16,15 @@ interface SessionIndicatorsProps {
   usageActive: boolean;
   usageBusy: boolean;
   usageRefresh: number | string;
-  canCompact: boolean;
-  compactionStatus: "requesting" | "queued" | "running" | null;
-  compactionMessage: string | null;
-  compactionUnavailableReason: string | null;
-  onCheckCompaction: (() => void) | undefined;
-  onCompact(): void;
-  onCancelCompaction?: (() => void) | undefined;
+  compaction?: {
+    canCompact: boolean;
+    status: "requesting" | "queued" | "running" | null;
+    message: string | null;
+    unavailableReason: string | null;
+    onCheck: (() => void) | undefined;
+    onCompact(): void;
+    onCancel: (() => void) | undefined;
+  };
 }
 
 export function SessionIndicators({
@@ -35,13 +37,7 @@ export function SessionIndicators({
   usageActive,
   usageBusy,
   usageRefresh,
-  canCompact,
-  compactionStatus,
-  compactionMessage,
-  compactionUnavailableReason,
-  onCheckCompaction,
-  onCompact,
-  onCancelCompaction,
+  compaction,
 }: SessionIndicatorsProps) {
   const [now, setNow] = useState(Date.now);
   const startedAt = workingTime?.startedAt;
@@ -60,6 +56,14 @@ export function SessionIndicators({
       : source === "lastMeasured"
         ? "Last measured usage"
         : null;
+  const {
+    status: compactionStatus = null,
+    message: compactionMessage,
+    unavailableReason: compactionUnavailableReason,
+    canCompact = false,
+    onCheck: onCheckCompaction,
+    onCancel: onCancelCompaction,
+  } = compaction ?? {};
   const cancelAvailable = compactionStatus === "queued" && onCancelCompaction !== undefined;
   const compactDisabled = compactionStatus !== null || !canCompact;
   const compactStatus =
@@ -78,6 +82,13 @@ export function SessionIndicators({
       ? compactionUnavailableReason
       : null;
   const contextAccessibleLabel = `Context window: ${contextLabel}${contextDetail ? `, ${contextDetail.toLowerCase()}` : ""}`;
+  const compactionAccessibleLabel = !compaction
+    ? ""
+    : cancelAvailable
+      ? ". Compaction queued. Cancel compaction"
+      : compactStatus === "Queued"
+        ? ". Compaction queued"
+        : `. ${actionAvailable || compactStatus ? compactAction : "Compaction unavailable"}`;
   const ratio = contextUsage && contextWindow ? contextUsage.usedTokens / contextWindow : 0;
   const incomplete = workingTime?.hasUnknownDuration || (fenced && Boolean(startedAt));
   const duration =
@@ -157,21 +168,25 @@ export function SessionIndicators({
           <button
             type="button"
             class={`session-indicator session-context-indicator ${compactionStatus ? "has-compaction-status" : actionAvailable ? "has-compaction-action" : ""} ${cancelAvailable ? "can-cancel-compaction" : ""} ${ratio >= 0.85 ? "is-critical" : ratio >= 0.7 ? "is-warning" : ""}`}
-            aria-label={`${contextAccessibleLabel}. ${cancelAvailable ? "Compaction queued. Cancel compaction" : compactStatus === "Queued" ? "Compaction queued" : actionAvailable || compactStatus ? compactAction : "Compaction unavailable"}`}
-            aria-disabled={!cancelAvailable && compactDisabled && !actionAvailable}
+            aria-label={`${contextAccessibleLabel}${compactionAccessibleLabel}`}
+            aria-disabled={
+              compaction ? !cancelAvailable && compactDisabled && !actionAvailable : undefined
+            }
             onClick={() => {
               if (cancelAvailable) onCancelCompaction();
               else if (compactionStatus !== null) return;
               else if (onCheckCompaction) onCheckCompaction();
-              else if (!compactDisabled) onCompact();
+              else if (!compactDisabled) compaction?.onCompact();
             }}
           >
             <span class="session-context-value" aria-hidden="true">
               {contextLabel}
             </span>
-            <span class="session-context-action" aria-hidden="true">
-              {compactAction}
-            </span>
+            {compaction && (
+              <span class="session-context-action" aria-hidden="true">
+                {compactAction}
+              </span>
+            )}
             {cancelAvailable && (
               <span class="session-context-cancel" aria-hidden="true">
                 Cancel

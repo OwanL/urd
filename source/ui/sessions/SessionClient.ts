@@ -28,7 +28,7 @@ import type { PrepassDetails, PrepassDetailsQuery } from "./transcript/Prepass.t
 import type { ContinuationReceipt, ContinuationSubmission } from "./inputs/Continuation.ts";
 import type { MessageEditReceipt, MessageEditSubmission } from "./inputs/MessageEdit.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
-import type { SessionSnapshot } from "./SessionSnapshot.ts";
+import type { SessionSnapshot, SubagentViewSnapshot } from "./SessionSnapshot.ts";
 import type { UserQuestion } from "./inputs/UserQuestion.ts";
 import type { StopReceipt } from "./inputs/Stop.ts";
 import type { UserMessageReceipt, UserMessageSubmission } from "./inputs/UserMessageSubmission.ts";
@@ -103,10 +103,7 @@ export class SessionClient {
     );
   }
 
-  getSubagentView(
-    sessionId: string,
-    signal: AbortSignal,
-  ): Promise<{ historyRevision: number; live: boolean; title: string; parentId: string }> {
+  getSubagentView(sessionId: string, signal: AbortSignal): Promise<SubagentViewSnapshot> {
     return requestJson(
       this.url(`/${encodeURIComponent(sessionId)}/subagent-view`),
       "GET",

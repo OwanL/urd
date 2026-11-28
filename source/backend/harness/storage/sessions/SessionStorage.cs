@@ -143,15 +143,6 @@ internal sealed class SessionStorage(Database database) {
         WHERE s.session_id = $id;
         """, row => (row.NullableString("title"), row.Bool("generating")), ("$id", sessionId)));
 
-  internal SubagentView? ReadSubagentView(Guid sessionId, bool live) => database.RunLocked(() =>
-      database.QuerySingleOrDefault(null, """
-        SELECT s.history_revision, s.parent_session_id, t.title
-        FROM sessions s LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
-        WHERE s.session_id = $id AND s.kind = $kind;
-        """, row => new SubagentView(row.Long("history_revision"), live,
-            row.NullableString("title") ?? "Subagent", row.Guid("parent_session_id")),
-        ("$id", sessionId), ("$kind", (int)SessionKind.Subagent)));
-
   internal IReadOnlyList<SubagentDiscovery> ReadSubagentDiscoveries(IReadOnlyList<Guid> childIds) => childIds.Count == 0
       ? [] : database.RunLocked(() => database.Query(null, """
         SELECT s.session_id, s.parent_session_id, t.title

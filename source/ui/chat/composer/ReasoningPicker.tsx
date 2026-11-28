@@ -21,7 +21,7 @@ interface ReasoningPickerProps {
   disabled: boolean;
 }
 
-function effortLabel(effort: string): string {
+export function effortLabel(effort: string): string {
   switch (effort) {
     case "none":
       return "None";

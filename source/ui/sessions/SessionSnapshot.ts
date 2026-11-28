@@ -30,6 +30,19 @@ export interface SessionPruningStatus {
   readonly error?: string | null;
 }
 
+export interface SubagentViewSnapshot {
+  readonly historyRevision: number;
+  readonly live: boolean;
+  readonly title: string;
+  readonly parentId: string;
+  readonly modelId: string | null;
+  readonly reasoningEffort: string | null;
+  readonly contextWindow: number | null;
+  readonly contextUsage: SessionContextUsage | null;
+  readonly workingTime: SessionWorkingTime | null;
+  readonly admissionFenced: boolean;
+}
+
 export interface SessionSnapshot {
   readonly sessionId: string;
   readonly historyRevision: number;

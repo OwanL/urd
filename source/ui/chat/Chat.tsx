@@ -471,19 +471,20 @@ export function Chat({
                 : null
             }
             contextWindow={selection?.contextWindow ?? null}
-            canCompact={canCompact}
-            compactionStatus={currentCompactionStatus}
-            compactionMessage={compaction && "message" in compaction ? compaction.message : null}
-            compactionUnavailableReason={snapshot?.compactionUnavailableReason ?? null}
-            onCheckCompaction={compaction?.phase === "uncertain" && ready ? onRefresh : undefined}
-            onCancelCompaction={
-              ready && snapshot && !(compaction?.phase === "observing" && compaction.cancelling)
-                ? () => void commands.cancelCompaction(sessionId, snapshot)
-                : undefined
-            }
-            onCompact={() => {
-              if (!workingDirectoryGate.current && snapshot)
-                void commands.compact(sessionId, snapshot, canCompact, defaultSelection);
+            compaction={{
+              canCompact,
+              status: currentCompactionStatus,
+              message: compaction && "message" in compaction ? compaction.message : null,
+              unavailableReason: snapshot?.compactionUnavailableReason ?? null,
+              onCheck: compaction?.phase === "uncertain" && ready ? onRefresh : undefined,
+              onCancel:
+                ready && snapshot && !(compaction?.phase === "observing" && compaction.cancelling)
+                  ? () => void commands.cancelCompaction(sessionId, snapshot)
+                  : undefined,
+              onCompact: () => {
+                if (!workingDirectoryGate.current && snapshot)
+                  void commands.compact(sessionId, snapshot, canCompact, defaultSelection);
+              },
             }}
             workingTime={snapshot?.workingTime ?? null}
             active={active && visible && notice !== null}

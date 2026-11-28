@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.AI;
 using Urd.Core.Compaction;
+using Urd.Core.Context;
 using Urd.Core.Execution;
 using Urd.Core.Providers;
 using Urd.Core.Sessions;
@@ -141,6 +142,28 @@ internal sealed class SnapshotReader {
 
     return database.Read(transaction => Read(transaction, sessionId));
   }
+
+  // Child footer facts only: no transcript previews, pending inputs or prepass reads.
+  internal (SubagentView? View, Guid? Unsettled, bool Stopping) ReadSubagentView(Guid sessionId, bool live) =>
+      database.Read(transaction => {
+        var child = database.QuerySingleOrDefault(transaction, """
+            SELECT s.history_revision, s.parent_session_id, t.title
+            FROM sessions s LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
+            WHERE s.session_id = $id AND s.kind = $kind;
+            """, row => (Found: true, Revision: row.Long("history_revision"),
+                Parent: row.Guid("parent_session_id"), Title: row.NullableString("title") ?? "Subagent"),
+            ("$id", sessionId), ("$kind", (int)SessionKind.Subagent));
+        if (!child.Found)
+          return (null, null, false);
+        var (unsettled, stopping, startedAt, _) = ReadUnsettledExecution(transaction, sessionId);
+        Guid? latest = unsettled ?? ReadLastSettlement(transaction, sessionId)?.ExecutionId;
+        LlmSelection? selection = ReadLatestSelection(transaction, sessionId, latest);
+        var view = new SubagentView(child.Revision, live, child.Title, child.Parent,
+            selection?.ModelId, selection is null ? null : PrepassDetailsReader.ReadReasoningEffort(selection),
+            selection?.ContextWindow, ReadContextUsage(transaction, sessionId, child.Revision, latest, selection),
+            ReadWorkingTime(transaction, sessionId, startedAt), AdmissionFenced: true);
+        return ((SubagentView?)view, unsettled, stopping);
+      });
 
   private SessionSnapshot Read(SqliteTransaction transaction, Guid sessionId) {
     long historyRevision = ReadHistoryRevision(transaction, sessionId);

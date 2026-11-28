@@ -25,7 +25,12 @@ public sealed partial class SessionManager {
   public Task<PrimarySession?> FindPrimaryAsync(Guid sessionId, CancellationToken cancellation = default) =>
       registry.RunOpenAsync(() => FindPrimary(sessionId, rejectChild: false), cancellation);
 
-  public Task<SubagentView?> ReadSubagentViewAsync(Guid sessionId, CancellationToken cancellation = default) =>
-      registry.RunOpenAsync(() => store.Sessions.ReadSubagentView(sessionId, registry.FindChild(sessionId) is not null),
-          cancellation);
+  public async Task<SubagentView?> ReadSubagentViewAsync(Guid sessionId, CancellationToken cancellation = default) {
+    SubagentSession? child = await registry.RunOpenAsync(() => registry.FindChild(sessionId), cancellation);
+    if (child is null)
+      return store.Snapshots.ReadSubagentView(sessionId, live: false).View;
+    SubagentView? view = await child.ReadUnderLockAsync(() => child.ReadSubagentView(), cancellation);
+    bool stillLive = await registry.RunOpenAsync(() => registry.FindChild(sessionId) == child, cancellation);
+    return stillLive ? view : store.Snapshots.ReadSubagentView(sessionId, live: false).View;
+  }
 }

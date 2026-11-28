@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { RequestError } from "../../http/RequestError.ts";
 import type { SessionClient } from "../../sessions/SessionClient.ts";
+import type { SubagentViewSnapshot } from "../../sessions/SessionSnapshot.ts";
 import type { TranscriptHistoryPage } from "../../sessions/transcript/Messages.ts";
 import { UserQuestions } from "../ask-user/UserQuestions.tsx";
 import { MessageEditingContext } from "../message-editing/EditableMessage.tsx";
 import { Transcript, type ReadingPosition } from "../transcript/Transcript.tsx";
 import type { TranscriptDisplay } from "../transcript/TranscriptDisplay.ts";
 import type { TranscriptNavigationState } from "../transcript/navigation/TranscriptNavigationStorage.ts";
+import { SubagentComposer } from "./SubagentComposer.tsx";
 import { SubagentNavigationContext, type SubagentLink } from "./SubagentNavigation.ts";
 import "./subagent-view.css";
 
@@ -47,8 +49,7 @@ export function SubagentView({
   const id = child?.id;
   const [view, setView] = useState<{
     id: string;
-    title: string;
-    revision: number;
+    snapshot: SubagentViewSnapshot;
     notice: number;
     history: TranscriptHistoryPage | null;
   } | null>(null);
@@ -85,8 +86,7 @@ export function SubagentView({
         if (controller.signal.aborted) return;
         setView({
           id: id!,
-          title: result.title,
-          revision: result.historyRevision,
+          snapshot: result,
           notice: ++notice.current,
           history,
         });
@@ -121,7 +121,7 @@ export function SubagentView({
           <span class="subagent-breadcrumb-item" key={item.id}>
             <span aria-hidden="true">/</span>
             {index === path.length - 1 ? (
-              <span aria-current="page">{current?.title || item.title || item.id}</span>
+              <span aria-current="page">{current?.snapshot.title || item.title || item.id}</span>
             ) : (
               <button type="button" onClick={() => onNavigate(path.slice(0, index + 1))}>
                 {item.title || item.id}
@@ -153,7 +153,7 @@ export function SubagentView({
               display={display}
               streamId={streamId}
               history={current.history}
-              historyRevision={current.revision}
+              historyRevision={current.snapshot.historyRevision}
               notice={String(current.notice)}
               visible={connected && visible}
               position={positions.get(id)}
@@ -167,6 +167,14 @@ export function SubagentView({
         </SubagentNavigationContext.Provider>
       )}
       <UserQuestions client={client} sessionId={rootId} connected={connected} notice={rootNotice} />
+      {id && (
+        <SubagentComposer
+          key={id}
+          sessionId={id}
+          snapshot={current?.snapshot ?? null}
+          active={connected && visible && current !== null}
+        />
+      )}
     </section>
   );
 }

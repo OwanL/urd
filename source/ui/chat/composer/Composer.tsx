@@ -1,13 +1,12 @@
 import "../../controls/selector.css";
 import type { ComponentChildren, RefObject, TargetedKeyboardEvent } from "preact";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hooks";
+import { useCallback, useEffect, useLayoutEffect, useRef } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import { IconButton } from "../../controls/IconButton.tsx";
-import { Popover } from "../../controls/Popover.tsx";
 import { composerSubmissionState } from "./ComposerSubmission.ts";
 import { ModelPicker } from "../../providers/models/ModelPicker.tsx";
 import type { ModelPickerOption } from "../../providers/models/ModelPicker.tsx";
-import "./composer.css";
+import { ComposerControls } from "./ComposerControls.tsx";
 import { ReasoningPicker } from "./ReasoningPicker.tsx";
 
 // Native content sizing removes the per-keystroke measure-and-mutate cycle;
@@ -86,15 +85,7 @@ export function Composer({
   subagentProviders,
   indicators,
 }: ComposerProps) {
-  const controls = useRef<HTMLDivElement>(null);
-  const selections = useRef<HTMLDivElement>(null);
-  const actions = useRef<HTMLDivElement>(null);
-  const accounting = useRef<HTMLDivElement>(null);
-  const accountingWidth = useRef(0);
-  const [inlineAccounting, setInlineAccounting] = useState(true);
-  const overflowTrigger = useRef<HTMLButtonElement>(null);
-  const overflowId = useId();
-  const [overflowOpen, setOverflowOpen] = useState(false);
+  const focusInput = useCallback(() => input.current?.focus({ preventScroll: true }), [input]);
   const composing = useRef(false);
   const locked = selectionLocked || working || stopping;
   const submission = composerSubmissionState(
@@ -128,57 +119,6 @@ export function Composer({
     observer.observe(textarea);
     return () => observer.disconnect();
   }, [input]);
-
-  useLayoutEffect(() => {
-    const row = controls.current;
-    const pinned = selections.current;
-    const buttons = actions.current;
-    const textarea = input.current;
-    if (!row || !pinned || !buttons) return;
-    function layout() {
-      if (!row!.clientWidth) return;
-      if (inlineAccounting && accounting.current)
-        accountingWidth.current = accounting.current.getBoundingClientRect().width;
-      const flex = pinned!.style.flex;
-      pinned!.style.flex = "none";
-      const pinnedWidth = pinned!.getBoundingClientRect().width;
-      pinned!.style.flex = flex;
-      const gap = Number.parseFloat(getComputedStyle(row!).columnGap) || 0;
-      const actionGap = Number.parseFloat(getComputedStyle(buttons!).columnGap) || 0;
-      const more = overflowTrigger.current?.getBoundingClientRect().width ?? 0;
-      const actionWidth = buttons!.getBoundingClientRect().width - (more ? more + actionGap : 0);
-      const next =
-        pinnedWidth + accountingWidth.current + actionWidth + gap * 2 <= row!.clientWidth;
-      if (next === inlineAccounting) return;
-      const focused = document.activeElement;
-      const group = accounting.current;
-      const menu = document.getElementById(overflowId);
-      if (
-        focused === overflowTrigger.current ||
-        group?.contains(focused) ||
-        menu?.contains(focused) ||
-        [...(group?.querySelectorAll("[aria-controls]") ?? [])].some((control) =>
-          document.getElementById(control.getAttribute("aria-controls")!)?.contains(focused),
-        )
-      )
-        textarea?.focus({ preventScroll: true });
-      setOverflowOpen(false);
-      setInlineAccounting(next);
-    }
-    const observer = new ResizeObserver(layout);
-    for (const element of [row, pinned, buttons, inlineAccounting ? accounting.current : null])
-      if (element) observer.observe(element);
-    layout();
-    return () => observer.disconnect();
-  }, [
-    inlineAccounting,
-    overflowOpen,
-    modelLabel,
-    reasoningEffort,
-    hasProviders,
-    overflowId,
-    input,
-  ]);
 
   function send(event: TargetedKeyboardEvent<HTMLTextAreaElement>) {
     if (
@@ -220,105 +160,79 @@ export function Composer({
           composing.current = false;
         }}
       />
-      <div class="composer-controls" ref={controls}>
-        <div class="composer-selections" ref={selections}>
-          {hasProviders === false ? (
-            <button
-              class="selector composer-add-provider"
-              type="button"
-              disabled={locked}
-              onClick={onSetUpProvider}
-            >
-              <Icon name="plus" />
-              <span>Add provider</span>
-            </button>
-          ) : (
-            <ModelPicker
-              models={models}
-              modelKey={modelKey}
-              modelLabel={modelLabel}
-              onModelChange={onModelChange}
-              loadingModels={loadingModels}
-              refreshingModels={refreshingModels}
-              modelsError={modelsError}
-              onRetryModels={onRetryModels}
-              disabled={locked}
-            />
-          )}
-          {hasProviders !== false && (
-            <ReasoningPicker
-              effort={reasoningEffort}
-              options={reasoningOptions}
-              onChange={onReasoningChange}
-              disabled={locked || !modelKey}
-            />
-          )}
-          {subagentProviders}
-        </div>
-        {inlineAccounting && (
-          <div class="composer-accounting" ref={accounting}>
-            {indicators}
-          </div>
-        )}
-        <div class="composer-actions" ref={actions}>
-          {!inlineAccounting && (
-            <div class="composer-overflow">
-              <IconButton
-                icon="more"
-                label="More options"
-                hint="Session details"
-                buttonRef={overflowTrigger}
-                aria-expanded={overflowOpen}
-                aria-controls={overflowOpen ? overflowId : undefined}
-                aria-haspopup="dialog"
-                onClick={() => setOverflowOpen((open) => !open)}
+      <ComposerControls
+        selectionLayoutKey={`${modelLabel}:${reasoningEffort}:${hasProviders}`}
+        focusFallback={focusInput}
+        indicators={indicators}
+        selections={
+          <>
+            {hasProviders === false ? (
+              <button
+                class="selector composer-add-provider"
+                type="button"
+                disabled={locked}
+                onClick={onSetUpProvider}
+              >
+                <Icon name="plus" />
+                <span>Add provider</span>
+              </button>
+            ) : (
+              <ModelPicker
+                models={models}
+                modelKey={modelKey}
+                modelLabel={modelLabel}
+                onModelChange={onModelChange}
+                loadingModels={loadingModels}
+                refreshingModels={refreshingModels}
+                modelsError={modelsError}
+                onRetryModels={onRetryModels}
+                disabled={locked}
               />
-              {overflowOpen && (
-                <Popover
-                  id={overflowId}
-                  anchor={overflowTrigger}
-                  label="Session details"
-                  class="composer-overflow-popover"
-                  placement="above"
-                  onClose={() => setOverflowOpen(false)}
-                >
-                  <div class="composer-accounting" ref={accounting}>
-                    {indicators}
-                  </div>
-                </Popover>
-              )}
-            </div>
-          )}
-          {working ? (
+            )}
+            {hasProviders !== false && (
+              <ReasoningPicker
+                effort={reasoningEffort}
+                options={reasoningOptions}
+                onChange={onReasoningChange}
+                disabled={locked || !modelKey}
+              />
+            )}
+            {subagentProviders}
+          </>
+        }
+        actions={
+          <>
+            {working ? (
+              <IconButton
+                icon="stop"
+                label="Stop"
+                hint={stopping ? "Stopping…" : "Stop"}
+                class="composer-stop"
+                disabled={stopping}
+                aria-busy={stopping}
+                onClick={onStop}
+              />
+            ) : null}
             <IconButton
-              icon="stop"
-              label="Stop"
-              hint={stopping ? "Stopping…" : "Stop"}
-              class="composer-stop"
-              disabled={stopping}
-              aria-busy={stopping}
-              onClick={onStop}
+              icon="send"
+              label={submission.label}
+              hint={
+                configurationPending ? (
+                  "Saving model settings…"
+                ) : (
+                  <>
+                    {submission.label} <kbd>Enter</kbd>
+                  </>
+                )
+              }
+              class="composer-send"
+              aria-busy={configurationPending}
+              type="submit"
+              disabled={!canSubmit}
             />
-          ) : null}
-          <IconButton
-            icon="send"
-            label={submission.label}
-            hint={
-              configurationPending ? (
-                "Saving model settings…"
-              ) : (
-                <>
-                  {submission.label} <kbd>Enter</kbd>
-                </>
-              )
-            }
-            class="composer-send"
-            aria-busy={configurationPending}
-            type="submit"
-            disabled={!canSubmit}
-          />
-        </div>
-      </div>
+          </>
+        }
+      />
     </form>
   );
 }

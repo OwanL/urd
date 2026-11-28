@@ -7,6 +7,28 @@
   width: 100%;
 }
 
+.subagent-view > .composer {
+  margin-top: auto;
+}
+
+.subagent-model-label,
+.subagent-effort-label {
+  padding: 4px 7px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.subagent-model-label {
+  max-width: min(24rem, 46vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subagent-effort-label {
+  flex: none;
+}
+
 .subagent-breadcrumb {
   display: flex;
   flex: none;

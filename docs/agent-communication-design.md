@@ -244,8 +244,8 @@ Subagent calls have dedicated transcript rows with the child title and report. S
 resolved child opens its read-only transcript in the same tab; breadcrumbs return to the primary
 or an ancestor, and nested child rows can be opened in turn. Completed children remain accessible
 through their parent call. The tab's agent menu lists live descendants and opens their paths;
-it is available by hover or explicit control. The child transcript does not provide message
-editing or a composer.
+it is available by hover or explicit control. The child composer displays session indicators,
+but does not accept messages. The child transcript cannot be edited.
 
 ### Agent question presentation (2026-11-19)
 

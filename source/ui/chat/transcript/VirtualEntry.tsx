@@ -1,3 +1,4 @@
+import { Component } from "preact";
 import { useCallback, useLayoutEffect, useRef } from "preact/hooks";
 import type { MarkdownSavedSourcePosition } from "../../markdown-rendering/MarkdownMessageView.tsx";
 import type {
@@ -25,7 +26,7 @@ import type { ResponseStatusContext } from "../prepass/PrepassRows.tsx";
 
 export type RestoreSource = (saved: MarkdownSavedSourcePosition) => boolean;
 
-export function VirtualEntry({
+function EntryRow({
   client,
   display,
   streamId,
@@ -241,4 +242,21 @@ export function VirtualEntry({
       {status?.after}
     </div>
   );
+}
+
+type EntryRowProps = Parameters<typeof EntryRow>[0];
+
+// Window descriptors are immutable. Don't render unchanged rows when only the composer changes.
+export class VirtualEntry extends Component<EntryRowProps> {
+  shouldComponentUpdate(next: EntryRowProps): boolean {
+    const previous = this.props;
+    const keys = Object.keys(next) as (keyof EntryRowProps)[];
+    if (keys.length !== Object.keys(previous).length) return true;
+    for (const key of keys) if (previous[key] !== next[key]) return true;
+    return false;
+  }
+
+  render() {
+    return <EntryRow {...this.props} />;
+  }
 }

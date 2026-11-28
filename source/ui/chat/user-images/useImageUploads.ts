@@ -23,6 +23,8 @@ export interface ImageUploads {
 }
 
 // The queue is tied to a composer or exact edit target, not to a transcript row.
+const noImages: readonly PendingImage[] = [];
+
 export function useImageUploads<T>(
   sessionId: string,
   scope: T,
@@ -43,15 +45,20 @@ export function useImageUploads<T>(
   );
   queue.observe(existing);
   useLayoutEffect(() => () => queue.dispose(), [queue]);
-  return {
-    images: state?.queue === queue ? state.images : [],
-    pasteError: state?.queue === queue ? state.pasteError : null,
-    pending: () => queue.pending(),
-    paste: (blobs, existing) => queue.paste(blobs, existing),
-    remove: (id) => queue.remove(id),
-    clearPasteError: () => queue.clearPasteError(),
-    retry: (id) => queue.retry(id),
-  };
+  // One stable uploads object per queue state keeps command callbacks and context
+  // values that capture uploads referentially stable across unrelated renders.
+  return useMemo(
+    () => ({
+      images: state?.queue === queue ? state.images : noImages,
+      pasteError: state?.queue === queue ? state.pasteError : null,
+      pending: () => queue.pending(),
+      paste: (blobs, existing) => queue.paste(blobs, existing),
+      remove: (id) => queue.remove(id),
+      clearPasteError: () => queue.clearPasteError(),
+      retry: (id) => queue.retry(id),
+    }),
+    [queue, state],
+  );
 }
 
 export class ImageUploadQueue {

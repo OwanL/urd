@@ -213,6 +213,12 @@ export function Chat({
     setWorkingDirectoryLocked(locked);
     setWorkingDirectoryNotice(message);
   }, []);
+  // Workspace passes handler props as fresh closures on every render, and they reach
+  // response-status contexts inside the transcript; routing through the latest ref
+  // keeps those context objects reference-stable across draft-only updates.
+  const chooseModelsRef = useRef(onChooseModels);
+  chooseModelsRef.current = onChooseModels;
+  const chooseModels = useCallback(() => chooseModelsRef.current(), []);
   const pendingInputRemoval = commands.hasPendingInputRemoval(sessionId);
   const compaction = commands.status.compactions[sessionId];
   const compactionPending =
@@ -229,9 +235,9 @@ export function Chat({
         })),
       ),
       visible: visible && notice !== null,
-      onChooseModels,
+      onChooseModels: chooseModels,
     }),
-    [client, sessionId, models.options, visible, notice, onChooseModels],
+    [client, sessionId, models.options, visible, notice, chooseModels],
   );
   const pendingResponse = snapshot?.pendingResponse ?? null;
   const state = deriveChatStatus(
@@ -279,24 +285,28 @@ export function Chat({
   const sendingBlocked = imageBlocked || tooManyImages || composerUploads.images.length > 0;
   const modelKey = selection ? `${selection.connection.id}/${selection.modelId}` : null;
   const error = readError || chat.error || stop?.error;
-  const editingContext = {
-    controller: messageEditing,
-    sessionId,
-    draft: chat.messageEdit,
-    uploads: editUploads,
-    active,
-    selection,
-    canEdit: Boolean(
-      ready &&
-      canPersist &&
-      snapshot &&
-      !snapshot.admissionFenced &&
-      !chat.pending &&
-      !chat.pendingContinuation &&
-      !pendingInputRemoval &&
-      !compactionPending,
-    ),
-  };
+  const canEdit = Boolean(
+    ready &&
+    canPersist &&
+    snapshot &&
+    !snapshot.admissionFenced &&
+    !chat.pending &&
+    !chat.pendingContinuation &&
+    !pendingInputRemoval &&
+    !compactionPending,
+  );
+  const editingContext = useMemo(
+    () => ({
+      controller: messageEditing,
+      sessionId,
+      draft: chat.messageEdit,
+      uploads: editUploads,
+      active,
+      selection,
+      canEdit,
+    }),
+    [messageEditing, sessionId, chat.messageEdit, editUploads, active, selection, canEdit],
+  );
   function choose(next: LlmSelection) {
     if (!state.selectionLocked) selectModel(sessionId, next);
   }
@@ -318,7 +328,7 @@ export function Chat({
           onPositionChange={onPositionChange}
           transcriptPosition={transcriptPosition}
           onTranscriptPositionChange={onTranscriptPositionChange}
-          onChooseModels={onChooseModels}
+          onChooseModels={chooseModels}
           renderPrepass={
             snapshot?.pendingInputs.some((input) => input.isClaimed) || pendingResponse
               ? (entries) => (

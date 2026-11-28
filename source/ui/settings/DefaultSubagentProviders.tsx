@@ -1,5 +1,6 @@
 import { useState } from "preact/hooks";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
+import { providerReady } from "../providers/settings/ProviderConnectionStatus.ts";
 import type { ProviderSettingsState } from "../providers/settings/useProviderSettings.ts";
 import { SubagentProviderFields } from "../providers/subagents/SubagentProviderFields.tsx";
 import type { SubagentProviders } from "../providers/subagents/SubagentProviderSelection.ts";
@@ -27,7 +28,9 @@ export function DefaultSubagentProviders({
       {saved && providers.loaded ? (
         <SubagentProviderFields
           label="Subagent providers for new chats"
-          connections={providers.connections}
+          connections={providers.connections.filter((connection) =>
+            providerReady(connection, providers.credentials[connection.id]),
+          )}
           selection={draft ? draft.connectionIds : saved.subagentProviderConnectionIds}
           disabled={state.pending || draft !== null || Boolean(readError)}
           onChange={(connectionIds) => {

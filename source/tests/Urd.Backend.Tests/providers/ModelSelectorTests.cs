@@ -53,6 +53,36 @@ public sealed class ModelSelectorTests {
     }
   }
 
+  [Fact]
+  public async Task InferredFamilyAppliesUntilAnExplicitOverrideIsSaved() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    const string model = "claude-sonnet-4.5";
+    var manager = CreateManager(store, model);
+    try {
+      ProviderConnection connection = await AddConnectionAsync(manager, "provider");
+      var preferences = new PreferenceManager(store);
+      preferences.SetModelChoice(AuxiliaryModelPurpose.Tools, ModelChoice.ForModel(connection.Id, model));
+      var selector = new ModelSelector(manager);
+
+      LlmSelection inferred = await selector.ResolveAsync(AuxiliaryModelPurpose.Tools, preferences.Read());
+      Assert.Equal(ModelFamily.Anthropic, inferred.Family);
+
+      await manager.SaveModelSettingsAsync(new(connection.Id, model, ModelFamily.Other,
+          SupportsImages: false, FamilyExplicit: false));
+      LlmSelection learnedCapability = await selector.ResolveAsync(AuxiliaryModelPurpose.Tools, preferences.Read());
+      Assert.Equal(ModelFamily.Anthropic, learnedCapability.Family);
+      Assert.False(learnedCapability.SupportsImages);
+
+      await manager.SaveModelSettingsAsync(new(connection.Id, model, ModelFamily.Other,
+          SupportsImages: false, FamilyExplicit: true));
+      Assert.Equal(ModelFamily.Other,
+          (await selector.ResolveAsync(AuxiliaryModelPurpose.Tools, preferences.Read())).Family);
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
   [Theory]
   [InlineData("small", ModelBucket.Small)]
   [InlineData("medium", ModelBucket.Medium)]

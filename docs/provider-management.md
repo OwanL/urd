@@ -61,6 +61,7 @@ Paths below start with `/api/providers`:
 | Method and path | Body → successful response |
 | --- | --- |
 | GET `/` | Saved `ProviderConnection[]` |
+| GET `/available` | Saved connections that are locally usable without a new sign-in; no network request |
 | POST `/chatgpt` | `{name}` → 201 connection |
 | POST `/github-copilot` | `{name}` → 201 connection |
 | POST `/openai` | `{name}` → 201 connection |
@@ -80,7 +81,7 @@ Paths below start with `/api/providers`:
 | GET `/{id}/bucket-suggestions` | `{connection, assignments:[{bucket,modelId}]}` from cached eligible catalog data |
 | POST `/{id}/bucket-suggestions` | Same exact payload → 204; 409 if stale, without mutation |
 | GET `/{id}/model-settings` | Saved per-model family/image-support records; no network request |
-| POST `/{id}/model-settings` | `{connectionId, modelId, family, supportsImages}` → saved record |
+| POST `/{id}/model-settings` | `{connectionId, modelId, family, supportsImages, contextWindow, familyExplicit}` → saved record |
 | POST `/{id}/model-tests` | `{modelId}` → response preview and available usage |
 
 A connection is `{id, name, route, api, endpoint, authentication}`. Custom `api` is
@@ -231,11 +232,18 @@ factories and explicit strict-function schema settings on the plan namespace pat
 Protocol support for a reasoning effort does not establish support by a particular model;
 current ID/name catalogs leave that compatibility unknown. No model-name heuristic fills it in.
 
-Unconfigured models default to family `other` and allow image input. An explicit provider
-rejection that says the model does not accept images can turn support off for that exact
-connection and model, but only after an image request and only if there is no saved model
-setting. A saved Images setting always wins. Generic request failures and bad image formats
-do not change settings, and rejected requests are not retried with the image removed.
+Catalog reads resolve known OpenAI, Anthropic and Google model identities centrally; unknown
+models remain family `other`. Official OpenAI and ChatGPT connections are OpenAI, Copilot uses
+its vendor metadata when present, and otherwise identity comes from conservative model ID/name
+patterns. An explicit saved family, including an explicit `other`, always wins. This metadata
+does not enable a model or alter model policy.
+
+Models allow image input by default. An explicit provider rejection that says the model does
+not accept images can turn support off for that exact connection and model, but only after an
+image request and only if there is no saved model setting. Learned image rejection records do
+not become family overrides. A saved Images setting always wins. Generic request failures and
+bad image formats do not change settings, and rejected requests are not retried with the image
+removed.
 
 Saved settings survive refresh/disconnect and are deleted only with their connection. Each
 submission freezes its selection. If the chat still has an older selection after a rejection,

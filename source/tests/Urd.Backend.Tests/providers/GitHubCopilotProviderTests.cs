@@ -63,9 +63,13 @@ public sealed class GitHubCopilotProviderTests {
             Assert.Equal(16384, item.ContextWindow);
             Assert.Equal(8192, item.MaxOutputTokens);
             Assert.Equal(new[] { "low", "high" }, item.ReasoningEfforts);
+            Assert.Equal(ModelFamily.Other, item.Family);
           },
           item => Assert.Equal(LlmApi.OpenAIChatCompletions, item.Api),
-          item => Assert.Equal(LlmApi.AnthropicMessages, item.Api));
+          item => {
+            Assert.Equal(LlmApi.AnthropicMessages, item.Api);
+            Assert.Equal(ModelFamily.Anthropic, item.Family);
+          });
       Assert.Equal(catalog.Models.Select(item => (item.Id, item.Api)),
           (await manager.GetModelCatalogAsync(connection.Id)).Models.Select(item => (item.Id, item.Api)));
       Assert.Equal(LlmApi.OpenAIResponses, (await manager.GetAsync(connection.Id)).Api);

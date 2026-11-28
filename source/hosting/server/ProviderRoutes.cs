@@ -15,6 +15,8 @@ internal static class ProviderRoutes {
         | RouteExceptionPolicy.CancellationStatus,
         (_, failure) => failure is ProviderOperationException providerFailure ? MapProviderFailure(providerFailure) : null);
     routes.MapGet("", (Delegate)(async (HttpContext http) => Results.Ok(await providers.ListAsync(http.RequestAborted))));
+    routes.MapGet("/available", (Delegate)(async (HttpContext http) =>
+        Results.Ok(await providers.ListAvailableAsync(http.RequestAborted))));
     routes.MapPost("/openai", (Delegate)((HttpContext http) => AddAsync(http, providers.AddOpenAIAsync)));
     routes.MapPost("/chatgpt", (Delegate)((HttpContext http) => AddAsync(http, providers.AddChatGptAsync)));
     routes.MapPost("/github-copilot", (Delegate)((HttpContext http) => AddAsync(http, providers.AddGitHubCopilotAsync)));

@@ -66,6 +66,13 @@ const mappings = [
     response: connections,
   },
   {
+    name: "list available connections",
+    call: (client: ProviderClient) => client.listAvailable(),
+    method: "GET",
+    path: "/api/providers/available",
+    response: [connections[1]],
+  },
+  {
     name: "read the cached catalog without discovery",
     call: (client: ProviderClient) => client.getModels(connectionId),
     method: "GET",

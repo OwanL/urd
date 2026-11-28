@@ -55,6 +55,7 @@ internal sealed class GitHubCopilotModels(HttpClient client) {
         throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse);
 
       string? name = Text(item, "name");
+      string displayName = string.IsNullOrWhiteSpace(name) || name.Length > 256 || name.Any(char.IsControl) ? id : name;
       JsonElement capability = Property(item, "capabilities");
       JsonElement limits = Property(capability, "limits");
       JsonElement prices = Property(Property(Property(item, "billing"), "token_prices"), "default");
@@ -65,8 +66,8 @@ internal sealed class GitHubCopilotModels(HttpClient client) {
         _ => defaultContext ?? maximumContext ?? PositiveInteger(limits, "max_prompt_tokens")
       };
       string[]? efforts = Strings(Property(Property(capability, "supports"), "reasoning_effort"));
-      models.Add(new(id, string.IsNullOrWhiteSpace(name) || name.Length > 256 || name.Any(char.IsControl) ? id : name,
-          context, api, PositiveInteger(limits, "max_output_tokens"), efforts));
+      models.Add(new(id, displayName, context, api, PositiveInteger(limits, "max_output_tokens"), efforts,
+          Family: ModelIdentity.Infer(id, displayName, Text(item, "vendor"))));
     }
     return models;
   }

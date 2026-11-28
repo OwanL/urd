@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 48;
+  private const int SchemaVersion = 49;
 
   private const string SnoozedSessionsIndex = """
       CREATE INDEX sessions_snoozed_until ON sessions(snoozed_until_ms) WHERE snoozed_until_ms IS NOT NULL;
@@ -213,7 +213,12 @@ internal static class DatabaseSchema {
         ALTER TABLE next_provider_connections RENAME TO provider_connections;
         ALTER TABLE next_model_settings RENAME TO model_settings;
         """],
-    [47] = ["ALTER TABLE preferences ADD COLUMN model_favorites_json TEXT;"]
+    [47] = ["ALTER TABLE preferences ADD COLUMN model_favorites_json TEXT;"],
+    // Existing rows represent user-visible settings and remain explicit. Learned image rejections use false going forward.
+    [48] = ["""
+        ALTER TABLE model_settings ADD COLUMN family_explicit INTEGER NOT NULL DEFAULT 1
+            CHECK (family_explicit IN (0, 1));
+        """]
   };
 
   internal static void Initialize(SqliteConnection connection) {
@@ -676,6 +681,7 @@ internal static class DatabaseSchema {
           family INTEGER NOT NULL CHECK (family IN (0, 1, 2, 3)),
           supports_images INTEGER NOT NULL CHECK (supports_images IN (0, 1)),
           context_window INTEGER CHECK (context_window IS NULL OR context_window > 0),
+          family_explicit INTEGER NOT NULL DEFAULT 1 CHECK (family_explicit IN (0, 1)),
           PRIMARY KEY (connection_id, model_id)
       ) STRICT;
       CREATE TABLE provider_host (

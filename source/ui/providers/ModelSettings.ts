@@ -1,4 +1,4 @@
-// Explicit model metadata; IDs and connection routes do not imply capabilities.
+// Per-connection overrides and learned capabilities.
 export type ModelFamily = "openAI" | "anthropic" | "google" | "other";
 
 export interface ModelSettings {
@@ -7,4 +7,5 @@ export interface ModelSettings {
   readonly family: ModelFamily;
   readonly supportsImages: boolean;
   readonly contextWindow: number | null;
+  readonly familyExplicit?: boolean;
 }

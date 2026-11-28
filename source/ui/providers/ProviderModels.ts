@@ -1,4 +1,5 @@
 import type { LlmApi } from "./ProviderConnection.ts";
+import type { ModelFamily } from "./ModelSettings.ts";
 
 // Provider-supplied catalog metadata with optional reference API pricing.
 export interface ProviderModel {
@@ -7,6 +8,7 @@ export interface ProviderModel {
   readonly contextWindow?: number | null;
   readonly api?: LlmApi | null;
   readonly price?: ProviderModelPrice | null;
+  readonly family?: ModelFamily | null;
 }
 
 // Reference API rates, not Copilot subscription billing.

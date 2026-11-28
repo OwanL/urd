@@ -77,6 +77,13 @@ public sealed class ProviderManager : IDisposable {
     return storage.List();
   }
 
+  public async Task<IReadOnlyList<ProviderConnection>> ListAvailableAsync(
+      CancellationToken cancellationToken = default) {
+    using var held = await gate.AcquireAsync(cancellationToken);
+    ObjectDisposedException.ThrowIf(disposed, this);
+    return AvailableProviders(null).Select(state => state.Connection).ToArray();
+  }
+
   public async Task<ProviderConnection> GetAsync(Guid connectionId, CancellationToken cancellationToken = default) {
     using var held = await gate.AcquireAsync(cancellationToken);
     ObjectDisposedException.ThrowIf(disposed, this);
@@ -244,11 +251,7 @@ public sealed class ProviderManager : IDisposable {
 
     using var held = await gate.AcquireAsync(cancellationToken);
     ObjectDisposedException.ThrowIf(disposed, this);
-    IReadOnlyList<ProviderConnection> saved = storage.List();
-    if (connectionIds is null)
-      return saved.Count > 0;
-    HashSet<Guid> allowed = connectionIds.ToHashSet();
-    return saved.Any(connection => allowed.Contains(connection.Id));
+    return AvailableProviders(connectionIds).Any();
   }
 
   internal async Task<IReadOnlyList<(ProviderConnection Connection, ProviderModelCatalog Catalog)>>
@@ -256,7 +259,7 @@ public sealed class ProviderManager : IDisposable {
     using var held = await gate.AcquireAsync(cancellationToken);
     ObjectDisposedException.ThrowIf(disposed, this);
     return AvailableProviders(connectionIds).Where(state => state.Catalog is { Models.Count: > 0 })
-        .Select(state => (state.Connection, state.Catalog!)).ToArray();
+        .Select(state => (state.Connection, EnrichCatalog(state.Connection, state.Catalog!))).ToArray();
   }
 
   public async Task<IReadOnlyList<ModelSettings>> GetModelSettingsAsync(
@@ -294,7 +297,10 @@ public sealed class ProviderManager : IDisposable {
         UsageRates? rates = prices is null
             ? ModelPriceCatalog.Bundled.FindRates(connection, model.Id)
             : prices.FindRates(connection, model.Id);
-        return model with { Price = rates is null ? null : new(rates.Input, rates.Output, rates.Source, rates.CapturedAt) };
+        return model with {
+          Price = rates is null ? null : new(rates.Input, rates.Output, rates.Source, rates.CapturedAt),
+          Family = ModelIdentity.Resolve(connection, model)
+        };
       }).ToArray() };
 
   public Task<ProviderModelTestResult> TestModelAsync(Guid connectionId, string modelId,

@@ -3,7 +3,7 @@ namespace Urd.Core.Providers;
 // Provider-supplied catalog metadata, enriched with reference prices on reads.
 public sealed record ProviderModel(string Id, string Name, int? ContextWindow = null,
     LlmApi? Api = null, int? MaxOutputTokens = null, IReadOnlyList<string>? ReasoningEfforts = null,
-    ProviderModelPrice? Price = null);
+    ProviderModelPrice? Price = null, ModelFamily? Family = null);
 
 // Reference API rates per million tokens, not a statement of subscription billing.
 public sealed record ProviderModelPrice(decimal? InputPerMillion, decimal? OutputPerMillion,

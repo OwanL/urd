@@ -227,7 +227,10 @@ function mapModels(
       selection: {
         connection,
         modelId: model.id,
-        family: modelSettings?.family ?? "other",
+        family:
+          modelSettings && modelSettings.familyExplicit !== false
+            ? modelSettings.family
+            : (model.family ?? "other"),
         supportsImages,
         contextWindow: modelSettings?.contextWindow ?? model.contextWindow ?? null,
         reasoningEffort: "high",

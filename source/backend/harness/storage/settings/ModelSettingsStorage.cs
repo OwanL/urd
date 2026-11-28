@@ -10,11 +10,11 @@ internal sealed class ModelSettingsStorage(Database database) {
     return database.Read(transaction => {
       RequireConnection(transaction, connectionId);
       return database.Query(transaction, """
-        SELECT model_id, family, supports_images, context_window FROM model_settings
+        SELECT model_id, family, supports_images, context_window, family_explicit FROM model_settings
         WHERE connection_id = $id ORDER BY model_id;
         """, row => new ModelSettings(connectionId, row.String("model_id"),
             (ModelFamily)row.Int("family"), row.Bool("supports_images"),
-            row.NullableInt("context_window")), ("$id", connectionId));
+            row.NullableInt("context_window"), row.Bool("family_explicit")), ("$id", connectionId));
     });
   }
 
@@ -29,14 +29,15 @@ internal sealed class ModelSettingsStorage(Database database) {
     return database.Write(transaction => {
       RequireConnection(transaction, settings.ConnectionId);
       database.Execute(transaction, """
-        INSERT INTO model_settings (connection_id, model_id, family, supports_images, context_window)
-        VALUES ($id, $model, $family, $images, $contextWindow)
+        INSERT INTO model_settings
+            (connection_id, model_id, family, supports_images, context_window, family_explicit)
+        VALUES ($id, $model, $family, $images, $contextWindow, $familyExplicit)
         ON CONFLICT (connection_id, model_id) DO UPDATE
         SET family = excluded.family, supports_images = excluded.supports_images,
-            context_window = excluded.context_window;
+            context_window = excluded.context_window, family_explicit = excluded.family_explicit;
         """, ("$id", settings.ConnectionId), ("$model", settings.ModelId),
           ("$family", (int)settings.Family), ("$images", settings.SupportsImages ? 1 : 0),
-          ("$contextWindow", settings.ContextWindow));
+          ("$contextWindow", settings.ContextWindow), ("$familyExplicit", settings.FamilyExplicit ? 1 : 0));
       return settings;
     });
   }
@@ -49,8 +50,9 @@ internal sealed class ModelSettingsStorage(Database database) {
   // Positive evidence fills an unset capability only; a user's saved setting wins.
   internal void RecordImageRejection(Guid connectionId, string modelId) => database.Write(transaction =>
       database.Execute(transaction, """
-        INSERT INTO model_settings (connection_id, model_id, family, supports_images, context_window)
-        VALUES ($id, $model, $family, 0, NULL)
+        INSERT INTO model_settings
+            (connection_id, model_id, family, supports_images, context_window, family_explicit)
+        VALUES ($id, $model, $family, 0, NULL, 0)
         ON CONFLICT (connection_id, model_id) DO NOTHING;
         """, ("$id", connectionId), ("$model", modelId), ("$family", (int)ModelFamily.Other)));
 

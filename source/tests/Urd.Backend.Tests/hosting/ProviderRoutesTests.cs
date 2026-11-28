@@ -35,11 +35,14 @@ public sealed class ProviderRoutesTests {
     Assert.Equal(ProviderRoute.Custom, connection.Route);
     Assert.Equal(connection, await GetAsync<ProviderConnection>(server.Client, PathFor(connection)));
     Assert.Equal(connection, Assert.Single(await GetAsync<ProviderConnection[]>(server.Client, "/api/providers")));
+    Assert.Empty(await GetAsync<ProviderConnection[]>(server.Client, "/api/providers/available"));
     Assert.Empty(handler.Requests);
 
     ProviderCredentialStatus credentials = await PostAsync<ProviderCredentialStatus>(server.Client,
         PathFor(connection, "/api-key"), new { connection, apiKey = Secret });
     Assert.True(credentials.HasCredentials);
+    Assert.Equal(connection,
+        Assert.Single(await GetAsync<ProviderConnection[]>(server.Client, "/api/providers/available")));
     Assert.Contains(Secret, Assert.Single(StoredProviders.Read(database)).Credentials!);
 
     ProviderModelCatalog empty = await GetAsync<ProviderModelCatalog>(server.Client, PathFor(connection, "/models"));
@@ -61,7 +64,8 @@ public sealed class ProviderRoutesTests {
     ProviderModelCatalog refreshed = await PostAsync<ProviderModelCatalog>(server.Client,
         PathFor(connection, "/models/refresh"));
     Assert.NotNull(refreshed.RefreshedAt);
-    Assert.Equal(new ProviderModel("fixture-model", "fixture-model"), Assert.Single(refreshed.Models));
+    Assert.Equal(new ProviderModel("fixture-model", "fixture-model", Family: ModelFamily.Other),
+        Assert.Single(refreshed.Models));
     ScriptedOpenAIRequest request = Assert.Single(handler.Requests);
     Assert.Equal(HttpMethod.Get, request.Method);
     Assert.Equal("/prefix/v1/models", request.Uri.AbsolutePath);

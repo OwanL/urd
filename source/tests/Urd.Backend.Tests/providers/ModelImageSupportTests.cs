@@ -41,6 +41,7 @@ public sealed class ModelImageSupportTests {
       if (learn) {
         var learned = Assert.Single(settings);
         Assert.Equal(model, learned.ModelId);
+        Assert.False(learned.FamilyExplicit);
         Assert.False(learned.SupportsImages);
         var repeated = await Assert.ThrowsAsync<ProviderOperationException>(Send);
         Assert.Contains("disabled", repeated.Message, StringComparison.OrdinalIgnoreCase);

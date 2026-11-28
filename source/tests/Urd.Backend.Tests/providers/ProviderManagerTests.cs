@@ -32,7 +32,8 @@ public sealed class ProviderManagerTests {
       }
 
       ProviderModelCatalog catalog = await manager.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
-      Assert.Equal(new ProviderModel("fixture-model", "fixture-model"), Assert.Single(catalog.Models));
+      Assert.Equal(new ProviderModel("fixture-model", "fixture-model", Family: ModelFamily.Other),
+          Assert.Single(catalog.Models));
       ScriptedOpenAIRequest request = Assert.Single(handler.Requests);
       Assert.Equal(new Uri("https://fixture.invalid/prefix/v1/models"), request.Uri);
       Assert.Equal(authentication == AuthenticationMethod.ApiKey ? "Bearer synthetic-managed-key" : null, request.Authorization);
@@ -59,11 +60,15 @@ public sealed class ProviderManagerTests {
       Assert.Contains("#openai/gpt-6.2-sol", price.Source);
       Assert.NotEqual(default, price.CapturedAt);
       Assert.Null(refreshed.Models.Single(model => model.Id == "unknown-fixture").Price);
+      Assert.All(refreshed.Models, model => Assert.Equal(ModelFamily.OpenAI, model.Family));
 
       ProviderModelCatalog cached = await manager.GetModelCatalogAsync(connection.Id);
       Assert.Equal(price, cached.Models.Single(model => model.Id == "gpt-6.2-sol").Price);
       Assert.Null(cached.Models.Single(model => model.Id == "unknown-fixture").Price);
-      Assert.All(store.Providers.Get(connection.Id).Catalog!.Models, model => Assert.Null(model.Price));
+      Assert.All(store.Providers.Get(connection.Id).Catalog!.Models, model => {
+        Assert.Null(model.Price);
+        Assert.Null(model.Family);
+      });
     } finally {
       await CloseAsync(manager);
     }

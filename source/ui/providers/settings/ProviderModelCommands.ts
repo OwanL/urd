@@ -9,7 +9,7 @@ type ModelState = Pick<
 >;
 
 export type ModelSettingsEdit = Partial<
-  Pick<ModelSettings, "family" | "supportsImages" | "contextWindow">
+  Pick<ModelSettings, "family" | "familyExplicit" | "supportsImages" | "contextWindow">
 >;
 
 // Model drafts are local; only explicit saves or refreshes dispatch commands.

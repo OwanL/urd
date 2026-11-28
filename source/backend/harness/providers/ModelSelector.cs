@@ -105,7 +105,9 @@ public sealed class ModelSelector {
 
     ModelSettings? modelSettings = settings.FirstOrDefault(candidate =>
         string.Equals(candidate.ModelId, model.Id, StringComparison.Ordinal));
-    return new LlmSelection(connection, model.Id, reasoningEffort ?? "high", modelSettings?.Family ?? ModelFamily.Other,
+    ModelFamily family = modelSettings is { FamilyExplicit: true }
+        ? modelSettings.Family : ModelIdentity.Resolve(connection, model);
+    return new LlmSelection(connection, model.Id, reasoningEffort ?? "high", family,
         modelSettings?.SupportsImages ?? true, modelSettings?.ContextWindow ?? model.ContextWindow,
         connection.Route == ProviderRoute.GitHubCopilot ? model.Api : null);
   }

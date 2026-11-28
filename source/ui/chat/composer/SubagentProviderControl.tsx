@@ -96,7 +96,7 @@ function SubagentProviderMenu({
     const abort = new AbortController();
     void Promise.all([
       sessionClient.getSubagentProviders(sessionId, abort.signal),
-      providerClient.list(abort.signal),
+      providerClient.listAvailable(abort.signal),
     ]).then(
       ([policy, connections]) => {
         if (!abort.signal.aborted) setData({ ...policy, connections });

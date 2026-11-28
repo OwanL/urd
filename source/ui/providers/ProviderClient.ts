@@ -23,6 +23,10 @@ export class ProviderClient {
     return requestJson(this.url(""), "GET", undefined, signal);
   }
 
+  listAvailable(signal?: AbortSignal): Promise<readonly ProviderConnection[]> {
+    return requestJson(this.url("/available"), "GET", undefined, signal);
+  }
+
   get(connectionId: string, signal?: AbortSignal): Promise<ProviderConnection> {
     return requestJson(this.url(`/${encodeURIComponent(connectionId)}`), "GET", undefined, signal);
   }

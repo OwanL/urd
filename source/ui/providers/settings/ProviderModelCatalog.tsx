@@ -62,14 +62,16 @@ export function ProviderModelCatalog({
                   saved ?? {
                     connectionId: connection.id,
                     modelId: model.id,
-                    family: "other",
+                    family: model.family ?? "other",
                     supportsImages: true,
                     contextWindow: null,
+                    familyExplicit: false,
                   };
                 const changed =
                   draft &&
                   (!saved ||
                     draft.family !== saved.family ||
+                    draft.familyExplicit !== saved.familyExplicit ||
                     draft.supportsImages !== saved.supportsImages ||
                     draft.contextWindow !== saved.contextWindow);
                 const unavailable = disabled || !records;
@@ -85,10 +87,16 @@ export function ProviderModelCatalog({
                       }}
                     >
                       <ProviderModelFamily
-                        family={settings.family}
+                        family={
+                          settings.familyExplicit === false
+                            ? (model.family ?? "other")
+                            : settings.family
+                        }
                         modelName={model.name}
                         disabled={unavailable}
-                        onChange={(family) => state.actions.editModel(settings, { family })}
+                        onChange={(family) =>
+                          state.actions.editModel(settings, { family, familyExplicit: true })
+                        }
                       />
                       <label>
                         <input

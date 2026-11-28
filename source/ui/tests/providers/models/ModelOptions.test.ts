@@ -444,7 +444,7 @@ void test("provider changes prevent an older manual refresh from publishing over
   assert.equal(oldRefresh.options, null);
 });
 
-void test("configured metadata is matched by connection and model without inference or mutation", async () => {
+void test("catalog identity defaults and explicit settings are matched without mutation", async () => {
   const connection = Object.freeze({ ...firstConnection });
   const settings: readonly ModelSettings[] = Object.freeze([
     Object.freeze({
@@ -453,6 +453,14 @@ void test("configured metadata is matched by connection and model without infere
       family: "anthropic" as const,
       supportsImages: true,
       contextWindow: 16_384,
+    }),
+    Object.freeze({
+      connectionId: connection.id,
+      modelId: "claude-default",
+      family: "other" as const,
+      familyExplicit: false,
+      supportsImages: false,
+      contextWindow: null,
     }),
     Object.freeze({
       connectionId: "another-connection",
@@ -478,9 +486,24 @@ void test("configured metadata is matched by connection and model without infere
       connectionId: connection.id,
       refreshedAt: null,
       models: Object.freeze([
-        Object.freeze({ id: "gpt-configured", name: "GPT configured", contextWindow: 32_768 }),
-        Object.freeze({ id: "claude-default", name: "Claude default", contextWindow: 64_000 }),
-        Object.freeze({ id: "gpt-unconfigured", name: "GPT unmatched", contextWindow: null }),
+        Object.freeze({
+          id: "gpt-configured",
+          name: "GPT configured",
+          contextWindow: 32_768,
+          family: "openAI" as const,
+        }),
+        Object.freeze({
+          id: "claude-default",
+          name: "Claude default",
+          contextWindow: 64_000,
+          family: "anthropic" as const,
+        }),
+        Object.freeze({
+          id: "gpt-unconfigured",
+          name: "GPT unmatched",
+          contextWindow: null,
+          family: "openAI" as const,
+        }),
       ]),
     }),
     getModelSettings: async () => records,
@@ -496,8 +519,8 @@ void test("configured metadata is matched by connection and model without infere
     ]),
     [
       ["anthropic", true, 16_384],
-      ["other", true, 64_000],
-      ["other", true, null],
+      ["anthropic", false, 64_000],
+      ["openAI", true, null],
     ],
   );
   assert.equal(result.options?.[0]?.selection.connection, connection);

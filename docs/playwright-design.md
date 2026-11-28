@@ -115,8 +115,9 @@ Bitwarden is on by default. On first startup, Urd downloads and checksum-verifie
 Bitwarden extension from its official GitHub release. If the install fails, Urd starts without
 it and tries again on the next startup. You can also retry from **Settings → General → Bitwarden**
 on the local Urd address, then restart Urd. The extension does not auto-update. The browser
-stays headless. Use **Open Bitwarden** in the browser viewer to sign in or unlock. Bitwarden owns its vault and save prompts; to select a saved login on a
-site, use Bitwarden's inline suggestions. If the inline menu is off, enable it in Bitwarden's
+stays headless. While the chat has browser tabs, use **Open Bitwarden** in the browser viewer to
+sign in or unlock. Bitwarden owns its vault and save prompts; to select a saved login on a site,
+use Bitwarden's inline suggestions. If the inline menu is off, enable it in Bitwarden's
 autofill settings. Disabling the extension takes effect on restart and does not delete its
 profile data. Device approval is a sign-in option, not an unlock method for a locked vault.
 

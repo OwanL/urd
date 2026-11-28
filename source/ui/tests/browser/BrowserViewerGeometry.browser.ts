@@ -55,6 +55,27 @@ void test("Bitwarden opens from the keyboard and returns to the selected browser
   }
 });
 
+void test("the browser launcher disappears when the last tab closes, even with Bitwarden", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${server.resolvedUrls!.local[0]}geometry-test#bitwarden`);
+    const join = page.getByRole("button", { name: "Join browser" });
+    await join.click();
+    await page.getByRole("tab", { name: "Example" }).waitFor();
+
+    await page.evaluate(() => (location.hash = "bitwarden-empty"));
+    await page.getByRole("tab", { name: "Example" }).waitFor({ state: "detached" });
+    assert.equal(await page.locator(".browser-launcher").count(), 0);
+    assert.equal(await page.locator(".browser-viewer-panel").count(), 0);
+
+    await page.evaluate(() => (location.hash = "bitwarden"));
+    await join.waitFor();
+    assert.equal(await page.locator(".browser-viewer-panel").count(), 0);
+  } finally {
+    await page.close();
+  }
+});
+
 async function rect(page: Page, selector: string): Promise<Rect> {
   const box = await page.locator(selector).boundingBox();
   assert.ok(box, `${selector} is visible`);

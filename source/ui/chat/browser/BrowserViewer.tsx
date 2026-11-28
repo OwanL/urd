@@ -39,11 +39,13 @@ export function BrowserViewer({
   const trigger = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef<(() => void) | null>(null);
   const panelId = useId();
+  const hasPages = pages.length > 0;
+  const viewerOpen = active && open && hasPages;
   const {
     state: bitwarden,
     close: closeBitwarden,
     toggle: toggleBitwarden,
-  } = useBitwardenPage(sessionId, active && open && bitwardenAvailable);
+  } = useBitwardenPage(sessionId, viewerOpen && bitwardenAvailable);
 
   useEffect(() => {
     if (!active) return;
@@ -58,7 +60,7 @@ export function BrowserViewer({
           ...new Set(nextPages.filter((page) => page.active).map((page) => page.ownerId)),
         ]);
         setReadFailure(null);
-        if (!nextPages.length && !result.bitwarden) setOpen(false);
+        if (!nextPages.length) setOpen(false);
         setSelectedPageId((current) => {
           if (nextPages.some((page) => page.id === current)) return current;
           return (nextPages.find((page) => page.active) ?? nextPages[0])?.id ?? null;
@@ -102,8 +104,7 @@ export function BrowserViewer({
       : bitwarden?.kind === "failed"
         ? bitwarden.message
         : null;
-  const canOpen = !!selected || bitwardenAvailable;
-  const launcher = canOpen && (
+  const launcher = active && hasPages && (
     <Tooltip
       content={
         <>
@@ -141,7 +142,7 @@ export function BrowserViewer({
       <div class="chat-pane">{children(launcher)}</div>
       <BrowserWindow
         id={panelId}
-        open={active && open && canOpen}
+        open={viewerOpen}
         pages={pages}
         selected={selected}
         showingBitwarden={showingBitwarden}
@@ -182,15 +183,13 @@ export function BrowserViewer({
             {bitwardenNotice}
           </p>
         )}
-        {displayed ? (
+        {displayed && (
           <BrowserPageView
             key={displayed.id}
             sessionId={sessionId}
             page={displayed}
             enabled={active}
           />
-        ) : (
-          !bitwardenNotice && <p class="browser-viewer-notice">No browser pages.</p>
         )}
       </BrowserWindow>
     </>

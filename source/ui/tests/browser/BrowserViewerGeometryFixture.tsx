@@ -1,4 +1,5 @@
 import { render } from "preact";
+import { useEffect, useState } from "preact/hooks";
 import { BrowserViewer } from "../../chat/browser/BrowserViewer.tsx";
 import {
   BrowserPageStream,
@@ -15,16 +16,19 @@ window.fetch = async (_input, init) => {
     init?.method === "POST"
       ? { id: "vault", ownerId: "session", title: "Bitwarden", url: "", active: false }
       : {
-          bitwarden: location.hash === "#bitwarden",
-          pages: [
-            {
-              id: "page",
-              ownerId: "owner",
-              title: "Example",
-              url: "https://example.com",
-              active: true,
-            },
-          ],
+          bitwarden: location.hash.startsWith("#bitwarden"),
+          pages:
+            location.hash === "#bitwarden-empty"
+              ? []
+              : [
+                  {
+                    id: "page",
+                    ownerId: "owner",
+                    title: "Example",
+                    url: "https://example.com",
+                    active: true,
+                  },
+                ],
         };
   return Response.json(body);
 };
@@ -41,31 +45,41 @@ BrowserPageStream.prototype.open = function () {
   image.toBlob((blob) => handlers.frame(blob!));
 };
 
-render(
-  <div style={{ display: "flex", height: "100%" }}>
-    <div class="chat-view">
-      <BrowserViewer
-        sessionId="session"
-        active
-        refresh={0}
-        browserRefresh={0}
-        openRequest={null}
-        onOwnersChange={() => {}}
-        onReturnToQuestion={undefined}
-      >
-        {(launcher) => (
-          <>
-            <div class="transcript-area">
-              <div class="transcript" />
-            </div>
-            <div class="composer">
-              {launcher && <div class="browser-launcher-slot">{launcher}</div>}
-              <textarea class="composer-input" aria-label="Message" />
-            </div>
-          </>
-        )}
-      </BrowserViewer>
+function Fixture() {
+  const [browserRefresh, setBrowserRefresh] = useState(0);
+  useEffect(() => {
+    const refresh = () => setBrowserRefresh((count) => count + 1);
+    window.addEventListener("hashchange", refresh);
+    return () => window.removeEventListener("hashchange", refresh);
+  }, []);
+
+  return (
+    <div style={{ display: "flex", height: "100%" }}>
+      <div class="chat-view">
+        <BrowserViewer
+          sessionId="session"
+          active
+          refresh={0}
+          browserRefresh={browserRefresh}
+          openRequest={null}
+          onOwnersChange={() => {}}
+          onReturnToQuestion={undefined}
+        >
+          {(launcher) => (
+            <>
+              <div class="transcript-area">
+                <div class="transcript" />
+              </div>
+              <div class="composer">
+                {launcher && <div class="browser-launcher-slot">{launcher}</div>}
+                <textarea class="composer-input" aria-label="Message" />
+              </div>
+            </>
+          )}
+        </BrowserViewer>
+      </div>
     </div>
-  </div>,
-  document.body,
-);
+  );
+}
+
+render(<Fixture />, document.body);

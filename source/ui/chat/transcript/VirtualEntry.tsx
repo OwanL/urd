@@ -37,6 +37,7 @@ function EntryRow({
   subagent,
   rank,
   top,
+  measurementEpoch,
   motion,
   enter,
   root,
@@ -73,6 +74,7 @@ function EntryRow({
       subagent?: never;
       rank?: never;
       top?: never;
+      measurementEpoch?: never;
     }
   | {
       draftRow?: never;
@@ -81,6 +83,7 @@ function EntryRow({
       subagent: SubagentRowPresentation | undefined;
       rank: number;
       top: number;
+      measurementEpoch: number;
     }
 )) {
   const row = useRef<HTMLDivElement>(null);
@@ -113,7 +116,7 @@ function EntryRow({
     observer.observe(element);
     update();
     return () => observer.disconnect();
-  }, [descriptor, rank, onMeasure]);
+  }, [descriptor, rank, onMeasure, measurementEpoch]);
 
   const { text, images } = descriptor
     ? transcriptMessageContent(descriptor)

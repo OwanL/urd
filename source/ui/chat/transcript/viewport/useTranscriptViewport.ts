@@ -63,6 +63,7 @@ export function useTranscriptViewport({
   const positionWindowRef = useRef<TranscriptPositionWindow | null>(null);
   const viewport = useRef<TranscriptViewportModel | null>(null);
   const [modelVersion, setModelVersion] = useState(0);
+  const measurementEpoch = useRef(0);
   const [, setScrollVersion] = useState(0);
   const [documentInactive, setDocumentInactive] = useState(() => document.hidden);
   const {
@@ -234,6 +235,8 @@ export function useTranscriptViewport({
       if (target !== null) onProgrammaticScroll(target);
       if (width <= 0 || model.snapshot().width === width) return;
       const adjustment = resizeViewport(model, width);
+      // Width invalidates measured heights even for rows that do not rewrap.
+      measurementEpoch.current++;
       scrollAdjustment.current = adjustment === 0 ? null : adjustment;
       setModelVersion((value) => value + 1);
       saveCurrentState();
@@ -464,6 +467,7 @@ export function useTranscriptViewport({
     rememberScroll,
     rows,
     paused: !visible || documentInactive,
+    measurementEpoch: measurementEpoch.current,
     onMeasure,
     ...rowSources,
     tailTop: topPadding + estimatedHeight,

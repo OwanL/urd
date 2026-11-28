@@ -56,6 +56,7 @@ export function VirtualTranscript({
     rememberScroll,
     rows,
     paused,
+    measurementEpoch,
     onMeasure,
     onSourceCapture,
     onSourceRestore,
@@ -137,6 +138,7 @@ export function VirtualTranscript({
                   key={key}
                   {...entryProps}
                   {...row}
+                  measurementEpoch={measurementEpoch}
                   enter={Boolean(row.descriptor.tool) && enterDurable(row.rank - liveWindowStart)}
                 />
               ))}

@@ -42,6 +42,34 @@ public sealed class ProviderManagerTests {
   }
 
   [Fact]
+  public async Task CatalogReadsEnrichReferencePricesWithoutSavingThem() {
+    using var database = new TemporaryDatabase();
+    using UrdStore store = UrdStore.Open(database.Path);
+    using var handler = new ScriptedOpenAIHandler("""
+        {"object":"list","data":[{"id":"gpt-6.2-sol","object":"model","created":1700000000,"owned_by":"openai"},
+        {"id":"unknown-fixture","object":"model","created":1700000000,"owned_by":"openai"}]}
+        """);
+    var manager = Manager(store, handler);
+    try {
+      ProviderConnection connection = await manager.AddOpenAIAsync("OpenAI");
+      await manager.SetApiKeyAsync(connection, "synthetic-key");
+      ProviderModelCatalog refreshed = await manager.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout);
+      ProviderModelPrice price = Assert.IsType<ProviderModelPrice>(refreshed.Models.Single(model => model.Id == "gpt-6.2-sol").Price);
+      Assert.Equal((2m, 10m), (price.InputPerMillion, price.OutputPerMillion));
+      Assert.Contains("#openai/gpt-6.2-sol", price.Source);
+      Assert.NotEqual(default, price.CapturedAt);
+      Assert.Null(refreshed.Models.Single(model => model.Id == "unknown-fixture").Price);
+
+      ProviderModelCatalog cached = await manager.GetModelCatalogAsync(connection.Id);
+      Assert.Equal(price, cached.Models.Single(model => model.Id == "gpt-6.2-sol").Price);
+      Assert.Null(cached.Models.Single(model => model.Id == "unknown-fixture").Price);
+      Assert.All(store.Providers.Get(connection.Id).Catalog!.Models, model => Assert.Null(model.Price));
+    } finally {
+      await CloseAsync(manager);
+    }
+  }
+
+  [Fact]
   public async Task CredentialChangeJoinsCatalogCleanupAndLateResponseCannotRepopulateIt() {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);

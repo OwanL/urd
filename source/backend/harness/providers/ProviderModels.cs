@@ -1,8 +1,13 @@
 namespace Urd.Core.Providers;
 
-// Provider-supplied catalog metadata; absent options remain unknown.
+// Provider-supplied catalog metadata, enriched with reference prices on reads.
 public sealed record ProviderModel(string Id, string Name, int? ContextWindow = null,
-    LlmApi? Api = null, int? MaxOutputTokens = null, IReadOnlyList<string>? ReasoningEfforts = null);
+    LlmApi? Api = null, int? MaxOutputTokens = null, IReadOnlyList<string>? ReasoningEfforts = null,
+    ProviderModelPrice? Price = null);
+
+// Reference API rates per million tokens, not a statement of subscription billing.
+public sealed record ProviderModelPrice(decimal? InputPerMillion, decimal? OutputPerMillion,
+    string Source, DateTimeOffset CapturedAt);
 
 // The last successfully fetched catalog; a null timestamp means it has never been fetched.
 public sealed record ProviderModelCatalog(

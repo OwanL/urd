@@ -12,6 +12,7 @@ namespace Urd.Core.Providers;
 public sealed class ProviderManager : IDisposable {
   private static readonly Uri OpenAIEndpoint = new("https://api.openai.com/v1/");
   private readonly ProviderStorage storage;
+  private readonly ModelPriceCatalog? prices;
   private readonly ModelSettingsStorage modelSettings;
   private readonly AsyncLock gate = new();
   private readonly HttpMessageHandler handler;
@@ -44,6 +45,7 @@ public sealed class ProviderManager : IDisposable {
     ArgumentNullException.ThrowIfNull(callbackUri);
     ArgumentNullException.ThrowIfNull(handler);
     storage = store.Providers;
+    this.prices = prices;
     modelSettings = store.ModelSettings;
     this.handler = handler;
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
@@ -197,7 +199,8 @@ public sealed class ProviderManager : IDisposable {
       Guid connectionId, CancellationToken cancellationToken = default) {
     using var held = await gate.AcquireAsync(cancellationToken);
     ObjectDisposedException.ThrowIf(disposed, this);
-    return storage.Get(connectionId).Catalog ?? new(connectionId, null, []);
+    ProviderState state = storage.Get(connectionId);
+    return EnrichCatalog(state.Connection, state.Catalog ?? new(connectionId, null, []));
   }
 
   public async Task<BucketSuggestions> GetBucketSuggestionsAsync(Guid connectionId, PreferenceManager preferences,
@@ -283,8 +286,16 @@ public sealed class ProviderManager : IDisposable {
         RequireCurrentGrant(state);
         if (!storage.SaveCatalog(connectionId, state.Generation, catalog))
           throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
-        return catalog;
+        return EnrichCatalog(state.Connection, catalog);
       }, cancellationToken);
+
+  private ProviderModelCatalog EnrichCatalog(ProviderConnection connection, ProviderModelCatalog catalog) =>
+      catalog with { Models = catalog.Models.Select(model => {
+        UsageRates? rates = prices is null
+            ? ModelPriceCatalog.Bundled.FindRates(connection, model.Id)
+            : prices.FindRates(connection, model.Id);
+        return model with { Price = rates is null ? null : new(rates.Input, rates.Output, rates.Source, rates.CapturedAt) };
+      }).ToArray() };
 
   public Task<ProviderModelTestResult> TestModelAsync(Guid connectionId, string modelId,
       CancellationToken cancellationToken = default) {

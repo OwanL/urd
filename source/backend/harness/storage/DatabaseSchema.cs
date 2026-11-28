@@ -4,7 +4,7 @@ namespace Urd.Core.Storage;
 
 // Creates or upgrades the durable schema before storage is opened to callers.
 internal static class DatabaseSchema {
-  private const int SchemaVersion = 49;
+  private const int SchemaVersion = 50;
 
   private const string SnoozedSessionsIndex = """
       CREATE INDEX sessions_snoozed_until ON sessions(snoozed_until_ms) WHERE snoozed_until_ms IS NOT NULL;
@@ -124,6 +124,13 @@ internal static class DatabaseSchema {
 
   private const string SessionTreeIndex = "CREATE INDEX sessions_children ON sessions(parent_session_id);";
 
+  // Avoid scanning unrelated history for each request deleted during chat closure.
+  private const string RequestReferenceIndexes = """
+      CREATE INDEX execution_tool_completions_claimed_request
+          ON execution_tool_completions(claimed_request_id) WHERE claimed_request_id IS NOT NULL;
+      CREATE INDEX session_compactions_first_kept_request ON session_compactions(first_kept_request_id);
+      """;
+
   private const string QueuedAfterCompactionColumn = """
       queued_after_compaction TEXT REFERENCES execution_runs(run_id)
           CHECK (queued_after_compaction IS NULL OR (kind = 0 AND working_started_at IS NULL))
@@ -218,7 +225,8 @@ internal static class DatabaseSchema {
     [48] = ["""
         ALTER TABLE model_settings ADD COLUMN family_explicit INTEGER NOT NULL DEFAULT 1
             CHECK (family_explicit IN (0, 1));
-        """]
+        """],
+    [49] = [RequestReferenceIndexes]
   };
 
   internal static void Initialize(SqliteConnection connection) {
@@ -660,6 +668,7 @@ internal static class DatabaseSchema {
           summary TEXT NOT NULL
       ) STRICT;
       CREATE INDEX session_compactions_latest ON session_compactions(session_id, history_revision, ordinal DESC);
+      {{RequestReferenceIndexes}}
       CREATE TABLE provider_connections (
           connection_id TEXT PRIMARY KEY NOT NULL,
           name TEXT NOT NULL,

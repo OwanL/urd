@@ -1,12 +1,11 @@
 # Subagent rows
 
-[Interactive mockup](index.html) · [Wide comparison](preview.png) · [Narrow view with cost breakdown](narrow.png)
+[Interactive mockup](index.html) · [Wide and narrow panes](preview.png) · [Narrow pane with cost breakdown](narrow.png)
 
-**Recommendation: A, aligned metrics.** On wide panes, align the model, elapsed
-time, and total cost so adjacent rows are easy to compare. When space runs out,
-move the same metadata below the title. **B** does that at every width: it gives
-long titles more room, but takes more vertical space in a batch. In both layouts,
-keep the existing title navigation and report below the row.
+Keep the title, model, elapsed time, and total cost on one line at every width.
+Align the metrics across rows. In a narrow pane, use shorter model labels and
+truncate long titles rather than wrapping the row or hiding elapsed time or cost.
+Open the subagent from its title to read the report; don’t add an inline preview.
 
 ## What the numbers mean
 

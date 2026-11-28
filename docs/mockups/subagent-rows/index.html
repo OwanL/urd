@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Urd · Subagent row mockups</title>
+  <title>Urd · Single-line subagent rows</title>
   <style>
     :root {
       color-scheme: dark;
@@ -31,14 +31,13 @@
     .intro { margin-bottom: 27px; }
     .eyebrow { margin-bottom: 5px; color: var(--text-secondary); font-size: 11px; }
     h1 { margin-bottom: 4px; font-size: 27px; font-weight: 620; line-height: 1.3; }
-    .intro p, .option-label p, .footnote { color: var(--text-secondary); }
-    .options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
-    .option { min-width: 0; container-type: inline-size; }
-    .option-label { margin-bottom: 10px; }
-    .option-label h2 { font-size: 14px; font-weight: 600; }
-    .option-label p { font-size: 12px; }
+    .intro p, .footnote { color: var(--text-secondary); }
+    .panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 360px); gap: 22px; }
+    .pane { display: flex; flex-direction: column; min-width: 0; container-type: inline-size; }
+    .pane h2 { margin-bottom: 10px; font-size: 14px; font-weight: 600; }
     .transcript {
-      min-height: 323px;
+      flex: 1;
+      min-height: 240px;
       padding: 20px;
       border: 1px solid var(--border-subtle);
       border-radius: 9px;
@@ -56,31 +55,24 @@
     .assistant { margin-bottom: 15px; }
     .list-heading { margin-bottom: 2px; color: var(--text-secondary); font-size: 12px; font-weight: 500; }
     .rows { padding: 0; list-style-type: none; }
-    .row { margin-bottom: 3px; }
-    .row:last-child { margin-bottom: 0; }
-    .row-header { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 115px 50px 69px;
+      align-items: center;
+      gap: 10px;
+      min-height: 32px;
+    }
     .row-title {
-      display: inline-flex;
+      display: flex;
       align-items: center;
       gap: 3px;
       min-width: 0;
-      min-height: 28px;
       padding-left: 4px;
     }
-    .row-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .row-title .icon { color: var(--text-secondary); }
-    .metrics {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 57px 79px;
-      align-items: baseline;
-      gap: 7px;
-      flex: 0 0 253px;
-      margin-left: auto;
-      color: var(--text-secondary);
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    .model { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .row-title span, .model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .row-title .icon, .model, .elapsed, .cost { color: var(--text-secondary); }
+    .model, .elapsed, .cost { font-size: 12px; white-space: nowrap; }
+    .model-short { display: none; }
     .elapsed { text-align: right; }
     .elapsed, .amount { font-variant-numeric: tabular-nums; }
     .elapsed .icon { margin-right: 3px; vertical-align: -2px; }
@@ -88,18 +80,12 @@
     .cost-button, .cost-missing { display: inline-flex; align-items: center; gap: 3px; min-height: 28px; padding: 0 5px; }
     .cost-button { border: 0; border-radius: 4px; background: transparent; cursor: pointer; }
     .cost-button:hover, .cost-button[aria-expanded="true"] { background: var(--surface-hover); color: var(--text-primary); }
-    .report {
-      margin: 1px 0 6px 4px;
-      padding-left: 9px;
-      border-left: 1px solid var(--border-subtle);
-      color: var(--text-secondary);
-    }
     .cost-detail {
       position: absolute;
       z-index: 1;
-      inset: calc(100% + 3px) 0 auto auto;
+      inset: auto 0 calc(100% + 3px) auto;
       width: 224px;
-      max-width: calc(100cqi - 40px);
+      max-width: calc(100cqi - 30px);
       padding: 9px 11px;
       border: 1px solid var(--border-subtle);
       border-radius: 7px;
@@ -113,33 +99,19 @@
     .cost-total { margin-top: 5px; padding-top: 5px; border-top: 1px solid var(--border-subtle); color: var(--text-primary); }
     .footnote { margin-top: 14px; font-size: 12px; }
 
-    .compact .row-title { flex: 1 1 auto; }
-    .stacked .row-header { display: grid; gap: 0; }
-    .stacked .row-title { justify-self: start; max-width: 100%; }
-    .stacked .metrics { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: -4px 0 0 4px; }
-    .stacked .metrics > :not(:first-child)::before { content: "·"; margin-right: 8px; }
-    .stacked .cost-button, .stacked .cost-missing { margin-left: -3px; }
-    .stacked .row { position: relative; margin-bottom: 5px; }
-    .stacked .cost { position: static; }
-    .stacked .cost-detail { inset: 51px auto auto 4px; }
-
     @container (max-width: 485px) {
-      .compact .row-header { display: grid; gap: 0; }
-      .compact .row-title { justify-self: start; max-width: 100%; }
-      .compact .metrics { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin: -4px 0 0 4px; }
-      .compact .metrics > :not(:first-child)::before { content: "·"; margin-right: 8px; }
-      .compact .cost-button, .compact .cost-missing { margin-left: -3px; }
-      .compact .row { position: relative; margin-bottom: 5px; }
-      .compact .cost { position: static; }
-      .compact .cost-detail { inset: 51px auto auto 4px; }
+      .transcript { padding: 14px; }
+      .row { grid-template-columns: minmax(0, 1fr) 74px 42px 64px; gap: 6px; }
+      .model-full { display: none; }
+      .model-short { display: inline; }
     }
-    @media (max-width: 1060px) {
+    @media (max-width: 850px) {
       .board { max-width: 700px; }
-      .options { grid-template-columns: minmax(0, 1fr); }
+      .panes { grid-template-columns: minmax(0, 1fr); }
+      .narrow { width: min(100%, 360px); }
     }
     @media (max-width: 550px) {
       .board { padding: 25px 15px; }
-      .transcript { padding: 14px; }
     }
   </style>
 </head>
@@ -159,24 +131,18 @@
   <main class="board">
     <header class="intro">
       <p class="eyebrow">Urd / Transcript</p>
-      <h1>Subagent rows</h1>
-      <p>Model, elapsed time, and total cost without opening the subagent.</p>
+      <h1>Single-line subagent rows</h1>
+      <p>Title, model, elapsed time, and total cost stay on one line.</p>
     </header>
 
-    <div class="options">
-      <section class="option compact" aria-labelledby="compact-label">
-        <header class="option-label">
-          <h2 id="compact-label">A · Aligned metrics</h2>
-          <p>Faster to scan across a batch. Stacks when space runs out.</p>
-        </header>
-        <div class="transcript" data-preview="a"></div>
+    <div class="panes">
+      <section class="pane" aria-labelledby="wide-label">
+        <h2 id="wide-label">Wide pane</h2>
+        <div class="transcript" data-preview="wide"></div>
       </section>
-      <section class="option stacked" aria-labelledby="stacked-label">
-        <header class="option-label">
-          <h2 id="stacked-label">B · Below the title</h2>
-          <p>More room for titles, with the same layout at every width.</p>
-        </header>
-        <div class="transcript" data-preview="b"></div>
+      <section class="pane narrow" aria-labelledby="narrow-label">
+        <h2 id="narrow-label">Narrow pane</h2>
+        <div class="transcript" data-preview="narrow"></div>
       </section>
     </div>
     <p class="footnote">Select a cost to see the breakdown. Values are illustrative.</p>
@@ -188,60 +154,49 @@
     <h3 class="list-heading">Subagents</h3>
     <ul class="rows">
       <li class="row">
-        <div class="row-header">
-          <div class="row-title" title="Trace scroll anchoring">
-            <span>Trace scroll anchoring</span><svg class="icon" aria-hidden="true"><use href="#chevron"/></svg>
-          </div>
-          <div class="metrics">
-            <span class="model" title="Claude Sonnet 4.6">Claude Sonnet 4.6</span>
-            <span class="elapsed" title="1 minute 18 seconds elapsed"><time datetime="PT1M18S">1:18</time></span>
-            <span class="cost">
-              <button class="cost-button" type="button" aria-expanded="false" aria-label="Scroll anchoring cost: $0.084 including descendants">
-                <svg class="icon" aria-hidden="true"><use href="#layers"/></svg><span class="amount">$0.084</span>
-              </button>
-              <span class="cost-detail" hidden>
-                <span class="cost-heading">Cost breakdown</span>
-                <span class="cost-line"><span>This subagent</span><span class="amount">$0.031</span></span>
-                <span class="cost-line"><span>Nested subagents</span><span class="amount">$0.053</span></span>
-                <span class="cost-line cost-total"><span>Total</span><span class="amount">$0.084</span></span>
-              </span>
-            </span>
-          </div>
-        </div>
-        <p class="report">Appending tool results preserves the reading position.</p>
+        <span class="row-title" title="Scroll anchoring">
+          <span>Scroll anchoring</span><svg class="icon" aria-hidden="true"><use href="#chevron"/></svg>
+        </span>
+        <span class="model" title="Claude Sonnet 4.6">
+          <span class="model-full">Claude Sonnet 4.6</span><span class="model-short">Sonnet 4.6</span>
+        </span>
+        <span class="elapsed" title="1 minute 18 seconds elapsed"><time datetime="PT1M18S">1:18</time></span>
+        <span class="cost">
+          <button class="cost-button" type="button" aria-expanded="false" aria-label="Scroll anchoring cost: $0.084 including descendants">
+            <svg class="icon" aria-hidden="true"><use href="#layers"/></svg><span class="amount">$0.084</span>
+          </button>
+          <span class="cost-detail" hidden>
+            <span class="cost-heading">Cost breakdown</span>
+            <span class="cost-line"><span>This subagent</span><span class="amount">$0.031</span></span>
+            <span class="cost-line"><span>Nested subagents</span><span class="amount">$0.053</span></span>
+            <span class="cost-line cost-total"><span>Total</span><span class="amount">$0.084</span></span>
+          </span>
+        </span>
       </li>
       <li class="row">
-        <div class="row-header">
-          <div class="row-title" title="Review keyboard and focus behavior">
-            <span>Review keyboard and focus behavior</span><svg class="icon" aria-hidden="true"><use href="#chevron"/></svg>
-          </div>
-          <div class="metrics">
-            <span class="model" title="GPT-5.4 Mini">GPT-5.4 Mini</span>
-            <span class="elapsed" title="Running · 24 seconds elapsed"><svg class="icon" aria-hidden="true"><use href="#running"/></svg><time datetime="PT24S" aria-label="Running, 24 seconds elapsed">0:24</time></span>
-            <span class="cost">
-              <button class="cost-button" type="button" aria-expanded="false" aria-label="Keyboard and focus review cost so far: $0.012">
-                <span class="amount">$0.012</span>
-              </button>
-              <span class="cost-detail" hidden>
-                <span class="cost-heading">Cost so far</span>
-                <span class="cost-line"><span>This subagent</span><span class="amount">$0.012</span></span>
-                <span class="cost-line cost-total"><span>Total</span><span class="amount">$0.012</span></span>
-              </span>
-            </span>
-          </div>
-        </div>
+        <span class="row-title" title="Keyboard and focus review">
+          <span>Keyboard and focus review</span><svg class="icon" aria-hidden="true"><use href="#chevron"/></svg>
+        </span>
+        <span class="model" title="GPT-5.4 Mini">GPT-5.4 Mini</span>
+        <span class="elapsed" title="Running · 24 seconds elapsed"><svg class="icon" aria-hidden="true"><use href="#running"/></svg><time datetime="PT24S" aria-label="Running, 24 seconds elapsed">0:24</time></span>
+        <span class="cost">
+          <button class="cost-button" type="button" aria-expanded="false" aria-label="Keyboard and focus review cost so far: $0.012">
+            <span class="amount">$0.012</span>
+          </button>
+          <span class="cost-detail" hidden>
+            <span class="cost-heading">Cost so far</span>
+            <span class="cost-line"><span>This subagent</span><span class="amount">$0.012</span></span>
+            <span class="cost-line cost-total"><span>Total</span><span class="amount">$0.012</span></span>
+          </span>
+        </span>
       </li>
       <li class="row">
-        <div class="row-header">
-          <div class="row-title" title="Run transcript tests">
-            <span>Run transcript tests</span>
-          </div>
-          <div class="metrics">
-            <span class="model" title="Claude Haiku 4.5">Claude Haiku 4.5</span>
-            <span class="elapsed" title="Not started">Queued</span>
-            <span class="cost"><span class="cost-missing" title="Cost not available">—</span></span>
-          </div>
-        </div>
+        <span class="row-title" title="Transcript tests"><span>Transcript tests</span></span>
+        <span class="model" title="Claude Haiku 4.5">
+          <span class="model-full">Claude Haiku 4.5</span><span class="model-short">Haiku 4.5</span>
+        </span>
+        <span class="elapsed" title="Not started">Queued</span>
+        <span class="cost"><span class="cost-missing" title="Cost not available">—</span></span>
       </li>
     </ul>
   </template>

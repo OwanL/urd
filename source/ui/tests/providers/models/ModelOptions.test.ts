@@ -39,6 +39,38 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+void test("picker labels both OpenAI routes without using their saved hostname", async () => {
+  const chatGpt: ProviderConnection = {
+    ...secondConnection,
+    name: "api.openai.com",
+    route: "chatGpt",
+    endpoint: "https://api.openai.com/v1/",
+    authentication: "oAuth",
+  };
+  const openAI: ProviderConnection = {
+    ...chatGpt,
+    id: "10000000-0000-0000-0000-000000000003",
+    route: "openAI",
+    authentication: "apiKey",
+  };
+  const models = new ModelOptions({
+    listAvailable: async () => [firstConnection, chatGpt, openAI],
+    getModels: async (id) => catalog(id, "model", "Model"),
+    getModelSettings: async () => [],
+    getCredentials: async () => assert.fail("cached reads should not check credentials"),
+    refreshModels: async () => assert.fail("cached reads should not refresh models"),
+  });
+  const result = await models.readCached(new AbortController().signal);
+  assert.deepEqual(
+    result.options?.map(({ providerLabel, selection }) => [providerLabel, selection.connection]),
+    [
+      [firstConnection.name, firstConnection],
+      ["OpenAI", chatGpt],
+      ["OpenAI", openAI],
+    ],
+  );
+});
+
 void test("automatic discovery skips signed-out providers without losing cached options", async () => {
   const signedOut: ProviderConnection = {
     ...secondConnection,

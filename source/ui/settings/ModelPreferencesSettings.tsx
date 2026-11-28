@@ -13,6 +13,7 @@ import type {
   ModelChoice,
 } from "../preferences/PreferencesClient.ts";
 import type { ProviderClient } from "../providers/ProviderClient.ts";
+import { providerLabel } from "../providers/ProviderLabel.ts";
 
 const buckets: readonly ModelBucket[] = ["small", "medium", "large"];
 const emptyBucket: readonly ConfiguredModel[] = [];
@@ -31,7 +32,7 @@ const purposeNames: Record<AuxiliaryModelPurpose, string> = {
 
 interface CachedModels {
   readonly options: readonly ModelOption[];
-  readonly providers: readonly { readonly id: string; readonly name: string }[];
+  readonly providers: readonly { readonly id: string; readonly label: string }[];
   readonly loading: boolean;
   readonly loaded: boolean;
   readonly error: string | null;
@@ -68,7 +69,10 @@ export function ModelPreferencesSettings({
         if (readAbort.current !== abort || abort.signal.aborted) return;
         setCatalog({
           options: result.options ?? [],
-          providers: (result.providers ?? []).map(({ id, name }) => ({ id, name })),
+          providers: (result.providers ?? []).map((connection) => ({
+            id: connection.id,
+            label: providerLabel(connection),
+          })),
           loading: false,
           loaded: result.options !== null,
           error: result.error ? "Saved model catalogs could not all be read." : null,
@@ -104,7 +108,7 @@ export function ModelPreferencesSettings({
     const option = modelByKey.get(modelKey(model));
     if (option) return `${option.providerLabel} · ${option.modelLabel}`;
     const provider = catalog.providers.find(({ id }) => id === model.connectionId);
-    const identity = `${provider?.name ?? model.connectionId} · ${model.modelId}`;
+    const identity = `${provider?.label ?? model.connectionId} · ${model.modelId}`;
     if (!catalog.loaded && !catalog.error)
       return `${catalog.loading ? "Checking saved catalog" : "Saved model"} · ${identity}`;
     if (catalog.error) return `Catalog unavailable · ${identity}`;
@@ -129,7 +133,7 @@ export function ModelPreferencesSettings({
         connectionId: saved.connectionId,
         modelId: saved.modelId,
         modelLabel: `${saved.modelId} (unavailable)`,
-        providerLabel: provider?.name ?? saved.connectionId,
+        providerLabel: provider?.label ?? saved.connectionId,
         inputPrice: null,
         outputPrice: null,
         priceSource: null,

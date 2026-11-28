@@ -1,8 +1,9 @@
 import { Icon } from "../../controls/Icon.tsx";
 import type { ProviderConnection } from "../ProviderConnection.ts";
+import { providerLabel } from "../ProviderLabel.ts";
 import type { ProviderChoice } from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
-import { connectionStatus, connectionTitle } from "./ProviderSettingsPresentation.ts";
+import { connectionStatus } from "./ProviderSettingsPresentation.ts";
 
 const choices = [
   {
@@ -87,7 +88,7 @@ export function ProviderChooser({
                     disabled={!canNavigate}
                     onClick={() => onOpenConnection(item, true)}
                   >
-                    <strong>{connectionTitle(item)}</strong>
+                    <strong>{providerLabel(item)}</strong>
                     <span class="provider-settings-secondary">{connectionStatus(state, item)}</span>
                     <Icon name="chevron" />
                   </button>
@@ -95,7 +96,7 @@ export function ProviderChooser({
                     type="button"
                     class="provider-settings-remove-setup provider-settings-danger"
                     disabled={!canEdit}
-                    aria-label={`Remove saved setup for ${connectionTitle(item)}`}
+                    aria-label={`Remove saved setup for ${providerLabel(item)}`}
                     onClick={() => onRemoveConnection(item)}
                   >
                     Remove

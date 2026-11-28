@@ -2,6 +2,7 @@ import "./provider-settings.css";
 import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
 import type { ProviderConnection } from "../ProviderConnection.ts";
+import { providerLabel } from "../ProviderLabel.ts";
 import { ConnectionForm } from "./ConnectionForm.tsx";
 import { ProviderBucketSuggestions } from "./ProviderBucketSuggestions.tsx";
 import { ProviderChooser } from "./ProviderChooser.tsx";
@@ -9,7 +10,7 @@ import { ProviderConnectionConfirmation } from "./ProviderConnectionConfirmation
 import { ProviderConnectionDetail } from "./ProviderConnectionDetail.tsx";
 import { ProviderSettingsFeedback } from "./ProviderSettingsFeedback.tsx";
 import { ProviderSettingsOverview, type ProviderSearch } from "./ProviderSettingsOverview.tsx";
-import { connectionStatus, connectionTitle } from "./ProviderSettingsPresentation.ts";
+import { connectionStatus } from "./ProviderSettingsPresentation.ts";
 import { matchesConnection, providerSetupState } from "./ProviderConnectionStatus.ts";
 import type { ProviderChoice } from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
@@ -185,7 +186,7 @@ export function ProviderSettings({
                     ? "Ollama"
                     : "Custom provider"
                   : connection
-                    ? connectionTitle(connection)
+                    ? providerLabel(connection)
                     : "Provider unavailable"}
             </h3>
             {connection && (

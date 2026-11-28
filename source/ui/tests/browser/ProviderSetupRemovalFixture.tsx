@@ -8,7 +8,7 @@ import type { ProviderSettingsState } from "../../providers/settings/useProvider
 
 const unfinished: ProviderConnection = {
   id: "unfinished-openai",
-  name: "OpenAI",
+  name: "api.openai.com",
   route: "openAI",
   api: "openAIResponses",
   endpoint: "https://api.openai.com/v1",

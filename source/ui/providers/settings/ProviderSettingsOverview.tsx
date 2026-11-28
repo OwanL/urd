@@ -2,8 +2,9 @@ import "./provider-settings-overview.css";
 import type { RefObject } from "preact";
 import { Icon } from "../../controls/Icon.tsx";
 import type { ProviderConnection } from "../ProviderConnection.ts";
+import { providerLabel } from "../ProviderLabel.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
-import { connectionAttention, connectionTitle } from "./ProviderSettingsPresentation.ts";
+import { connectionAttention } from "./ProviderSettingsPresentation.ts";
 
 export interface ProviderSearch {
   value: string;
@@ -90,7 +91,7 @@ export function ProviderSettingsOverview({
                 disabled={!canNavigate}
                 onClick={() => onOpenConnection(item)}
               >
-                <strong>{connectionTitle(item)}</strong>
+                <strong>{providerLabel(item)}</strong>
                 {attention && <span class="provider-settings-secondary">{attention}</span>}
                 <Icon name="chevron" />
               </button>

@@ -1,4 +1,5 @@
 import type { ProviderConnection } from "../ProviderConnection.ts";
+import { providerLabel } from "../ProviderLabel.ts";
 import { toggleSubagentProvider } from "./SubagentProviderSelection.ts";
 import type { SubagentProviderConnectionIds } from "./SubagentProviderSelection.ts";
 import "./subagent-providers.css";
@@ -42,7 +43,9 @@ export function SubagentProviderFields({
         />
       </div>
       {connections.length === 0 && <p>No provider connections.</p>}
-      {connections.map(({ id, name }) => checkbox(id, name, explicit?.has(id) ?? true))}
+      {connections.map((connection) =>
+        checkbox(connection.id, providerLabel(connection), explicit?.has(connection.id) ?? true),
+      )}
       {unavailable.map((id) => checkbox(id, `Unavailable connection · ${id}`, true))}
     </fieldset>
   );

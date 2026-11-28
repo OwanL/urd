@@ -3,7 +3,7 @@ import { useId } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { ConnectionBindingDraft } from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
-import { providerNames } from "./ProviderSettingsPresentation.ts";
+import { providerLabel } from "../ProviderLabel.ts";
 
 export function ConnectionForm({
   state,
@@ -37,7 +37,7 @@ export function ConnectionForm({
         )}
         {connection && connection.route !== "custom" && (
           <p class="provider-settings-secondary">
-            {providerNames[connection.route]} ·{" "}
+            {providerLabel(connection)} ·{" "}
             {connection.api === "openAIResponses" ? "Responses" : "Chat Completions"}
           </p>
         )}

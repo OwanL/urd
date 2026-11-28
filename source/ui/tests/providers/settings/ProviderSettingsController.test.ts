@@ -4,7 +4,7 @@ import { RequestError } from "../../../http/RequestError.ts";
 import type { ProviderConnection } from "../../../providers/ProviderConnection.ts";
 import type { ProviderCredentialStatus } from "../../../providers/ProviderCredentials.ts";
 import type { ProviderSignIn } from "../../../providers/ProviderSignIn.ts";
-import { connectionTitle } from "../../../providers/settings/ProviderSettingsPresentation.ts";
+import { providerLabel } from "../../../providers/ProviderLabel.ts";
 import {
   connection,
   credential,
@@ -142,7 +142,7 @@ void test("Ollama creates a named, keyless Chat Completions connection with an e
     api: "openAIChatCompletions",
     authentication: "none",
   });
-  assert.equal(connectionTitle(created), "Ollama");
+  assert.equal(providerLabel(created), "Ollama");
   assert.deepEqual(ready, [created.id]);
 });
 

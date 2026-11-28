@@ -1,5 +1,6 @@
 import type { ProviderClient } from "../ProviderClient.ts";
 import type { ProviderConnection } from "../ProviderConnection.ts";
+import { providerLabel } from "../ProviderLabel.ts";
 import type { LlmSelection } from "../LlmSelection.ts";
 import type { ProviderModelCatalog } from "../ProviderModels.ts";
 import type { ModelSettings } from "../ModelSettings.ts";
@@ -206,6 +207,7 @@ function mapModels(
       .filter((setting) => setting.connectionId === connection.id)
       .map((setting) => [setting.modelId, setting] as const),
   );
+  const label = providerLabel(connection);
   const copilot = connection.route === "gitHubCopilot";
   const options: ModelOption[] = [];
   for (const model of catalog.models) {
@@ -218,7 +220,7 @@ function mapModels(
       connectionId: connection.id,
       modelId: model.id,
       modelLabel: model.name,
-      providerLabel: connection.name,
+      providerLabel: label,
       inputPrice: model.price?.inputPerMillion ?? null,
       outputPrice: model.price?.outputPerMillion ?? null,
       priceSource: model.price?.source ?? null,

@@ -1,4 +1,5 @@
 import type { ProviderConnection } from "../ProviderConnection.ts";
+import { providerLabel } from "../ProviderLabel.ts";
 import type { ProviderCredentialStatus } from "../ProviderCredentials.ts";
 import type { ProviderSignIn } from "../ProviderSignIn.ts";
 import type { ProviderCredentialState } from "./ProviderSettingsTypes.ts";
@@ -50,7 +51,7 @@ export function providerSetupState(
 
 export function matchesConnection(connection: ProviderConnection, search: string): boolean {
   const query = search.trim().toLocaleLowerCase();
-  return [connection.name, connection.route, connection.endpoint].some((value) =>
-    value.toLocaleLowerCase().includes(query),
+  return [providerLabel(connection), connection.name, connection.route, connection.endpoint].some(
+    (value) => value.toLocaleLowerCase().includes(query),
   );
 }

@@ -1,4 +1,5 @@
 import type { ProviderConnection } from "../ProviderConnection.ts";
+import { providerLabel } from "../ProviderLabel.ts";
 import { credentialState, providerReady, signInPending } from "./ProviderConnectionStatus.ts";
 import type {
   ProviderCredentialState,
@@ -6,13 +7,6 @@ import type {
   ProviderSettingsOperation,
 } from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
-
-export const providerNames = {
-  chatGpt: "ChatGPT",
-  gitHubCopilot: "GitHub Copilot",
-  openAI: "OpenAI",
-  custom: "Custom",
-} as const;
 
 const copilotConfigurationMessage =
   "GitHub Copilot is not configured for this Urd installation. Ask the installer to set URD_GITHUB_COPILOT_CLIENT_ID and restart Urd.";
@@ -41,10 +35,6 @@ const credentialStateLabels: Record<ProviderCredentialState, string> = {
   planAccessMissing: "Plan access missing",
   connected: "Connected",
 };
-
-export function connectionTitle(connection: ProviderConnection): string {
-  return connection.route === "custom" ? connection.name : providerNames[connection.route];
-}
 
 type ConnectionStatusState = Pick<ProviderSettingsState, "credentials" | "signIns" | "errors">;
 
@@ -115,9 +105,10 @@ export function confirmationText(
   kind: "binding" | "disconnect" | "remove",
   connection: ProviderConnection,
 ): string {
+  const label = providerLabel(connection);
   if (kind === "binding")
-    return `Change connection settings for “${connectionTitle(connection)}”? Saved credentials and models will be cleared, and active requests may stop.`;
+    return `Change connection settings for “${label}”? Saved credentials and models will be cleared, and active requests may stop.`;
   if (kind === "disconnect")
-    return `Disconnect “${connectionTitle(connection)}”? Saved credentials will be cleared and active requests may stop. Urd will also try to revoke remote access where supported.`;
-  return `Remove “${connectionTitle(connection)}” from this device? This deletes its settings and credentials and may stop active requests. Disconnect first if you also want to revoke remote access.`;
+    return `Disconnect “${label}”? Saved credentials will be cleared and active requests may stop. Urd will also try to revoke remote access where supported.`;
+  return `Remove “${label}” from this device? This deletes its settings and credentials and may stop active requests. Disconnect first if you also want to revoke remote access.`;
 }

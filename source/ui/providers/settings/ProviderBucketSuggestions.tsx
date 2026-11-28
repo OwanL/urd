@@ -1,4 +1,5 @@
 import "./provider-bucket-suggestions.css";
+import { providerLabel } from "../ProviderLabel.ts";
 import type { BucketSetup } from "./ProviderSettingsTypes.ts";
 
 export function ProviderBucketSuggestions({
@@ -34,8 +35,8 @@ export function ProviderBucketSuggestions({
         </p>
       ) : (
         <>
-          <p class="provider-settings-secondary" title={setup.proposal.connection.id}>
-            {setup.proposal.connection.name} · {new URL(setup.proposal.connection.endpoint).host}
+          <p class="provider-settings-secondary" title={setup.proposal.connection.endpoint}>
+            {providerLabel(setup.proposal.connection)}
           </p>
           <dl class="provider-settings-bucket-list">
             {setup.proposal.assignments.map(({ bucket, modelId }) => (

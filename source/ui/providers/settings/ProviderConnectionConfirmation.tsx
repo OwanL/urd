@@ -1,3 +1,4 @@
+import { providerLabel } from "../ProviderLabel.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import { confirmationText } from "./ProviderSettingsPresentation.ts";
 
@@ -14,7 +15,7 @@ export function ProviderConnectionConfirmation({
     <div class="provider-settings-confirmation" role="group" aria-label="Confirm connection change">
       <p>
         {incompleteSetup && confirmation.kind === "remove"
-          ? `Remove unfinished setup for “${confirmation.connection.name}”? This deletes its local configuration.`
+          ? `Remove unfinished setup for “${providerLabel(confirmation.connection)}”? This deletes its local configuration.`
           : confirmationText(confirmation.kind, confirmation.connection)}
       </p>
       <div class="provider-settings-actions">

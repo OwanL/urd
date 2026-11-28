@@ -65,6 +65,19 @@ public sealed class PreferenceManager {
     });
   }
 
+  public void SetModelFavorites(IReadOnlyList<ModelFavorite> favorites) {
+    ArgumentNullException.ThrowIfNull(favorites);
+    ModelFavorite[] savedFavorites = favorites.ToArray();
+    var seen = new HashSet<ModelFavorite>();
+    foreach (ModelFavorite favorite in savedFavorites) {
+      if (favorite is null || favorite.ConnectionId == Guid.Empty || string.IsNullOrWhiteSpace(favorite.ModelId))
+        throw new ArgumentException("Favorites must have a connection ID and a nonempty model ID.", nameof(favorites));
+      if (!seen.Add(favorite))
+        throw new ArgumentException("Favorite connection/model pairs must be unique.", nameof(favorites));
+    }
+    store.Preferences.Update(preferences => preferences with { ModelFavorites = savedFavorites });
+  }
+
   internal BucketAssignment[] SuggestBuckets(ProviderModelCatalog catalog) =>
       Suggestions(store.Preferences.Read().ModelChoices, catalog);
 

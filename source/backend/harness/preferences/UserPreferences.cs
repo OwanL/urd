@@ -5,6 +5,7 @@ public sealed record UserPreferences(string? WorkingDirectory, int? CompactionTr
   public int MaxSubagentDepth { get; init; } = DefaultMaxSubagentDepth;
   public bool LanHostingEnabled { get; init; }
   public AuxiliaryModelPreferences ModelChoices { get; init; } = new();
+  public IReadOnlyList<ModelFavorite> ModelFavorites { get; init; } = [];
   // Null allows all available providers; an empty list allows none.
   public IReadOnlyList<Guid>? SubagentProviderConnectionIds { get; init; }
   public ProtectedResourcePreferences ProtectedResources { get; init; } = new();

@@ -243,6 +243,61 @@ public sealed class PreferencesRoutesTests {
   }
 
   [Fact]
+  public async Task ModelFavoritesRouteReplacesOrderedFavoritesAndValidatesInput() {
+    using var database = new TemporaryDatabase();
+    await using var server = new RunningServer(RunningServer.OptionsFor(database));
+    await server.WaitForReadyAsync();
+
+    using HttpResponseMessage provider = await RequestAsync(server.Client, HttpMethod.Post, "/api/providers/custom",
+        JsonBody("""{"name":"Fixture","api":"openAIResponses","endpoint":"https://fixture.invalid/v1/","authentication":"none"}"""));
+    Assert.Equal(HttpStatusCode.Created, provider.StatusCode);
+    Guid connectionId = (await provider.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+    const string path = "/api/preferences/model-favorites";
+
+    using (HttpResponseMessage initial = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences")) {
+      Assert.Equal(HttpStatusCode.OK, initial.StatusCode);
+      Assert.Empty((await initial.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("modelFavorites").EnumerateArray());
+    }
+
+    var first = new { connectionId, modelId = "first-model" };
+    var second = new { connectionId, modelId = "second-model" };
+    using (HttpResponseMessage saved = await RequestAsync(server.Client, HttpMethod.Post, path,
+        JsonBody(JsonSerializer.Serialize(new { favorites = new[] { first, second } })))) {
+      Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+      AssertPrivateResponse(saved);
+      JsonElement preferences = await saved.Content.ReadFromJsonAsync<JsonElement>();
+      JsonElement[] favorites = preferences.GetProperty("modelFavorites").EnumerateArray().ToArray();
+      Assert.Equal(new[] { "first-model", "second-model" },
+          favorites.Select(favorite => favorite.GetProperty("modelId").GetString()));
+      Assert.All(favorites, favorite => Assert.Equal(connectionId, favorite.GetProperty("connectionId").GetGuid()));
+    }
+
+    using (HttpResponseMessage replaced = await RequestAsync(server.Client, HttpMethod.Post, path,
+        JsonBody(JsonSerializer.Serialize(new { favorites = new[] { second } })))) {
+      Assert.Equal(HttpStatusCode.OK, replaced.StatusCode);
+      JsonElement[] favorites = (await replaced.Content.ReadFromJsonAsync<JsonElement>())
+          .GetProperty("modelFavorites").EnumerateArray().ToArray();
+      Assert.Equal("second-model", Assert.Single(favorites).GetProperty("modelId").GetString());
+    }
+
+    foreach (string invalidBody in new[] {
+        "{}",
+        "{\"favorites\":null}",
+        "{\"favorites\":[{\"connectionId\":\"00000000-0000-0000-0000-000000000000\",\"modelId\":\"model\"}]}",
+        JsonSerializer.Serialize(new { favorites = new[] { new { connectionId, modelId = "" } } }),
+        JsonSerializer.Serialize(new { favorites = new[] { first, first } })
+    }) {
+      using HttpResponseMessage invalid = await RequestAsync(server.Client, HttpMethod.Post, path, JsonBody(invalidBody));
+      Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+      AssertPrivateResponse(invalid);
+      using HttpResponseMessage current = await RequestAsync(server.Client, HttpMethod.Get, "/api/preferences");
+      JsonElement[] favorites = (await current.Content.ReadFromJsonAsync<JsonElement>())
+          .GetProperty("modelFavorites").EnumerateArray().ToArray();
+      Assert.Equal("second-model", Assert.Single(favorites).GetProperty("modelId").GetString());
+    }
+  }
+
+  [Fact]
   public async Task SubagentProviderRouteDistinguishesOmittedNullEmptyAndSelectedProviderIds() {
     using var database = new TemporaryDatabase();
     await using var server = new RunningServer(RunningServer.OptionsFor(database));

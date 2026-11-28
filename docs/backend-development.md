@@ -9,7 +9,7 @@ saved-primary-ID discovery, durable Send decisions, safe-boundary steering, addr
 Stop, bounded snapshot/history/content reads, known-not-sent discovery and graceful
 shutdown. The browser workspace is implemented and served as static assets by the Server.
 
-`UrdStore` owns the shared database, currently schema 47. It records whether a request
+`UrdStore` owns the shared database, currently schema 48. It records whether a request
 started sending and pages inputs known not to have been sent, so users can retrieve
 and explicitly resend them. Snapshots stay slim; transcript metadata and
 content use separate bounded reads, and reported usage is persisted per request. Session snapshots
@@ -38,7 +38,8 @@ Schema 41 adds session-owned user images and ordered per-input image references.
 in the profile’s content-addressed image directory, not in SQLite. Schema 46 can reserve one
 conversation execution behind a running manual compaction, while retaining the one-active-run
 constraint. Existing runs remain unchanged. Schema 47 adds the GitHub Copilot connection route,
-preserving saved provider data and dependent model settings. These upgrades do not close existing sessions. The current build
+preserving saved provider data and dependent model settings. Schema 48 adds nullable model favorites
+to preferences without changing existing values. These upgrades do not close existing sessions. The current build
 rejects unsupported versions and does not remove or reset databases. Every later durable schema
 change must register its SQL step in `DatabaseSchema` and bump the version, including for development
 builds. On startup, `DatabaseMigrations` applies required steps and records the new version in one

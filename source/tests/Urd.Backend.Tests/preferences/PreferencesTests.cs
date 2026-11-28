@@ -10,6 +10,39 @@ namespace Urd.Backend.Tests.Preferences;
 
 public sealed class PreferencesTests {
   [Fact]
+  public void ModelFavoritesAreValidatedCopiedAndPersistedInOrder() {
+    using var database = new TemporaryDatabase();
+    var first = new ModelFavorite(Guid.NewGuid(), "missing-model");
+    var second = new ModelFavorite(Guid.NewGuid(), "another-model");
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      var other = new PreferenceManager(store);
+      Assert.Empty(preferences.Read().ModelFavorites);
+      ModelFavorite[] input = [first, second];
+      preferences.SetModelFavorites(input);
+      input[0] = second;
+      Assert.Equal(new[] { first, second }, other.Read().ModelFavorites);
+      var read = (ModelFavorite[])preferences.Read().ModelFavorites;
+      read[0] = second;
+      Assert.Equal(new[] { first, second }, preferences.Read().ModelFavorites);
+      Assert.Throws<ArgumentException>(() => preferences.SetModelFavorites([first, first]));
+      Assert.Throws<ArgumentException>(() => preferences.SetModelFavorites([new(Guid.Empty, "model")]));
+      Assert.Throws<ArgumentException>(() => preferences.SetModelFavorites([new(Guid.NewGuid(), " ")]));
+      Assert.Throws<ArgumentException>(() => preferences.SetModelFavorites([null!]));
+      Assert.Equal(new[] { first, second }, preferences.Read().ModelFavorites);
+    }
+    using (UrdStore store = UrdStore.Open(database.Path)) {
+      var preferences = new PreferenceManager(store);
+      Assert.Equal(new[] { first, second }, preferences.Read().ModelFavorites);
+      preferences.SetModelFavorites([second]);
+      Assert.Equal(new[] { second }, preferences.Read().ModelFavorites);
+      preferences.SetModelFavorites([]);
+    }
+    using UrdStore reopened = UrdStore.Open(database.Path);
+    Assert.Empty(new PreferenceManager(reopened).Read().ModelFavorites);
+  }
+
+  [Fact]
   public void SubagentDepthDefaultsValidatesAndPersists() {
     using var database = new TemporaryDatabase();
     using (UrdStore store = UrdStore.Open(database.Path)) {
@@ -248,11 +281,15 @@ public sealed class PreferencesTests {
     Assert.Throws<ArgumentOutOfRangeException>(() => first.SetCompactionTriggerTokenCount(-1));
     Assert.Equal(4096, second.Read().CompactionTriggerTokenCount);
 
+    var favorite = new ModelFavorite(Guid.NewGuid(), "model");
+    first.SetModelFavorites([favorite]);
     database.Execute("""
       CREATE TRIGGER fail_preferences BEFORE UPDATE ON preferences
       BEGIN SELECT RAISE(ABORT, 'Injected preference write failure'); END;
       """);
     Assert.Throws<SqliteException>(() => first.SetCompactionTriggerTokenCount(8192));
+    Assert.Throws<SqliteException>(() => first.SetModelFavorites([]));
+    Assert.Equal(new[] { favorite }, second.Read().ModelFavorites);
     Assert.Equal(4096, second.Read().CompactionTriggerTokenCount);
     Assert.Equal(directory, second.Read().WorkingDirectory);
     Assert.Equal(4096L, database.Scalar("SELECT compaction_trigger_token_count FROM preferences WHERE singleton = 1;")); // raw-sql: failed write must not persist

@@ -36,9 +36,9 @@ internal sealed class PreferencesStorage(Database database) {
         database.Execute(transaction, """
           INSERT INTO preferences (singleton, working_directory, compaction_trigger_token_count,
               model_choices_json, protected_resources_json, subagent_providers_json, lan_hosting_enabled, source_ignores_json,
-              max_subagent_depth)
+              max_subagent_depth, model_favorites_json)
           VALUES (1, $directory, $compactionTriggerTokenCount, $modelChoices, $protectedResources, $subagentProviders,
-              $lanHostingEnabled, $sourceIgnores, $maxSubagentDepth)
+              $lanHostingEnabled, $sourceIgnores, $maxSubagentDepth, $modelFavorites)
           ON CONFLICT(singleton) DO UPDATE SET
               working_directory = excluded.working_directory,
               compaction_trigger_token_count = excluded.compaction_trigger_token_count,
@@ -47,7 +47,8 @@ internal sealed class PreferencesStorage(Database database) {
               subagent_providers_json = excluded.subagent_providers_json,
               lan_hosting_enabled = excluded.lan_hosting_enabled,
               source_ignores_json = excluded.source_ignores_json,
-              max_subagent_depth = excluded.max_subagent_depth;
+              max_subagent_depth = excluded.max_subagent_depth,
+              model_favorites_json = excluded.model_favorites_json;
           """, ("$directory", updated.WorkingDirectory),
             ("$compactionTriggerTokenCount", updated.CompactionTriggerTokenCount),
             ("$modelChoices", JsonSerializer.Serialize(updated.ModelChoices, JsonOptions)),
@@ -56,7 +57,8 @@ internal sealed class PreferencesStorage(Database database) {
                 ? null : JsonSerializer.Serialize(updated.SubagentProviderConnectionIds, JsonOptions)),
             ("$lanHostingEnabled", updated.LanHostingEnabled),
             ("$sourceIgnores", JsonSerializer.Serialize(updated.SourceIgnores, JsonOptions)),
-            ("$maxSubagentDepth", updated.MaxSubagentDepth));
+            ("$maxSubagentDepth", updated.MaxSubagentDepth),
+            ("$modelFavorites", JsonSerializer.Serialize(updated.ModelFavorites, JsonOptions)));
         return true;
       });
       cachedPreferences = updated;
@@ -70,13 +72,14 @@ internal sealed class PreferencesStorage(Database database) {
 
     UserPreferences persisted = database.Read(transaction => database.QuerySingleOrDefault(transaction, """
         SELECT working_directory, compaction_trigger_token_count, model_choices_json, protected_resources_json,
-            subagent_providers_json, lan_hosting_enabled, source_ignores_json, max_subagent_depth
+            subagent_providers_json, lan_hosting_enabled, source_ignores_json, max_subagent_depth, model_favorites_json
         FROM preferences WHERE singleton = 1;
         """, row => new UserPreferences(row.NullableString("working_directory"),
             row.NullableInt("compaction_trigger_token_count")) {
           LanHostingEnabled = row.Bool("lan_hosting_enabled"),
           MaxSubagentDepth = row.Int("max_subagent_depth"),
           ModelChoices = Deserialize<AuxiliaryModelPreferences>(row.NullableString("model_choices_json")) ?? new(),
+          ModelFavorites = Deserialize<ModelFavorite[]>(row.NullableString("model_favorites_json")) ?? [],
           ProtectedResources = Deserialize<ProtectedResourcePreferences>(row.NullableString("protected_resources_json")) ?? new(),
           SubagentProviderConnectionIds = Deserialize<Guid[]>(row.NullableString("subagent_providers_json")),
           SourceIgnores = DeserializeSourceIgnores(row.NullableString("source_ignores_json"))
@@ -110,6 +113,7 @@ internal sealed class PreferencesStorage(Database database) {
       Medium = preferences.ModelChoices.Medium.ToArray(),
       Large = preferences.ModelChoices.Large.ToArray()
     },
+    ModelFavorites = preferences.ModelFavorites.ToArray(),
     SubagentProviderConnectionIds = preferences.SubagentProviderConnectionIds?.ToArray(),
     ProtectedResources = preferences.ProtectedResources with {
       Tools = preferences.ProtectedResources.Tools.ToArray(),

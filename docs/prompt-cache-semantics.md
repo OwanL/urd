@@ -57,6 +57,15 @@ do not inherit this behavior. The identifier is a provider-facing correlation or
 affinity hint, not authentication, a cache guarantee, a cross-route key or a
 billing entitlement. Do not reuse it across account or project boundaries.
 
+On Copilot’s Anthropic Messages route, conversation requests opt in with ephemeral
+breakpoints on the last tool definition and the last system text block, when present.
+The tools precede the system text in the cache prefix, so an unchanged tool list can
+still be reused if system text changes. Urd does not send a session ID or mark chat
+history, tool results or signed thinking. Auxiliary requests do not opt in.
+[Anthropic documents](https://platform.claude.com/docs/en/build-with-claude/prompt-caching)
+a five-minute default lifetime and model-specific minimum prefix sizes. Copilot’s
+actual cache behavior has not been verified live.
+
 Other providers and routes have their own cache semantics. Do not generalize a
 ChatGPT-plan observation to API-key, custom, or other provider traffic without
 qualifying that route. Urd does not promise cache retention duration or expose a

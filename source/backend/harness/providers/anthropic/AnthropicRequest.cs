@@ -23,6 +23,9 @@ internal static class AnthropicRequest {
     ValidateOptions(options);
     int? modelLimit = state.Catalog?.Models.FirstOrDefault(model => model.Id == options.ModelId)?.MaxOutputTokens;
     int maxTokens = options.MaxOutputTokens ?? (modelLimit is > 0 ? modelLimit.Value : FallbackMaxOutputTokens);
+    // Opt in for conversation requests, without sending the local session ID to Copilot.
+    bool cachePrefix = options.AdditionalProperties?.TryGetValue(OpenAIInferenceClient.SessionIdProperty,
+        out object? sessionId) == true && sessionId is Guid id && id != Guid.Empty;
 
     using var body = new MemoryStream();
     using (var writer = new Utf8JsonWriter(body)) {
@@ -39,9 +42,9 @@ internal static class AnthropicRequest {
         writer.WriteEndArray();
       }
       // A generic effort value cannot distinguish Claude's budgeted and adaptive thinking modes.
-      WriteSystem(writer, messages, options.Instructions);
+      WriteSystem(writer, messages, options.Instructions, cachePrefix);
       WriteMessages(writer, messages, cancellationToken);
-      WriteTools(writer, options);
+      WriteTools(writer, options, cachePrefix);
       writer.WriteEndObject();
     }
 
@@ -83,7 +86,8 @@ internal static class AnthropicRequest {
 
   private static bool IsSystem(ChatMessage message) => message.Role == ChatRole.System || message.Role == developer;
 
-  private static void WriteSystem(Utf8JsonWriter writer, IReadOnlyList<ChatMessage> messages, string? instructions) {
+  private static void WriteSystem(Utf8JsonWriter writer, IReadOnlyList<ChatMessage> messages, string? instructions,
+      bool cachePrefix) {
     var parts = new List<string>();
     if (!string.IsNullOrEmpty(instructions)) parts.Add(instructions);
     foreach (AIContent part in messages.Where(IsSystem).SelectMany(message => message.Contents)) {
@@ -92,7 +96,8 @@ internal static class AnthropicRequest {
     }
     if (parts.Count == 0) return;
     writer.WriteStartArray("system");
-    foreach (string part in parts) WriteText(writer, part);
+    for (int i = 0; i < parts.Count; i++)
+      WriteText(writer, parts[i], cachePrefix && i == parts.Count - 1);
     writer.WriteEndArray();
   }
 
@@ -179,10 +184,17 @@ internal static class AnthropicRequest {
     writer.WriteEndObject();
   }
 
-  private static void WriteText(Utf8JsonWriter writer, string text) {
+  private static void WriteText(Utf8JsonWriter writer, string text, bool cacheBreakpoint = false) {
     writer.WriteStartObject();
     writer.WriteString("type", "text");
     writer.WriteString("text", text);
+    if (cacheBreakpoint) WriteCacheBreakpoint(writer);
+    writer.WriteEndObject();
+  }
+
+  private static void WriteCacheBreakpoint(Utf8JsonWriter writer) {
+    writer.WriteStartObject("cache_control");
+    writer.WriteString("type", "ephemeral");
     writer.WriteEndObject();
   }
 
@@ -197,15 +209,18 @@ internal static class AnthropicRequest {
     writer.WriteEndObject();
   }
 
-  private static void WriteTools(Utf8JsonWriter writer, ChatOptions options) {
-    if (options.Tools is not { Count: > 0 } || options.ToolMode is NoneChatToolMode) return;
+  private static void WriteTools(Utf8JsonWriter writer, ChatOptions options, bool cachePrefix) {
+    if (options.Tools is not { Count: > 0 } tools || options.ToolMode is NoneChatToolMode) return;
+    // Anthropic orders tools before system blocks; the tool prefix can survive changed instructions.
     writer.WriteStartArray("tools");
-    foreach (var function in options.Tools.Cast<AIFunctionDeclaration>()) {
+    int remaining = tools.Count;
+    foreach (var function in tools.Cast<AIFunctionDeclaration>()) {
       writer.WriteStartObject();
       writer.WriteString("name", function.Name);
       if (!string.IsNullOrEmpty(function.Description)) writer.WriteString("description", function.Description);
       writer.WritePropertyName("input_schema");
       function.JsonSchema.WriteTo(writer);
+      if (--remaining == 0 && cachePrefix) WriteCacheBreakpoint(writer);
       writer.WriteEndObject();
     }
     writer.WriteEndArray();

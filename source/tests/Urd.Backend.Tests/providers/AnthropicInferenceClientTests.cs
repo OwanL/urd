@@ -35,6 +35,7 @@ public sealed class AnthropicInferenceClientTests {
     ProviderState state = State(maxOutputTokens: 7200);
     ChatOptions options = Options();
     options.Instructions = "top-level instruction";
+    options.Tools!.Insert(0, AIFunctionFactory.Create(() => "pong", "ping"));
     options.AdditionalProperties = new() { [OpenAIInferenceClient.SessionIdProperty] = Guid.NewGuid() };
     ChatMessage[] input = [new(ChatRole.System, "system input"), new(ChatRole.User, [
       new TextContent("look it up"), new DataContent(png, "image/png")
@@ -86,8 +87,17 @@ public sealed class AnthropicInferenceClientTests {
     Assert.False(root.TryGetProperty(OpenAIInferenceClient.SessionIdProperty, out _));
     Assert.Equal(["top-level instruction", "system input"], root.GetProperty("system").EnumerateArray()
         .Select(block => block.GetProperty("text").GetString()));
-    Assert.Equal("lookup", root.GetProperty("tools")[0].GetProperty("name").GetString());
-    Assert.Equal("AQID", root.GetProperty("messages")[0].GetProperty("content")[1].GetProperty("source").GetProperty("data").GetString());
+    JsonElement system = root.GetProperty("system");
+    Assert.False(system[0].TryGetProperty("cache_control", out _));
+    AssertEphemeralBreakpoint(system[1]);
+    JsonElement tools = root.GetProperty("tools");
+    Assert.Equal(["ping", "lookup"], tools.EnumerateArray().Select(tool => tool.GetProperty("name").GetString()));
+    Assert.False(tools[0].TryGetProperty("cache_control", out _));
+    AssertEphemeralBreakpoint(tools[1]);
+    JsonElement userContent = root.GetProperty("messages")[0].GetProperty("content");
+    Assert.Equal("AQID", userContent[1].GetProperty("source").GetProperty("data").GetString());
+    Assert.All(userContent.EnumerateArray(), block => Assert.False(block.TryGetProperty("cache_control", out _)));
+    Assert.False(root.TryGetProperty("cache_control", out _));
 
     Assert.Equal("agent", handler.Requests[1].Initiator);
     using var replay = JsonDocument.Parse(handler.Requests[1].Body);
@@ -95,14 +105,23 @@ public sealed class AnthropicInferenceClientTests {
     JsonElement nativeBlocks = replayMessages[1].GetProperty("content");
     Assert.Equal(["thinking", "redacted_thinking", "tool_use"], nativeBlocks.EnumerateArray()
         .Select(block => block.GetProperty("type").GetString()));
+    using var saved = JsonDocument.Parse(native.Json);
+    Assert.Equal(saved.RootElement.GetProperty("blocks").GetRawText(), nativeBlocks.GetRawText());
     Assert.Equal("signed-for-original-scope", nativeBlocks[0].GetProperty("signature").GetString());
     Assert.Equal("opaque-reasoning", nativeBlocks[1].GetProperty("data").GetString());
+    Assert.All(nativeBlocks.EnumerateArray(), block => Assert.False(block.TryGetProperty("cache_control", out _)));
+    Assert.Equal(system.GetRawText(), replay.RootElement.GetProperty("system").GetRawText());
+    Assert.Equal(tools.GetRawText(), replay.RootElement.GetProperty("tools").GetRawText());
+    Assert.Equal(userContent.GetRawText(), replayMessages[0].GetProperty("content").GetRawText());
     Assert.Equal("user", replayMessages[2].GetProperty("role").GetString());
     JsonElement resultBlock = Assert.Single(replayMessages[2].GetProperty("content").EnumerateArray());
     Assert.Equal("tool_result", resultBlock.GetProperty("type").GetString());
     Assert.Equal(call.CallId, resultBlock.GetProperty("tool_use_id").GetString());
     Assert.True(resultBlock.GetProperty("is_error").GetBoolean());
+    Assert.False(resultBlock.TryGetProperty("cache_control", out _));
     Assert.Equal("image/png", resultBlock.GetProperty("content")[1].GetProperty("source").GetProperty("media_type").GetString());
+    Assert.All(resultBlock.GetProperty("content").EnumerateArray(),
+        block => Assert.False(block.TryGetProperty("cache_control", out _)));
     Assert.DoesNotContain("test-only detail", handler.Requests[1].Body, StringComparison.Ordinal);
     using var switched = JsonDocument.Parse(handler.Requests[2].Body);
     JsonElement portable = Assert.Single(switched.RootElement.GetProperty("messages")[1].GetProperty("content").EnumerateArray());
@@ -111,6 +130,32 @@ public sealed class AnthropicInferenceClientTests {
     Assert.DoesNotContain("private reasoning", handler.Requests[2].Body, StringComparison.Ordinal);
     Assert.DoesNotContain("signed-for-original-scope", handler.Requests[2].Body, StringComparison.Ordinal);
     Assert.DoesNotContain("opaque-reasoning", handler.Requests[2].Body, StringComparison.Ordinal);
+  }
+
+  [Theory]
+  [InlineData(true, true, false)]
+  [InlineData(true, false, true)]
+  [InlineData(true, false, false)]
+  [InlineData(false, true, true)]
+  public async Task CacheBreakpointsOnlyMarkAvailableConversationPrefixes(bool conversation, bool system, bool tools) {
+    using var handler = new FakeHandler(Replies(new FixtureStream(messageStart + textBlock + End())));
+    using var transport = new HttpClient(handler);
+    ChatOptions options = Options();
+    if (conversation)
+      options.AdditionalProperties = new() { [OpenAIInferenceClient.SessionIdProperty] = Guid.NewGuid() };
+    if (system) options.Instructions = "stable instruction";
+    if (!tools) options.ToolMode = ChatToolMode.None;
+
+    await CollectAsync(new(transport), State(), History(), options);
+
+    using var body = JsonDocument.Parse(Assert.Single(handler.Requests).Body);
+    JsonElement root = body.RootElement;
+    Assert.Equal(system, root.TryGetProperty("system", out var systemBlocks));
+    Assert.Equal(tools, root.TryGetProperty("tools", out var toolBlocks));
+    if (conversation && system) AssertEphemeralBreakpoint(Assert.Single(systemBlocks.EnumerateArray()));
+    if (conversation && tools) AssertEphemeralBreakpoint(Assert.Single(toolBlocks.EnumerateArray()));
+    if (!conversation || !system && !tools)
+      Assert.DoesNotContain("cache_control", root.GetRawText(), StringComparison.Ordinal);
   }
 
   [Theory]
@@ -225,6 +270,12 @@ public sealed class AnthropicInferenceClientTests {
     Assert.Equal(retryable ? TimeSpan.FromSeconds(2) : null, error.RetryAfter);
     Assert.DoesNotContain(Bearer, error.Message, StringComparison.Ordinal);
     Assert.Contains("[redacted]", error.Message, StringComparison.Ordinal);
+  }
+
+  private static void AssertEphemeralBreakpoint(JsonElement block) {
+    JsonElement control = block.GetProperty("cache_control");
+    Assert.Equal("type", Assert.Single(control.EnumerateObject()).Name);
+    Assert.Equal("ephemeral", control.GetProperty("type").GetString());
   }
 
   private static async Task<List<ChatResponseUpdate>> CollectAsync(AnthropicInferenceClient client, ProviderState state,

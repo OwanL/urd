@@ -1,10 +1,5 @@
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import {
-  credentialState,
-  providerHostname,
-  providerReady,
-  signInPending,
-} from "./ProviderConnectionStatus.ts";
+import { credentialState, providerReady, signInPending } from "./ProviderConnectionStatus.ts";
 import type {
   ProviderCredentialState,
   ProviderSettingsNotice,
@@ -48,9 +43,7 @@ const credentialStateLabels: Record<ProviderCredentialState, string> = {
 };
 
 export function connectionTitle(connection: ProviderConnection): string {
-  return connection.route === "custom"
-    ? providerHostname(connection.endpoint)
-    : providerNames[connection.route];
+  return connection.route === "custom" ? connection.name : providerNames[connection.route];
 }
 
 type ConnectionStatusState = Pick<ProviderSettingsState, "credentials" | "signIns" | "errors">;

@@ -1,26 +1,32 @@
 import { Icon } from "../../controls/Icon.tsx";
-import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
+import type { ProviderConnection } from "../ProviderConnection.ts";
+import type { ProviderChoice } from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import { connectionStatus, connectionTitle } from "./ProviderSettingsPresentation.ts";
 
 const choices = [
   {
-    route: "chatGpt",
+    choice: "chatGpt",
     label: "Sign in with ChatGPT",
     hint: "Use the Codex access included in your ChatGPT plan.",
   },
   {
-    route: "gitHubCopilot",
+    choice: "gitHubCopilot",
     label: "Sign in with GitHub Copilot",
     hint: "Use Copilot access provided by your GitHub account or organization.",
   },
   {
-    route: "openAI",
+    choice: "openAI",
     label: "Use an OpenAI API key",
     hint: "Pay for API usage separately from your ChatGPT plan.",
   },
   {
-    route: "custom",
+    choice: "ollama",
+    label: "Ollama",
+    hint: "Connect to a running Ollama server.",
+  },
+  {
+    choice: "custom",
     label: "Custom endpoint",
     hint: "Connect a local server or another OpenAI-compatible URL.",
   },
@@ -40,19 +46,19 @@ export function ProviderChooser({
   unknown: readonly ProviderConnection[];
   canEdit: boolean;
   canNavigate: boolean;
-  onChoose: (route: ProviderRoute) => void;
+  onChoose: (choice: ProviderChoice) => void;
   onOpenConnection: (connection: ProviderConnection, setup?: boolean) => void;
 }) {
   return (
     <>
       <ul class="provider-settings-connections" aria-label="Choose a provider">
-        {choices.map(({ route, label, hint }) => (
-          <li key={route}>
+        {choices.map(({ choice, label, hint }) => (
+          <li key={choice}>
             <button
               type="button"
               class="provider-settings-connection provider-choice"
               disabled={!canEdit}
-              onClick={() => onChoose(route)}
+              onClick={() => onChoose(choice)}
             >
               <span class="provider-choice-copy">
                 <strong>{label}</strong>

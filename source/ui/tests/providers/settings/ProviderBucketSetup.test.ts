@@ -57,7 +57,7 @@ for (const decision of ["skip", "confirm", "conflict"] as const) {
     t.after(() => state.setActivity(false, false));
     state.setActivity(true, true);
     await flush();
-    state.editAdd({ route: "openAI" });
+    state.chooseProvider("openAI");
     await state.create();
     state.setApiKey("synthetic-key");
     await state.replaceApiKey(keyConnection, true);
@@ -167,7 +167,7 @@ for (const invalidation of [
     t.after(() => state.setActivity(false, false));
     state.setActivity(true, true);
     await flush();
-    state.editAdd({ route: "openAI" });
+    state.chooseProvider("openAI");
     await state.create();
     state.setApiKey("initial");
     await state.replaceApiKey(keyConnection, true);
@@ -215,7 +215,8 @@ void test("a no-auth custom provider is ready after creation; empty suggestions 
   t.after(() => state.setActivity(false, false));
   state.setActivity(true, true);
   await flush();
-  state.editAdd({ route: "custom", endpoint: custom.endpoint, authentication: "none" });
+  state.chooseProvider("custom");
+  state.editAdd({ endpoint: custom.endpoint, authentication: "none" });
   await state.create();
   assert.deepEqual(calls, ["ready:one", "get:one"]);
   assert.equal(notifications(), 0);
@@ -279,7 +280,8 @@ void test("provider-step offers can be disabled without suppressing catalog refr
   t.after(() => state.setActivity(false, false));
   state.setActivity(true, true);
   await flush();
-  state.editAdd({ route: "custom", authentication: "none" });
+  state.chooseProvider("custom");
+  state.editAdd({ authentication: "none" });
   await state.create();
   await flush();
   assert.equal(refreshed, 1);

@@ -31,26 +31,21 @@ export function connectionCommands(
   forgetStatus: (id: string) => void,
 ) {
   async function create(created: (connection: ProviderConnection) => boolean): Promise<void> {
-    const { route, ...draft } = snapshot().add;
-    const settings = {
-      ...draft,
-      name: providerHostname(route === "custom" ? draft.endpoint : "https://api.openai.com"),
-    };
+    const { choice, ...draft } = snapshot().add;
     await command(
       "add",
       () => {
-        if (route === "chatGpt") return client.createChatGpt(settings.name);
-        if (route === "gitHubCopilot") return client.createGitHubCopilot("GitHub Copilot");
-        if (route === "openAI") return client.createOpenAI(settings.name);
-        return client.createCustom(settings);
+        if (choice === "chatGpt") return client.createChatGpt("api.openai.com");
+        if (choice === "gitHubCopilot") return client.createGitHubCopilot("GitHub Copilot");
+        if (choice === "openAI") return client.createOpenAI("api.openai.com");
+        return client.createCustom({
+          ...draft,
+          name: choice === "ollama" ? "Ollama" : providerHostname(draft.endpoint),
+        });
       },
       (connection) => {
         publish(recordConnection(snapshot(), connection));
-        const { selectedId, add } = snapshot();
-        publish({
-          ...(selectedId === null ? { selectedId: connection.id } : {}),
-          add: { ...add, name: "" },
-        });
+        if (snapshot().selectedId === null) publish({ selectedId: connection.id });
       },
       { afterSuccess: created },
     );
@@ -60,7 +55,11 @@ export function connectionCommands(
     if (connection.route !== "custom") return;
     const draft = snapshot().drafts[connection.id];
     if (!draft) return;
-    const settings = { ...draft, name: providerHostname(draft.endpoint) };
+    const name =
+      connection.name === providerHostname(connection.endpoint)
+        ? providerHostname(draft.endpoint)
+        : connection.name;
+    const settings = { ...draft, name };
     const bindingChanged =
       settings.endpoint !== connection.endpoint ||
       settings.api !== connection.api ||

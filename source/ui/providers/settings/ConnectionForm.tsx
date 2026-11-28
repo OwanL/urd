@@ -1,7 +1,7 @@
 import "./connection-form.css";
 import { useId } from "preact/hooks";
 import type { ProviderConnection } from "../ProviderConnection.ts";
-import type { ConnectionDraft } from "./ProviderSettingsTypes.ts";
+import type { ConnectionBindingDraft } from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import { providerNames } from "./ProviderSettingsPresentation.ts";
 
@@ -20,7 +20,7 @@ export function ConnectionForm({
   const { actions } = state;
   const draft = connection ? state.drafts[connection.id] : state.add;
   if (!draft) return null;
-  const edit = (update: Partial<ConnectionDraft>) =>
+  const edit = (update: Partial<ConnectionBindingDraft>) =>
     connection ? actions.edit(connection.id, update) : actions.editAdd(update);
 
   return (
@@ -32,7 +32,7 @@ export function ConnectionForm({
       }}
     >
       <fieldset disabled={disabled}>
-        {(connection?.route ?? state.add.route) === "custom" && (
+        {(!connection || connection.route === "custom") && (
           <CustomFields id={id} draft={draft} edit={edit} />
         )}
         {connection && connection.route !== "custom" && (
@@ -57,8 +57,8 @@ function CustomFields({
   edit,
 }: {
   id: string;
-  draft: ConnectionDraft;
-  edit: (update: Partial<ConnectionDraft>) => void;
+  draft: ConnectionBindingDraft;
+  edit: (update: Partial<ConnectionBindingDraft>) => void;
 }) {
   return (
     <>

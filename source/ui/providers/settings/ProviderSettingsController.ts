@@ -16,10 +16,24 @@ import { readProviderSettings } from "./ProviderSettingsReadCycle.ts";
 import { providerSignInTabs } from "./ProviderSignInTabs.ts";
 import type {
   AddDraft,
+  ConnectionBindingDraft,
   ConnectionDraft,
+  ProviderChoice,
   ProviderSettingsClient,
   ProviderSettingsSnapshot,
 } from "./ProviderSettingsTypes.ts";
+
+const customDefaults: ConnectionBindingDraft = {
+  endpoint: "",
+  api: "openAIResponses",
+  authentication: "apiKey",
+};
+
+const ollamaDefaults: ConnectionBindingDraft = {
+  endpoint: "http://127.0.0.1:11434/v1",
+  api: "openAIChatCompletions",
+  authentication: "none",
+};
 
 interface SetupContext {
   readonly connection: ProviderConnection;
@@ -49,18 +63,13 @@ export class ProviderSettingsController {
     signIns: {},
     blockedSignIns: {},
     drafts: {},
-    add: {
-      route: "chatGpt",
-      name: "",
-      endpoint: "",
-      api: "openAIResponses",
-      authentication: "apiKey",
-    },
+    add: { choice: "chatGpt", ...customDefaults },
     apiKey: "",
     confirmation: null,
     bucketSetup: null,
   };
 
+  private readonly addDrafts = new Map<ProviderChoice, AddDraft>();
   private setupVisible = false;
   private setupView = 0;
   private newConnectionId: string | null = null;
@@ -242,7 +251,16 @@ export class ProviderSettingsController {
     );
   }
 
-  editAdd(update: Partial<AddDraft>): void {
+  chooseProvider(choice: ProviderChoice): void {
+    const current = this.snapshot.add;
+    if (choice === current.choice) return;
+    if (current.choice === "custom" || current.choice === "ollama")
+      this.addDrafts.set(current.choice, current);
+    const defaults = choice === "ollama" ? ollamaDefaults : customDefaults;
+    this.patch({ add: this.addDrafts.get(choice) ?? { choice, ...defaults } });
+  }
+
+  editAdd(update: Partial<ConnectionBindingDraft>): void {
     this.patch({ add: { ...this.snapshot.add, ...update } });
   }
 

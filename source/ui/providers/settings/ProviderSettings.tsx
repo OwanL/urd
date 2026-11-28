@@ -1,7 +1,7 @@
 import "./provider-settings.css";
 import { useCallback, useLayoutEffect, useRef, useState } from "preact/hooks";
 import { Icon } from "../../controls/Icon.tsx";
-import type { ProviderConnection, ProviderRoute } from "../ProviderConnection.ts";
+import type { ProviderConnection } from "../ProviderConnection.ts";
 import { ConnectionForm } from "./ConnectionForm.tsx";
 import { ProviderBucketSuggestions } from "./ProviderBucketSuggestions.tsx";
 import { ProviderChooser } from "./ProviderChooser.tsx";
@@ -10,6 +10,7 @@ import { ProviderSettingsFeedback } from "./ProviderSettingsFeedback.tsx";
 import { ProviderSettingsOverview } from "./ProviderSettingsOverview.tsx";
 import { connectionStatus, connectionTitle } from "./ProviderSettingsPresentation.ts";
 import { matchesConnection, providerSetupState } from "./ProviderConnectionStatus.ts";
+import type { ProviderChoice } from "./ProviderSettingsTypes.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 
 interface Presentation {
@@ -140,13 +141,12 @@ export function ProviderSettings({
     actions.select(null);
     void (signIn ? actions.createAndSignIn() : actions.create());
   };
-  const choose = (route: ProviderRoute) => {
-    actions.editAdd({ route });
-    if (route !== "custom") create(route === "chatGpt" || route === "gitHubCopilot");
-    else {
+  const choose = (choice: ProviderChoice) => {
+    actions.chooseProvider(choice);
+    if (choice === "custom" || choice === "ollama") {
       actions.select(null);
       show({ screen: "custom", connectionId: null, creating: null, returnId: null });
-    }
+    } else create(choice === "chatGpt" || choice === "gitHubCopilot");
   };
 
   return (
@@ -189,7 +189,9 @@ export function ProviderSettings({
               {screen === "chooser"
                 ? "How do you want to connect?"
                 : screen === "custom"
-                  ? "Custom provider"
+                  ? state.add.choice === "ollama"
+                    ? "Ollama"
+                    : "Custom provider"
                   : connection
                     ? connectionTitle(connection)
                     : "Provider unavailable"}

@@ -105,7 +105,7 @@ void test("GitHub Copilot creation starts device sign-in without opening a popup
     state.setActivity(true, true);
     await flush();
     state.select(null);
-    state.editAdd({ route: "gitHubCopilot" });
+    state.chooseProvider("gitHubCopilot");
     listed = true;
     await state.createAndSignIn();
     assert.equal(opens, 0);

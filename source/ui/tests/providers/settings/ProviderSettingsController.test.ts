@@ -4,6 +4,7 @@ import { RequestError } from "../../../http/RequestError.ts";
 import type { ProviderConnection } from "../../../providers/ProviderConnection.ts";
 import type { ProviderCredentialStatus } from "../../../providers/ProviderCredentials.ts";
 import type { ProviderSignIn } from "../../../providers/ProviderSignIn.ts";
+import { connectionTitle } from "../../../providers/settings/ProviderSettingsPresentation.ts";
 import {
   connection,
   credential,
@@ -94,6 +95,57 @@ void test("explicit ChatGPT creation starts one sign-in and retains its authoriz
   state.dispose();
 });
 
+void test("Ollama creates a named, keyless Chat Completions connection with an editable endpoint", async (t) => {
+  const endpoint = "http://ollama.example:8080/v1";
+  const ready: string[] = [];
+  let saved: ProviderConnection | undefined;
+  const { state } = setup(
+    {
+      list: async () => (saved ? [saved] : []),
+      createCustom: async (settings) => {
+        saved = { id: "ollama", route: "custom", ...settings };
+        return saved;
+      },
+    },
+    async (id) => {
+      ready.push(id);
+      return false;
+    },
+  );
+  t.after(() => state.dispose());
+  state.setActivity(true, true);
+  await flush();
+  state.chooseProvider("ollama");
+  assert.deepEqual(state.snapshot.add, {
+    choice: "ollama",
+    endpoint: "http://127.0.0.1:11434/v1",
+    api: "openAIChatCompletions",
+    authentication: "none",
+  });
+  assert.equal(saved, undefined);
+  state.editAdd({ endpoint });
+  state.chooseProvider("custom");
+  assert.deepEqual(state.snapshot.add, {
+    choice: "custom",
+    endpoint: "",
+    api: "openAIResponses",
+    authentication: "apiKey",
+  });
+  state.chooseProvider("ollama");
+  await state.create();
+  const created = state.snapshot.connections[0]!;
+  assert.deepEqual(created, {
+    id: "ollama",
+    route: "custom",
+    name: "Ollama",
+    endpoint,
+    api: "openAIChatCompletions",
+    authentication: "none",
+  });
+  assert.equal(connectionTitle(created), "Ollama");
+  assert.deepEqual(ready, [created.id]);
+});
+
 void test("ordinary creation does not start sign-in", async () => {
   let starts = 0;
   const { state } = setup({
@@ -164,10 +216,10 @@ void test("explicit creation ignores other routes and existing connection ids", 
   state.setActivity(true, true);
   await flush();
   state.select(null);
-  state.editAdd({ route: "openAI" });
+  state.chooseProvider("openAI");
   await state.createAndSignIn();
   assert.equal(creates, 0);
-  state.editAdd({ route: "chatGpt" });
+  state.chooseProvider("chatGpt");
   await state.createAndSignIn();
   assert.equal(creates, 1);
   assert.equal(starts, 0);
@@ -257,7 +309,12 @@ void test("polling is visible-only, non-overlapping, terminal-bounded, and rerea
 });
 
 void test("binding edits, disconnect and removal require confirmation", async () => {
-  const custom: ProviderConnection = { ...connection, route: "custom", authentication: "apiKey" };
+  const custom: ProviderConnection = {
+    ...connection,
+    name: "provider.example",
+    route: "custom",
+    authentication: "apiKey",
+  };
   let updates = 0;
   let disconnects = 0;
   let removes = 0;

@@ -3,8 +3,9 @@
 The local server manages saved **ChatGPT subscription**, **GitHub Copilot**,
 **OpenAI API-key** and **custom OpenAI-compatible** connections. ChatGPT uses Responses;
 Copilot uses Responses, Chat Completions or Anthropic Messages per model. Custom endpoints
-use Responses or Chat Completions, with an API key or no authentication. Urd owns chat
-history and tool execution for every connection.
+use Responses or Chat Completions, with an API key or no authentication. The Ollama setup
+uses the custom Chat Completions route. Urd owns chat history and tool execution for every
+connection.
 
 ## Source responsibilities
 
@@ -272,8 +273,12 @@ by this presentation rule. Unknown credential reads are reported rather than tre
 unfinished or silently omitted without explanation.
 
 Add asks how to connect. **Sign in with ChatGPT** starts browser sign-in for Codex access
-through a ChatGPT plan. **Use an OpenAI API key** uses separate API billing. **Custom endpoint**
-is for a local or other compatible server URL. The same chooser is used during onboarding.
+through a ChatGPT plan. **Use an OpenAI API key** uses separate API billing. **Ollama**
+prefills `http://127.0.0.1:11434/v1` with Chat Completions and no API key. Change the URL
+if Ollama runs elsewhere; the endpoint must be reachable from the Urd server, not just the
+browser. Start Ollama and install a tool-capable model before using it with Urd. Urd discovers
+models from Ollama; it does not download them or check their tool support. **Custom endpoint**
+is for other compatible server URLs. The same chooser is used during onboarding.
 Its **Finish setup** section resumes saved configurations that still need credentials;
 **Check setup** keeps failed/unknown reads reachable. Successful authentication offers **Done**
 to return to the main list in Settings. In onboarding, **Next** becomes available when a usable
@@ -283,10 +288,9 @@ return directly to matching providers without stealing typing focus. Connected p
 not show setup forms. Configuration, model refresh and removal live under **Advanced**.
 A first-time **Load models** action stays visible until a usable connection has fetched its
 catalog, so ordinary setup does not require exploring advanced settings.
-New configurations are named from their hostname without a name field; presets display their
-recognizable provider name and custom connections display their hostname. Existing stored
-names are not migrated. Successful creation opens authentication; rejected custom creation
-retains its draft.
+New custom endpoints are named from their hostname; the Ollama preset is saved as a custom
+connection named **Ollama**. Custom connections display their saved name. Successful creation
+opens the connection view; rejected custom creation retains its draft.
 
 The page supports ChatGPT, GitHub Copilot, OpenAI API-key and custom compatible connections: create,
 custom binding changes, replace-only keys, sign-in/status/cancel, disconnect,

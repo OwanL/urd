@@ -44,7 +44,7 @@ void test("setup membership uses saved credentials, not current provider health"
   );
 });
 
-void test("names come from endpoint hostnames only when creating or saving", async () => {
+void test("generic custom connections default to their hostname and keep explicit names on save", async () => {
   assert.equal(
     providerHostname("https://user:secret@API.Example:443/v1/?key=value"),
     "api.example",
@@ -75,20 +75,15 @@ void test("names come from endpoint hostnames only when creating or saving", asy
   state.setActivity(true, true);
   await flush();
   assert.equal(state.snapshot.connections[0]?.name, "Work");
-  state.editAdd({ name: "Ignored", endpoint: "https://custom.example:1234/v1/" });
   await state.create();
-  state.editAdd({ route: "openAI" });
+  state.chooseProvider("openAI");
   await state.create();
-  state.editAdd({ route: "custom", name: "Ignored again" });
+  state.chooseProvider("custom");
+  state.editAdd({ endpoint: "https://custom.example:1234/v1/" });
   await state.create();
   assert.equal(state.snapshot.connections[0]?.name, "Work");
   await state.save(custom);
-  assert.deepEqual(names, [
-    "api.openai.com",
-    "api.openai.com",
-    "custom.example",
-    "provider.example",
-  ]);
+  assert.deepEqual(names, ["api.openai.com", "api.openai.com", "custom.example", "Work"]);
   state.setActivity(false, false);
 });
 

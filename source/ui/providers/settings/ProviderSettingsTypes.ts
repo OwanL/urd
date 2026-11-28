@@ -34,8 +34,11 @@ export type ProviderSettingsClient = Pick<
 
 export type ConnectionDraft = CustomProviderSettings;
 
-export interface AddDraft extends ConnectionDraft {
-  readonly route: ProviderRoute;
+export type ProviderChoice = ProviderRoute | "ollama";
+export type ConnectionBindingDraft = Omit<ConnectionDraft, "name">;
+
+export interface AddDraft extends ConnectionBindingDraft {
+  readonly choice: ProviderChoice;
 }
 
 export type ProviderSettingsOperation =

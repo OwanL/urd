@@ -78,11 +78,11 @@ export function providerSignInTabs({
       !setupVisible ||
       !visible ||
       selectedId !== null ||
-      (add.route !== "chatGpt" && add.route !== "gitHubCopilot")
+      (add.choice !== "chatGpt" && add.choice !== "gitHubCopilot")
     )
       return;
 
-    const tab = add.route === "chatGpt" ? reserveTab() : null;
+    const tab = add.choice === "chatGpt" ? reserveTab() : null;
     const existingIds = new Set(snapshot().connections.map(({ id }) => id));
     const intent = signInIntent;
     let signIn: Promise<void> | undefined;
@@ -92,7 +92,7 @@ export function providerSignInTabs({
       const { canMutate, setupVisible, visible, setupView } = activity();
       if (
         existingIds.has(connection.id) ||
-        connection.route !== add.route ||
+        connection.route !== add.choice ||
         connection.authentication !== "oAuth" ||
         !canMutate ||
         !setupVisible ||

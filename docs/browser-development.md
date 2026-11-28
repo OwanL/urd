@@ -55,6 +55,9 @@ new provider in Settings → Providers can offer another preview, limited to its
 applies those exact assignments, and later catalog/provider changes do not rewrite them. An empty
 chat with bucket setup missing shows a warning with inline assignment controls. Settings → Prepass
 configures independent tool/skill/instruction/title model choices and protected-resource lists.
+General groups subagent depth and default providers together, and reads instruction and skill
+sources only when their section is expanded. Provider search is available on the provider list,
+not on add or detail screens.
 Missing models/resources remain visibly unavailable rather than rebinding. Protection pickers
 discover resources for the default directory; built-in instructions always remain. Response headers
 freeze the model, effort (`medium` shown as a bare label) and start time. Boundary-anchored

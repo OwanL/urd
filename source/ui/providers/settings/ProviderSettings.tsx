@@ -8,7 +8,7 @@ import { ProviderChooser } from "./ProviderChooser.tsx";
 import { ProviderConnectionConfirmation } from "./ProviderConnectionConfirmation.tsx";
 import { ProviderConnectionDetail } from "./ProviderConnectionDetail.tsx";
 import { ProviderSettingsFeedback } from "./ProviderSettingsFeedback.tsx";
-import { ProviderSettingsOverview } from "./ProviderSettingsOverview.tsx";
+import { ProviderSettingsOverview, type ProviderSearch } from "./ProviderSettingsOverview.tsx";
 import { connectionStatus, connectionTitle } from "./ProviderSettingsPresentation.ts";
 import { matchesConnection, providerSetupState } from "./ProviderConnectionStatus.ts";
 import type { ProviderChoice } from "./ProviderSettingsTypes.ts";
@@ -36,7 +36,6 @@ export function ProviderSettings({
   const surface = useRef<HTMLElement>(null);
   const overviewControl = useRef<HTMLButtonElement>(null);
   const focusRequested = useRef(false);
-  const previousSearch = useRef(search);
   const [presentation, setPresentation] = useState<Presentation>(
     () =>
       presentations.get(actions) ?? {
@@ -48,23 +47,14 @@ export function ProviderSettings({
   );
   const { screen, connectionId, creating, returnId } = presentation;
   const show = useCallback(
-    (next: Presentation, focus = true) => {
-      focusRequested.current = focus;
+    (next: Presentation) => {
+      focusRequested.current = true;
       presentations.set(actions, next);
       setPresentation(next);
     },
     [actions],
   );
   const connection = state.connections.find(({ id }) => id === connectionId);
-
-  useLayoutEffect(() => {
-    if (search === previousSearch.current) return;
-    previousSearch.current = search;
-    if (search.trim() && screen !== "overview") {
-      actions.select(null);
-      show({ screen: "overview", connectionId: null, creating: null, returnId: null }, false);
-    }
-  }, [search, screen, actions, show]);
 
   useLayoutEffect(() => {
     // Only a successful create selects a new ID. Rejections and uncertain reads stay put.
@@ -107,7 +97,7 @@ export function ProviderSettings({
   const unknown = state.connections.filter(
     (item) => providerSetupState(item, state.credentials[item.id]) === "unknown",
   );
-  const visible = complete.filter((item) => matchesConnection(item, search));
+  const visible = complete.filter((item) => matchesConnection(item, search?.value ?? ""));
   const setup = connection && providerSetupState(connection, state.credentials[connection.id]);
   const bucketSetup = presentation.setup ? state.bucketSetup : null;
   const reviewingBuckets = bucketSetup !== null && bucketSetup.phase !== "finished";
@@ -173,6 +163,7 @@ export function ProviderSettings({
       {screen === "overview" ? (
         <ProviderSettingsOverview
           state={state}
+          search={search}
           visible={visible}
           complete={complete}
           unknown={unknown}
@@ -271,7 +262,7 @@ export function ProviderSettings({
 
 interface ProviderSettingsProps {
   state: ProviderSettingsState;
-  search: string;
+  search?: ProviderSearch;
   initialScreen?: "overview" | "chooser";
   onboarding?: boolean;
 }

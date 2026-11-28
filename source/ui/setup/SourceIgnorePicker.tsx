@@ -276,33 +276,36 @@ function Picker({
                 Ignore by filename <span class="source-preview-muted">All folders</span>
               </div>
               <div class="source-preview-names">
-                {names.map((name) => (
-                  <label class="source-preview-name-option" key={name}>
-                    <input
-                      type="checkbox"
-                      disabled={busy}
-                      checked={rules.filenames.some(
-                        (item) => filenameKey(item) === filenameKey(name),
+                {names.map((name) => {
+                  const count = nameCounts.get(filenameKey(name)) ?? 0;
+                  return (
+                    <label class="source-preview-name-option" key={name}>
+                      <input
+                        type="checkbox"
+                        disabled={busy}
+                        checked={rules.filenames.some(
+                          (item) => filenameKey(item) === filenameKey(name),
+                        )}
+                        onChange={() =>
+                          void save({
+                            ...rules,
+                            filenames: rules.filenames.some(
+                              (item) => filenameKey(item) === filenameKey(name),
+                            )
+                              ? rules.filenames.filter(
+                                  (item) => filenameKey(item) !== filenameKey(name),
+                                )
+                              : [...rules.filenames, name],
+                          })
+                        }
+                      />
+                      <span>{name}</span>
+                      {count > 0 && (
+                        <span class="source-preview-muted">{formatSourceCount(count, kind)}</span>
                       )}
-                      onChange={() =>
-                        void save({
-                          ...rules,
-                          filenames: rules.filenames.some(
-                            (item) => filenameKey(item) === filenameKey(name),
-                          )
-                            ? rules.filenames.filter(
-                                (item) => filenameKey(item) !== filenameKey(name),
-                              )
-                            : [...rules.filenames, name],
-                        })
-                      }
-                    />
-                    <span>{name}</span>
-                    <span class="source-preview-muted">
-                      {formatSourceCount(nameCounts.get(filenameKey(name)) ?? 0, kind)}
-                    </span>
-                  </label>
-                ))}
+                    </label>
+                  );
+                })}
               </div>
             </section>
           )}

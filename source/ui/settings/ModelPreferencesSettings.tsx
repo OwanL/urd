@@ -143,9 +143,9 @@ export function ModelPreferencesSettings({
   return (
     <section
       class="preference-model-settings"
-      aria-label={view === "buckets" ? "Model buckets" : "Purpose choices"}
+      aria-label={view === "buckets" ? "Model buckets" : "Prepass models"}
     >
-      {view === "purposes" && <h3>Purpose choices</h3>}
+      {view === "purposes" && <h3>Prepass models</h3>}
       {catalog.error && (
         <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">
           <p role="alert">{catalog.error}</p>
@@ -281,7 +281,8 @@ function AuxiliaryModelChoice({
       ? { connectionId: draftChoice.connectionId, modelId: draftChoice.modelId }
       : savedModel;
   const pickerLabel = `${purposeNames[purpose]} specific model · ${configuredModelLabel(draftModel)}`;
-  const bucketModels = saved?.bucket ? state.preferences?.modelChoices[saved.bucket] : undefined;
+  const selectedBucket = draftChoice?.bucket ?? saved?.bucket;
+  const bucketModels = selectedBucket ? state.preferences?.modelChoices[selectedBucket] : undefined;
 
   const chooseBucket = async (value: string) => {
     state.clearError();
@@ -316,7 +317,7 @@ function AuxiliaryModelChoice({
       </label>
       <select
         id={`auxiliary-model-${purpose}`}
-        value={specific ? "specific" : (saved?.bucket ?? "specific")}
+        value={specific ? "specific" : (selectedBucket ?? "specific")}
         disabled={busy}
         onChange={(event) => void chooseBucket(event.currentTarget.value)}
       >
@@ -340,7 +341,7 @@ function AuxiliaryModelChoice({
           disabled={busy || !catalogLoaded || loadingModels}
         />
       )}
-      {!specific && saved?.bucket && (
+      {!specific && selectedBucket && (
         <span class="preference-model-resolution">
           {bucketModels?.length ? describeBucket(bucketModels) : "No models configured"}
         </span>

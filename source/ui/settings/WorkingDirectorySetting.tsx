@@ -27,32 +27,33 @@ export function WorkingDirectorySetting({
 
   return (
     <>
-      <div class="general-settings-field">
-        <span>Working directory</span>
-        <code class="general-settings-path">{shown ?? emptyLabel}</code>
-        <p class="general-settings-description">Used for new chats.</p>
-      </div>
-      <div class="general-settings-actions">
-        <button
-          ref={buttonRef}
-          type="button"
-          disabled={state.pending}
-          onClick={() => {
-            state.clearError();
-            setPickerOpen(true);
-          }}
-        >
-          {shown === null ? "Choose…" : "Edit…"}
-        </button>
-        {resettable && (
+      <div class="working-directory-setting">
+        <div class="general-settings-field">
+          <span>Working directory for new chats</span>
+          <code class="general-settings-path">{shown ?? emptyLabel}</code>
+        </div>
+        <div class="general-settings-actions">
           <button
+            ref={buttonRef}
             type="button"
-            disabled={state.pending || !state.loaded || workingDirectory === null}
-            onClick={() => void state.saveWorkingDirectory(null)}
+            disabled={state.pending}
+            onClick={() => {
+              state.clearError();
+              setPickerOpen(true);
+            }}
           >
-            Reset to root
+            {shown === null ? "Choose…" : "Edit…"}
           </button>
-        )}
+          {resettable && (
+            <button
+              type="button"
+              disabled={state.pending || !state.loaded || workingDirectory === null}
+              onClick={() => void state.saveWorkingDirectory(null)}
+            >
+              Reset to root
+            </button>
+          )}
+        </div>
       </div>
       {!pickerOpen && (
         <div class="general-settings-feedback" aria-live="polite" aria-atomic="true">

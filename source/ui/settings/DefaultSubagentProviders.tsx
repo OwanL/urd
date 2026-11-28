@@ -27,7 +27,7 @@ export function DefaultSubagentProviders({
     >
       {saved && providers.loaded ? (
         <SubagentProviderFields
-          label="Subagent providers for new chats"
+          label="Providers for new chats"
           connections={providers.connections.filter((connection) =>
             providerReady(connection, providers.credentials[connection.id]),
           )}
@@ -39,7 +39,7 @@ export function DefaultSubagentProviders({
           }}
         />
       ) : (
-        <h3>Subagent providers for new chats</h3>
+        <h4>Providers for new chats</h4>
       )}
       <div class="general-settings-feedback" aria-live="polite">
         {pending && <p role="status">Saving…</p>}

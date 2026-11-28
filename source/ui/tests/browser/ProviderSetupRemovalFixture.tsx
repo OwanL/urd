@@ -74,7 +74,7 @@ function Fixture() {
 
   return (
     <main>
-      <ProviderSettings state={state} search="" initialScreen="chooser" />
+      <ProviderSettings state={state} initialScreen="chooser" />
       <output aria-label="Saved connection count">{connections.length}</output>
     </main>
   );

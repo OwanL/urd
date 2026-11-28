@@ -5,13 +5,21 @@ import {
   parseCompactionTriggerInput,
 } from "../preferences/CompactionTriggerInput.ts";
 import type { PreferencesState } from "../preferences/usePreferences.ts";
+import type { ProviderSettingsState } from "../providers/settings/useProviderSettings.ts";
+import { DefaultSubagentProviders } from "./DefaultSubagentProviders.tsx";
+import { MaxSubagentDepth } from "./MaxSubagentDepth.tsx";
+import { SourceSettings } from "./SourceSettings.tsx";
 import { WorkingDirectorySetting } from "./WorkingDirectorySetting.tsx";
 import { LanHostingSetting } from "./LanHostingSetting.tsx";
 import { BitwardenSetting } from "./BitwardenSetting.tsx";
 
 interface GeneralSettingsProps {
   state: PreferencesState;
+  providers: ProviderSettingsState;
+  active: boolean;
   buttonRef: RefObject<HTMLButtonElement | null>;
+  attentionSounds: boolean;
+  onAttentionSoundsChange(enabled: boolean): void;
   compactionTriggerDraft: string;
   onCompactionTriggerDraftChange(value: string): void;
   onCompactionTriggerSaved(value: number | null): void;
@@ -19,7 +27,11 @@ interface GeneralSettingsProps {
 
 export function GeneralSettings({
   state,
+  providers,
+  active,
   buttonRef,
+  attentionSounds,
+  onAttentionSoundsChange,
   compactionTriggerDraft,
   onCompactionTriggerDraftChange,
   onCompactionTriggerSaved,
@@ -35,6 +47,9 @@ export function GeneralSettings({
   const [triggerSaved, setTriggerSaved] = useState(false);
   const triggerId = useId();
   const triggerErrorId = `${triggerId}-error`;
+  const triggerDisabled = !state.loaded || state.pending || triggerSaving;
+  const triggerUnchanged =
+    compactionTriggerDraft === compactionTriggerInput(compactionTriggerTokenCount);
 
   const editTrigger = (value: string) => {
     onCompactionTriggerDraftChange(value);
@@ -44,12 +59,12 @@ export function GeneralSettings({
   };
 
   const saveTrigger = async () => {
+    if (triggerDisabled || triggerUnchanged) return;
     const result = parseCompactionTriggerInput(compactionTriggerDraft);
     if (!result.valid) {
       setTriggerValidation(result.error);
       return;
     }
-    if (state.pending || triggerSaving) return;
 
     setTriggerValidation(null);
     setTriggerSaved(false);
@@ -68,9 +83,16 @@ export function GeneralSettings({
       aria-busy={state.loading || state.pending || triggerSaving}
     >
       <WorkingDirectorySetting state={state} buttonRef={buttonRef} />
-      <div class="general-settings-field compaction-trigger-setting" aria-busy={triggerSaving}>
+      <form
+        class="general-setting-form"
+        aria-busy={triggerSaving}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void saveTrigger();
+        }}
+      >
         <label htmlFor={`${triggerId}-input`}>Compaction trigger (tokens)</label>
-        <div class="compaction-trigger-control">
+        <div class="settings-number-control">
           <input
             id={`${triggerId}-input`}
             type="text"
@@ -80,31 +102,20 @@ export function GeneralSettings({
             value={compactionTriggerDraft}
             aria-invalid={triggerValidation ? "true" : undefined}
             aria-describedby={triggerValidation ? triggerErrorId : undefined}
-            disabled={!state.loaded || state.pending || triggerSaving}
+            disabled={triggerDisabled}
             onInput={(event) => editTrigger(event.currentTarget.value)}
           />
           <button
             type="button"
             disabled={
-              !state.loaded ||
-              state.pending ||
-              triggerSaving ||
+              triggerDisabled ||
               (compactionTriggerDraft === "" && compactionTriggerTokenCount === null)
             }
             onClick={() => editTrigger("")}
           >
             Set automatic
           </button>
-          <button
-            type="button"
-            disabled={
-              !state.loaded ||
-              state.pending ||
-              triggerSaving ||
-              compactionTriggerDraft === compactionTriggerInput(compactionTriggerTokenCount)
-            }
-            onClick={() => void saveTrigger()}
-          >
+          <button type="submit" disabled={triggerDisabled || triggerUnchanged}>
             Save
           </button>
         </div>
@@ -118,12 +129,30 @@ export function GeneralSettings({
           {triggerSaved && !triggerSaving && <p role="status">Saved.</p>}
           {triggerError && <p role="alert">{triggerError}</p>}
         </div>
-      </div>
+      </form>
+      <label class="attention-sounds-setting">
+        <input
+          type="checkbox"
+          checked={attentionSounds}
+          onChange={(event) => onAttentionSoundsChange(event.currentTarget.checked)}
+        />
+        Play question and completion sounds
+      </label>
+      <section class="general-settings-group" aria-labelledby={`${triggerId}-subagents`}>
+        <h3 id={`${triggerId}-subagents`}>Subagents</h3>
+        <MaxSubagentDepth state={state} />
+        <DefaultSubagentProviders providers={providers} state={state} />
+      </section>
+      <SourceSettings active={active} />
       {location.hostname === "127.0.0.1" && (
-        <>
+        <section
+          class="general-settings-group host-browser-settings"
+          aria-labelledby={`${triggerId}-host`}
+        >
+          <h3 id={`${triggerId}-host`}>Host &amp; browser</h3>
           <LanHostingSetting />
           <BitwardenSetting />
-        </>
+        </section>
       )}
     </section>
   );

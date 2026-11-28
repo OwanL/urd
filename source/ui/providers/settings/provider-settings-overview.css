@@ -1,3 +1,40 @@
+.provider-settings .provider-settings-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  background: var(--surface-input);
+  color: var(--text-secondary);
+}
+
+.provider-settings .provider-settings-search:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.provider-settings .provider-settings-search .icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.provider-settings .provider-settings-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 4px 0;
+  border: 0;
+  outline: 0;
+  color: var(--text-primary);
+  background: transparent;
+}
+
+.provider-settings .provider-settings-search input:focus-visible {
+  outline: 0;
+}
+
 .provider-settings .provider-settings-overview-heading {
   display: flex;
   flex-wrap: wrap;

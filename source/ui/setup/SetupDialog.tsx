@@ -268,7 +268,6 @@ function Setup({ status, onComplete }: { status: SetupStatus; onComplete(): void
         {step === "provider" && (
           <ProviderSettings
             state={providers}
-            search=""
             initialScreen={validated.providerConfigured ? "overview" : "chooser"}
             onboarding
           />

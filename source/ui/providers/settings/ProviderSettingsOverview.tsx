@@ -1,11 +1,19 @@
 import "./provider-settings-overview.css";
+import type { RefObject } from "preact";
 import { Icon } from "../../controls/Icon.tsx";
 import type { ProviderConnection } from "../ProviderConnection.ts";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 import { connectionAttention, connectionTitle } from "./ProviderSettingsPresentation.ts";
 
+export interface ProviderSearch {
+  value: string;
+  onChange(value: string): void;
+  inputRef: RefObject<HTMLInputElement | null>;
+}
+
 export function ProviderSettingsOverview({
   state,
+  search,
   visible,
   complete,
   unknown,
@@ -17,6 +25,7 @@ export function ProviderSettingsOverview({
   onOpenConnection,
 }: {
   state: ProviderSettingsState;
+  search: ProviderSearch | undefined;
   visible: readonly ProviderConnection[];
   complete: readonly ProviderConnection[];
   unknown: readonly ProviderConnection[];
@@ -29,6 +38,19 @@ export function ProviderSettingsOverview({
 }) {
   return (
     <>
+      {search && (
+        <label class="provider-settings-search">
+          <Icon name="search" />
+          <input
+            ref={search.inputRef}
+            type="search"
+            aria-label="Search providers"
+            placeholder="Search providers…"
+            value={search.value}
+            onInput={(event) => search.onChange(event.currentTarget.value)}
+          />
+        </label>
+      )}
       <header class="provider-settings-overview-heading">
         <h3>Providers</h3>
         <button

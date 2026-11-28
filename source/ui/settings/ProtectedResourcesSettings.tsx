@@ -61,9 +61,7 @@ export function ProtectedResourcesSettings({
   return (
     <section class="preference-protected-settings" aria-label="Protected resources">
       <h3>Protected resources</h3>
-      <p class="general-settings-description">
-        Checked items are protected. Uncheck to remove protection.
-      </p>
+      <p class="general-settings-description">Checked resources bypass prepass filtering.</p>
       {!state.loaded && <p role="status">Loading preferences…</p>}
       {state.loaded && (
         <>

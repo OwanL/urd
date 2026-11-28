@@ -1,7 +1,6 @@
 import type { TargetedKeyboardEvent } from "preact";
 import type { RefObject } from "preact";
 import { useEffect, useId, useRef, useState } from "preact/hooks";
-import { Icon } from "../controls/Icon.tsx";
 import { McpSettings } from "../mcp/McpSettings.tsx";
 import { useMcpSettings } from "../mcp/useMcpSettings.ts";
 import { IconButton } from "../controls/IconButton.tsx";
@@ -15,16 +14,20 @@ import type { ProviderClient } from "../providers/ProviderClient.ts";
 import { ProviderSettings } from "../providers/settings/ProviderSettings.tsx";
 import { useProviderSettings } from "../providers/settings/useProviderSettings.ts";
 import { GeneralSettings } from "./GeneralSettings.tsx";
-import { DefaultSubagentProviders } from "./DefaultSubagentProviders.tsx";
-import { MaxSubagentDepth } from "./MaxSubagentDepth.tsx";
 import { ModelPreferencesSettings } from "./ModelPreferencesSettings.tsx";
 import { ProtectedResourcesSettings } from "./ProtectedResourcesSettings.tsx";
-import { SourceIgnorePicker } from "../setup/SourceIgnorePicker.tsx";
 import "./settings.css";
 
 export type SettingsTab = "providers" | "general" | "model-buckets" | "prepass" | "mcp";
 
 const tabs: readonly SettingsTab[] = ["providers", "general", "model-buckets", "prepass", "mcp"];
+const tabLabels: Record<SettingsTab, string> = {
+  providers: "Providers",
+  general: "General",
+  "model-buckets": "Model buckets",
+  prepass: "Prepass",
+  mcp: "MCP",
+};
 
 interface SettingsProps {
   open: boolean;
@@ -64,8 +67,6 @@ export function Settings({
     preferences.refresh,
   );
   const [search, setSearch] = useState("");
-  const [sourceKind, setSourceKind] = useState<"instructions" | "skills">("instructions");
-  const [sourceBusy, setSourceBusy] = useState(false);
   const savedCompactionTriggerTokenCount =
     preferences.preferences?.compactionTriggerTokenCount ?? null;
   const [compactionTriggerDraft, setCompactionTriggerDraft] = useState(() => ({
@@ -83,11 +84,7 @@ export function Settings({
   }, [savedCompactionTriggerTokenCount]);
   const searchInput = useRef<HTMLInputElement>(null);
   const workingDirectoryButton = useRef<HTMLButtonElement>(null);
-  const providersTab = useRef<HTMLButtonElement>(null);
-  const generalTab = useRef<HTMLButtonElement>(null);
-  const modelBucketsTab = useRef<HTMLButtonElement>(null);
-  const prepassTab = useRef<HTMLButtonElement>(null);
-  const mcpTab = useRef<HTMLButtonElement>(null);
+  const tabButtons = useRef<Partial<Record<SettingsTab, HTMLButtonElement | null>>>({});
   const id = useId();
   if (!open) return null;
 
@@ -98,16 +95,7 @@ export function Settings({
   };
   const focusTab = (next: SettingsTab) => {
     onTabChange(next);
-    (next === "providers"
-      ? providersTab
-      : next === "general"
-        ? generalTab
-        : next === "model-buckets"
-          ? modelBucketsTab
-          : next === "prepass"
-            ? prepassTab
-            : mcpTab
-    ).current?.focus();
+    tabButtons.current[next]?.focus();
   };
   const navigateTabs = (event: TargetedKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
@@ -125,17 +113,17 @@ export function Settings({
       class="settings-popover"
       label="Settings"
       placement="below"
-      initialFocus={
-        tab === "providers"
-          ? searchInput
-          : tab === "general"
-            ? workingDirectoryButton
-            : tab === "model-buckets"
-              ? modelBucketsTab
-              : tab === "prepass"
-                ? prepassTab
-                : mcpTab
-      }
+      initialFocus={{
+        get current() {
+          const field =
+            tab === "providers"
+              ? searchInput.current
+              : tab === "general"
+                ? workingDirectoryButton.current
+                : null;
+          return field ?? tabButtons.current[tab] ?? null;
+        },
+      }}
       onClose={close}
     >
       <header class="settings-heading">
@@ -148,66 +136,23 @@ export function Settings({
         aria-label="Settings categories"
         onKeyDown={navigateTabs}
       >
-        <button
-          ref={providersTab}
-          type="button"
-          id={`${id}-providers-tab`}
-          role="tab"
-          aria-selected={tab === "providers"}
-          aria-controls={`${id}-providers-panel`}
-          tabIndex={tab === "providers" ? 0 : -1}
-          onClick={() => onTabChange("providers")}
-        >
-          Providers
-        </button>
-        <button
-          ref={generalTab}
-          type="button"
-          id={`${id}-general-tab`}
-          role="tab"
-          aria-selected={tab === "general"}
-          aria-controls={`${id}-general-panel`}
-          tabIndex={tab === "general" ? 0 : -1}
-          onClick={() => onTabChange("general")}
-        >
-          General
-        </button>
-        <button
-          ref={modelBucketsTab}
-          type="button"
-          id={`${id}-model-buckets-tab`}
-          role="tab"
-          aria-selected={tab === "model-buckets"}
-          aria-controls={`${id}-model-buckets-panel`}
-          tabIndex={tab === "model-buckets" ? 0 : -1}
-          onClick={() => onTabChange("model-buckets")}
-        >
-          Model buckets
-        </button>
-        <button
-          ref={prepassTab}
-          type="button"
-          id={`${id}-prepass-tab`}
-          role="tab"
-          aria-selected={tab === "prepass"}
-          aria-controls={`${id}-prepass-panel`}
-          tabIndex={tab === "prepass" ? 0 : -1}
-          onClick={() => onTabChange("prepass")}
-        >
-          Prepass
-        </button>
-        <button
-          ref={mcpTab}
-          type="button"
-          id={`${id}-mcp-tab`}
-          role="tab"
-          aria-selected={tab === "mcp"}
-          aria-controls={`${id}-mcp-panel`}
-          tabIndex={tab === "mcp" ? 0 : -1}
-          onClick={() => onTabChange("mcp")}
-        >
-          MCP
-        </button>
+        {tabs.map((category) => (
+          <button
+            key={category}
+            ref={(button) => {
+              tabButtons.current[category] = button;
+            }}
+            type="button"
+            id={`${id}-${category}-tab`}
+            role="tab"
+            aria-selected={tab === category}
+            aria-controls={`${id}-${category}-panel`}
+            tabIndex={tab === category ? 0 : -1}
+            onClick={() => onTabChange(category)}
+          >
+            {tabLabels[category]}
+          </button>
+        ))}
       </div>
       <section
         class="settings-page"
@@ -225,18 +170,12 @@ export function Settings({
         aria-labelledby={`${id}-providers-tab`}
         hidden={tab !== "providers"}
       >
-        <label class="settings-search">
-          <Icon name="search" />
-          <input
-            ref={searchInput}
-            type="search"
-            aria-label="Search providers"
-            placeholder="Search providers…"
-            value={search}
-            onInput={(event) => setSearch(event.currentTarget.value)}
+        {tab === "providers" && (
+          <ProviderSettings
+            state={state}
+            search={{ value: search, onChange: setSearch, inputRef: searchInput }}
           />
-        </label>
-        {tab === "providers" && <ProviderSettings state={state} search={search} />}
+        )}
       </section>
       <section
         class="settings-page"
@@ -247,7 +186,11 @@ export function Settings({
       >
         <GeneralSettings
           state={preferences}
+          providers={state}
+          active={tab === "general"}
           buttonRef={workingDirectoryButton}
+          attentionSounds={attentionSounds}
+          onAttentionSoundsChange={onAttentionSoundsChange}
           compactionTriggerDraft={compactionTriggerDraft.value}
           onCompactionTriggerDraftChange={(value) =>
             setCompactionTriggerDraft(
@@ -258,47 +201,6 @@ export function Settings({
             setCompactionTriggerDraft({ value: compactionTriggerInput(value), edited: false })
           }
         />
-        <label class="attention-sounds-setting">
-          <input
-            type="checkbox"
-            checked={attentionSounds}
-            onChange={(event) => onAttentionSoundsChange(event.currentTarget.checked)}
-          />
-          Play question and completion sounds
-        </label>
-        <MaxSubagentDepth state={preferences} />
-        {tab === "general" && (
-          <section class="general-settings" aria-label="Source selection">
-            <h3>Sources</h3>
-            <div class="settings-tabs" role="group" aria-label="Source category">
-              <button
-                type="button"
-                disabled={sourceBusy}
-                aria-pressed={sourceKind === "instructions"}
-                onClick={() => setSourceKind("instructions")}
-              >
-                Instructions
-              </button>
-              <button
-                type="button"
-                disabled={sourceBusy}
-                aria-pressed={sourceKind === "skills"}
-                onClick={() => setSourceKind("skills")}
-              >
-                Skills
-              </button>
-            </div>
-            {sourceKind === "instructions" ? (
-              <SourceIgnorePicker
-                key="instructions"
-                kind="instructions"
-                onBusyChange={setSourceBusy}
-              />
-            ) : (
-              <SourceIgnorePicker key="skills" kind="skills" onBusyChange={setSourceBusy} />
-            )}
-          </section>
-        )}
       </section>
       <section
         class="settings-page"
@@ -315,9 +217,6 @@ export function Settings({
             active={tab === "model-buckets"}
           />
         </div>
-        {tab === "model-buckets" && (
-          <DefaultSubagentProviders providers={state} state={preferences} />
-        )}
       </section>
       <section
         class="settings-page"

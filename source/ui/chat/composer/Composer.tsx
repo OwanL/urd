@@ -10,6 +10,10 @@ import type { ModelPickerOption } from "../../providers/models/ModelPicker.tsx";
 import "./composer.css";
 import { ReasoningPicker } from "./ReasoningPicker.tsx";
 
+// Native content sizing removes the per-keystroke measure-and-mutate cycle;
+// browsers without support keep the JS resize below.
+const fieldSizing = CSS.supports("field-sizing", "content");
+
 interface ComposerProps {
   input: RefObject<HTMLTextAreaElement | null>;
   text: string;
@@ -108,13 +112,13 @@ export function Composer({
 
   useLayoutEffect(() => {
     const textarea = input.current;
-    if (!textarea) return;
+    if (!textarea || fieldSizing) return;
     resizeInput(textarea);
   }, [input, text]);
 
   useEffect(() => {
     const textarea = input.current;
-    if (!textarea) return;
+    if (!textarea || fieldSizing) return;
     let width = textarea.clientWidth;
     const observer = new ResizeObserver(() => {
       if (textarea.clientWidth === width) return;

@@ -46,6 +46,11 @@
   color: var(--text-secondary);
   opacity: 1;
 }
+@supports (field-sizing: content) {
+  .composer-input {
+    field-sizing: content;
+  }
+}
 .composer-controls,
 .composer-selections,
 .composer-actions {

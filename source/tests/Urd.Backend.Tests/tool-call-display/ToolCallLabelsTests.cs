@@ -53,6 +53,32 @@ public sealed class ToolCallLabelsTests {
   }
 
   [Theory]
+  [InlineData("Read", ToolCallIcon.Read)]
+  [InlineData("read_file", ToolCallIcon.Read)]
+  [InlineData("Write", ToolCallIcon.Write)]
+  [InlineData("write_file", ToolCallIcon.Write)]
+  [InlineData("Edit", ToolCallIcon.Edit)]
+  [InlineData("replace", ToolCallIcon.Edit)]
+  public void FileAliasesUseFilePathAndFallbackIcon(string tool, ToolCallIcon icon) {
+    string directory = Path.Combine(Path.GetTempPath(), "urd-label-work");
+    ToolCallLabel label = ToolCallLabels.Create(tool, "{\"file_path\":\"src/file.cs\"}", directory);
+    Assert.Equal(icon, label.Icon);
+    Assert.Equal("file.cs", label.Title);
+    Assert.Equal(Path.GetFullPath(Path.Combine(directory, "src/file.cs")), label.Path);
+    Assert.Equal(icon, ToolCallLabels.Create(tool, "{malformed", directory).Icon);
+  }
+
+  [Fact]
+  public void AliasReadRangesAndSkillLabelsAreDisplayed() {
+    string directory = Path.Combine(Path.GetTempPath(), "skills", "diagnose");
+    Assert.Equal("lines 4–6", ToolCallLabels.Create("Read", "{\"file_path\":\"a\",\"offset\":4,\"limit\":3}", directory).Detail);
+    Assert.Equal("lines 4–6", ToolCallLabels.Create("read_file", "{\"file_path\":\"a\",\"start_line\":4,\"end_line\":6}", directory).Detail);
+    Assert.Null(ToolCallLabels.Create("read_file", "{\"file_path\":\"a\",\"end_line\":6,\"$omitted\":1}", directory).Detail);
+    Assert.Equal(ToolCallIcon.Skill, ToolCallLabels.Create("Read", "{\"file_path\":\"SKILL.md\"}", directory).Icon);
+    Assert.Equal(ToolCallIcon.Skill, ToolCallLabels.Create("read_file", "{\"file_path\":\"SKILL.md\"}", directory).Icon);
+  }
+
+  [Theory]
   [InlineData("read", "skill.MD", "diagnose", ToolCallIcon.Skill)]
   [InlineData("read", "SKILL.md.bak", "SKILL.md.bak", ToolCallIcon.Read)]
   [InlineData("edit", "SKILL.md", "SKILL.md", ToolCallIcon.Edit)]

@@ -12,19 +12,15 @@ public static class ToolCallLabels {
 
     using (document) {
       JsonElement arguments = document!.RootElement;
-      if (toolName is "read" or "write" or "edit") {
+      if (toolName is not null && FileIcon(toolName) is { } icon) {
         (string title, string? path) = FileToolLabeler.GetFileLabel(arguments, toolName, workingDirectory);
-        if (toolName == "read" && title.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase) &&
+        if (icon == ToolCallIcon.Read && title.Equals("SKILL.md", StringComparison.OrdinalIgnoreCase) &&
             Path.GetFileName(Path.GetDirectoryName(path)) is { Length: > 0 } skillDirectory)
           return CreateLabel(ToolCallIcon.Skill, skillDirectory, null, null);
 
-        ToolCallIcon icon = toolName switch {
-          "read" => ToolCallIcon.Read,
-          "write" => ToolCallIcon.Write,
-          _ => ToolCallIcon.Edit
-        };
         string? detail = toolName switch {
-          "read" => FileToolLabeler.ReadDetail(arguments),
+          "read" or "Read" => FileToolLabeler.ReadDetail(arguments),
+          "read_file" => FileToolLabeler.GeminiReadDetail(arguments),
           "edit" => FileToolLabeler.EditDetail(arguments),
           _ => null
         };
@@ -40,15 +36,19 @@ public static class ToolCallLabels {
     }
   }
 
+  private static ToolCallIcon? FileIcon(string? toolName) => toolName switch {
+    "read" or "Read" or "read_file" => ToolCallIcon.Read,
+    "write" or "Write" or "write_file" => ToolCallIcon.Write,
+    "edit" or "Edit" or "replace" => ToolCallIcon.Edit,
+    _ => null
+  };
+
   private static ToolCallLabel Fallback(string? toolName, string fallbackTitle) => toolName switch {
     "bash" => CreateLabel(ToolCallIcon.Terminal, fallbackTitle, null, null),
-    "read" => CreateLabel(ToolCallIcon.Read, fallbackTitle, null, null),
-    "write" => CreateLabel(ToolCallIcon.Write, fallbackTitle, null, null),
-    "edit" => CreateLabel(ToolCallIcon.Edit, fallbackTitle, null, null),
     "cancel_pending_calls" => CancelPendingLabeler.Fallback(),
     "ask_agent" => AgentQuestionLabeler.FallbackAsk(),
     "answer_agent" => AgentQuestionLabeler.FallbackAnswer(),
-    _ => CreateLabel(ToolCallIcon.Generic, fallbackTitle, null, null)
+    _ => CreateLabel(FileIcon(toolName) ?? ToolCallIcon.Generic, fallbackTitle, null, null)
   };
 
   internal static ToolCallLabel CreateLabel(ToolCallIcon icon, string title, string? detail, string? path) {

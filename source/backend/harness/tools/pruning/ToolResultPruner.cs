@@ -7,7 +7,9 @@ namespace Urd.Core.Tools;
 internal static class ToolResultPruner {
   internal static ToolOutput Prune(string name, JsonElement arguments, ToolOutput output) {
     // Browser diffs depend on the preceding page text being delivered verbatim.
-    if (output.IsError || output.Images.Count != 0 || name is "browser" or "read" or "ask_user" || output.Spill is not null)
+    if (output.IsError || output.Images.Count != 0
+        || name is "browser" or "read" or "Read" or "read_file" or "ask_user"
+        || output.Spill is not null)
       return output;
 
     try {

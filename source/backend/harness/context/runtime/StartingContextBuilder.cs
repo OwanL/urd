@@ -24,7 +24,7 @@ internal sealed class StartingContextBuilder {
   internal StartingContext Create(StartingContextInput input, CancellationToken cancellation) {
     ArgumentNullException.ThrowIfNull(input);
     cancellation.ThrowIfCancellationRequested();
-    AIFunctionDeclaration[] tools = toolCatalog.Tools
+    AIFunctionDeclaration[] tools = toolCatalog.ForFamily(input.ModelFamily)
         .Select(AgentToolDeclaration.Create)
         .ToArray();
     return Compose(input, tools, cancellation);
@@ -56,13 +56,13 @@ internal sealed class StartingContextBuilder {
     cancellation.ThrowIfCancellationRequested();
 
     HashSet<string> protectedToolNames = new(preferences.ProtectedResources.Tools, StringComparer.Ordinal);
-    protectedToolNames.UnionWith(runtimeProtectedTools);
-    AIFunctionDeclaration[] allTools = toolCatalog.Tools.Select(AgentToolDeclaration.Create).ToArray();
+    protectedToolNames.UnionWith(runtimeProtectedTools.Select(toolCatalog.CapabilityName));
+    AIFunctionDeclaration[] allTools = toolCatalog.ForFamily(input.ModelFamily).Select(AgentToolDeclaration.Create).ToArray();
     var protectedSkills = ProtectedPaths(preferences.ProtectedResources.Skills);
     var protectedInstructions = ProtectedPaths(preferences.ProtectedResources.Instructions);
 
     AIFunctionDeclaration[] toolCandidates = allTools
-        .Where(tool => !protectedToolNames.Contains(tool.Name))
+        .Where(tool => !protectedToolNames.Contains(toolCatalog.CapabilityName(tool.Name)))
         .ToArray();
     DiscoveredSkill[] skillCandidates = resources.Skills
         .Where(skill => !protectedSkills.Contains(CanonicalPath(skill.Identity)))
@@ -81,8 +81,8 @@ internal sealed class StartingContextBuilder {
     // complete until all three operations have settled, including fatal and cancelled work.
     Task<StartingResourcePruningResult<AIFunctionDeclaration>> toolPruning = inherited is null
         ? pruner.PruneAsync(toolCandidates, protectedToolCount, cancellation)
-        : Task.FromResult(Inherit(toolCandidates, tool => tool.Name,
-            inherited.Tools.Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal)));
+        : Task.FromResult(Inherit(toolCandidates, tool => toolCatalog.CapabilityName(tool.Name),
+            inherited.Tools.Select(tool => toolCatalog.CapabilityName(tool.Name)).ToHashSet(StringComparer.Ordinal)));
     Task<StartingResourcePruningResult<DiscoveredSkill>> skillPruning =
         pruner.PruneAsync(skillCandidates, protectedSkillCount, cancellation, indexWarning);
     Task<StartingResourcePruningResult<DiscoveredInstructionDocument>> instructionPruning =
@@ -101,7 +101,7 @@ internal sealed class StartingContextBuilder {
         .Select(document => CanonicalPath(document.Identity)).ToHashSet(pathComparer);
 
     AIFunctionDeclaration[] selectedTools = allTools
-        .Where(tool => protectedToolNames.Contains(tool.Name) || retainedToolNames.Contains(tool.Name))
+        .Where(tool => protectedToolNames.Contains(toolCatalog.CapabilityName(tool.Name)) || retainedToolNames.Contains(tool.Name))
         .ToArray();
     DiscoveredSkill[] retainedSkills = resources.Skills
         .Where(skill => protectedSkills.Contains(CanonicalPath(skill.Identity))

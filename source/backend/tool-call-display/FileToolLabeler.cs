@@ -6,7 +6,8 @@ namespace Urd.Core.ToolCallDisplay;
 
 internal static class FileToolLabeler {
   internal static (string Title, string? Path) GetFileLabel(JsonElement arguments, string toolName, string? workingDirectory) {
-    if (!ToolCallExcerpt.TryGetExactString(arguments, "path", out string path) || string.IsNullOrWhiteSpace(path))
+    string pathField = toolName is "read" or "write" or "edit" ? "path" : "file_path";
+    if (!ToolCallExcerpt.TryGetExactString(arguments, pathField, out string path) || string.IsNullOrWhiteSpace(path))
       return (toolName, null);
 
     string title;
@@ -39,6 +40,17 @@ internal static class FileToolLabeler {
       return $"lines {first}+";
     long last = (long)first + limit - 1;
     return $"lines {first}–{last.ToString(CultureInfo.InvariantCulture)}";
+  }
+
+  internal static string? GeminiReadDetail(JsonElement arguments) {
+    bool hasStart = ToolCallExcerpt.TryGetPositiveInteger(arguments, "start_line", out int start);
+    bool hasEnd = ToolCallExcerpt.TryGetPositiveInteger(arguments, "end_line", out int end);
+    if ((!hasStart && !hasEnd) ||
+        (ToolCallExcerpt.HasTopLevelOmitted(arguments) && (!hasStart || !hasEnd)))
+      return null;
+
+    int first = hasStart ? start : 1;
+    return hasEnd ? $"lines {first}–{end}" : $"lines {first}+";
   }
 
   internal static string? EditDetail(JsonElement arguments) {

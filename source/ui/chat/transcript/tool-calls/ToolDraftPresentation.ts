@@ -102,7 +102,10 @@ function unescapeText(source: string, stopAtQuote = false) {
   return readJsonText(source, 0, false, stopAtQuote);
 }
 
-function editPreview(fields: StringField[], tail: string, field: string | null | undefined) {
+function editPreview(draft: ToolDraft, fields: StringField[], tail: string) {
+  const batched = draft.name === "edit";
+  const oldField = batched ? "oldText" : "old_string";
+  const newField = batched ? "newText" : "new_string";
   const parts: EditPreviewPart[] = [];
   let added = 0;
   let removed = 0;
@@ -110,11 +113,11 @@ function editPreview(fields: StringField[], tail: string, field: string | null |
 
   function appendEdits(fields: StringField[]) {
     for (const { key, value } of fields) {
-      if (key !== "oldText" && key !== "newText") continue;
+      if (key !== oldField && key !== newField) continue;
       hasEdit = true;
       if (!value) continue;
       const lines = value.split("\n");
-      if (key === "oldText") {
+      if (key === oldField) {
         removed += lines.length;
         parts.push({ kind: "removed", text: lines.map((line) => `− ${line}`).join("\n") });
       } else {
@@ -127,13 +130,14 @@ function editPreview(fields: StringField[], tail: string, field: string | null |
   appendEdits(fields);
   if (tail) {
     // A key inside a JSON string would have escaped closing quotes.
-    const marker = /"(oldText|newText)"\s*:\s*"/.exec(tail);
+    const pattern = batched ? /"(oldText|newText)"\s*:\s*"/ : /"(old_string|new_string)"\s*:\s*"/;
+    const marker = pattern.exec(tail);
     const start = marker?.index ?? -1;
     const prefix = start < 0 ? tail : tail.slice(0, start);
     const { text } = unescapeText(prefix, true);
-    const prefixField = marker ? (marker[1] === "newText" ? "oldText" : "newText") : field;
+    const prefixField = marker ? (marker[1] === newField ? oldField : newField) : draft.field;
     parts.push({ kind: "neutral", text: "…" });
-    if (text && (prefixField === "oldText" || prefixField === "newText"))
+    if (text && (prefixField === oldField || prefixField === newField))
       appendEdits([{ key: prefixField, value: text, complete: false }]);
     else if (text) parts.push({ kind: "neutral", text });
     if (start >= 0) appendEdits(strings(tail.slice(start)));
@@ -164,7 +168,11 @@ function parseToolDraft(draft: ToolDraft): DraftPresentation {
   const fields = strings(head);
   const last = fields.at(-1);
   const name = draft.name || "tool";
-  if (tail && name !== "edit") {
+  let kind: "read" | "write" | "edit" | null = null;
+  if (["read", "Read", "read_file"].includes(name)) kind = "read";
+  else if (["write", "Write", "write_file"].includes(name)) kind = "write";
+  else if (["edit", "Edit", "replace"].includes(name)) kind = "edit";
+  if (tail && kind !== "edit") {
     // The tail starts at an arbitrary byte, possibly inside an escape. Do not
     // join it to the head or interpret it as a continuation of that escape.
     if (last && !last.complete) {
@@ -177,7 +185,7 @@ function parseToolDraft(draft: ToolDraft): DraftPresentation {
     }
   }
   const get = (key: string) => fields.find((field) => field.key === key)?.value;
-  const path = get("path");
+  const path = get(name === kind ? "path" : "file_path");
   const title = path
     ? path
         .replace(/[\\/]+$/, "")
@@ -191,14 +199,14 @@ function parseToolDraft(draft: ToolDraft): DraftPresentation {
     preview: null,
   };
 
-  if (name === "read" || name === "write" || name === "edit") {
-    result.icon = name;
+  if (kind) {
+    result.icon = kind;
     result.title = oneLine(title, 120);
-    if (name === "write") {
+    if (kind === "write") {
       const text = get("content");
       if (text) result.preview = { style: "code", text };
-    } else if (name === "edit") {
-      const { parts, detail } = editPreview(fields, tail, draft.field);
+    } else if (kind === "edit") {
+      const { parts, detail } = editPreview(draft, fields, tail);
       result.detail = detail;
       if (parts.length) result.preview = { style: "edit", parts };
     }

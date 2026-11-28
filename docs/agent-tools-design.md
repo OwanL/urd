@@ -200,8 +200,16 @@ internal sealed record ToolOutput(
   JsonElement? Details = null, bool IsError = false);
 ```
 
-**Model settings.** Version 1 offers the generic tools to every family; a family without its own
-tool falls back to the generic one. Family-specific tools (e.g. `apply_patch`) come later.
+**Model settings and file tools.** Each execution uses its frozen model family, not the provider
+route. Anthropic gets `Read(file_path, offset?, limit?)`, `Write(file_path, content)`, and
+`Edit(file_path, old_string, new_string)` ([Claude Code reference](https://code.claude.com/docs/en/agent-sdk/typescript#edit)).
+Google gets `read_file(file_path, start_line?, end_line?)`, `write_file(file_path, content)`, and
+`replace(file_path, instruction, old_string, new_string)` ([Gemini CLI declarations](https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/tools/definitions/model-family-sets/gemini-3.ts)).
+Line numbers are 1-based and the end is inclusive. Both editors perform one exact unique replacement;
+`instruction` describes the change and does not execute it. Other families keep `read`, `write`,
+and batched `edit`. Shell and bespoke tools do not vary. These are custom function schemas, not
+provider-native tool registrations. Protected-tool settings, saved boundary selections and parent/child
+inheritance select capabilities; switching family does not rewrite historical calls or rerun pruning.
 
 ```csharp
 public enum ModelFamily { OpenAI, Anthropic, Google, Other }

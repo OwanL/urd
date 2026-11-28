@@ -2,6 +2,7 @@ using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Context;
 using Urd.Core.Execution;
+using Urd.Core.Providers;
 using Urd.Core.Sessions;
 using Urd.Core.Storage;
 using Urd.Core.Tools;
@@ -119,15 +120,51 @@ public sealed class StartingContextSessionTests {
     }
   }
 
+  [Fact]
+  public async Task SwitchingFamilyRebindsOnlyOfferedFileToolsAndKeepsHistoryRaw() {
+    using var database = new TemporaryDatabase();
+    string directory = Path.GetDirectoryName(database.Path)!;
+    string file = Path.Combine(directory, "family.txt");
+    await File.WriteAllTextAsync(file, "original");
+    int turns = 0;
+    using var client = new ScriptedChatClient(token => Interlocked.Increment(ref turns) switch {
+      1 => ToolBatch(token, new FunctionCallContent("first", "Edit", new Dictionary<string, object?> {
+        ["file_path"] = "family.txt", ["old_string"] = "original", ["new_string"] = "first edit"
+      })),
+      3 => ToolBatch(token, new FunctionCallContent("second", "replace", new Dictionary<string, object?> {
+        ["file_path"] = "family.txt", ["instruction"] = "Update the text", ["old_string"] = "first edit", ["new_string"] = "second edit"
+      })),
+      _ => Complete(token)
+    });
+    using UrdStore store = UrdStore.Open(database.Path);
+    var manager = new SessionManager(store, _ => client, [new EditTool(new FileMutationQueue())], directory);
+    try {
+      PrimarySession session = await manager.CreatePrimaryAsync();
+      await SubmitAndWaitAsync(session, "Claude edit", ModelFamily.Anthropic);
+      Assert.Equal("first edit", await File.ReadAllTextAsync(file));
+      await SubmitAndWaitAsync(session, "Gemini edit", ModelFamily.Google);
+      Assert.Equal("second edit", await File.ReadAllTextAsync(file));
+      await SubmitAndWaitAsync(session, "Generic follow-up");
+      string[] editNames = ["edit", "Edit", "replace"];
+      Assert.Equal(new[] { "Edit", "Edit", "replace", "replace", "edit" }, client.Options.Select(options =>
+          Assert.Single(options!.Tools!, tool => editNames.Contains(tool.Name)).Name));
+      Assert.Equal(new[] { "Edit", "replace" }, client.LastRequest.SelectMany(message => message.Contents)
+          .OfType<FunctionCallContent>().Select(call => call.Name));
+    } finally {
+      await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
+      File.Delete(file);
+    }
+  }
+
   private static TestAgentTool CreateTool(string name, string description = "Original meaning", Action? effect = null) =>
       new(AIFunctionFactory.Create(() => {
         effect?.Invoke();
         return "done";
       }, name: name, description: description));
 
-  private static async Task SubmitAndWaitAsync(PrimarySession session, string text) {
+  private static async Task SubmitAndWaitAsync(PrimarySession session, string text, ModelFamily family = ModelFamily.Other) {
     UserMessageReceipt receipt = await session.SubmitUserMessageAsync(
-        new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default));
+        new UserMessageSubmission(Guid.NewGuid(), 0, text, TestLlmSelection.Default with { Family = family }));
     Assert.Equal(MessageAcceptance.Accepted, receipt.Acceptance);
     Assert.Equal(ExecutionOutcome.Completed,
         (await session.WaitForExecutionFinishAsync(Assert.IsType<Guid>(receipt.ExecutionId)).WaitAsync(TestTimeout)).Outcome);

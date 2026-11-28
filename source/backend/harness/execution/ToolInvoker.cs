@@ -23,9 +23,7 @@ internal static class ToolInvoker {
           ?? throw new InvalidOperationException($"Unknown tool '{call.Name}'.");
       AIFunctionDeclaration? offered = offeredDefinitions.FirstOrDefault(declaration =>
           string.Equals(declaration.Name, call.Name, StringComparison.Ordinal));
-      AIFunctionDeclaration current = AgentToolDeclaration.Create(tool);
-      if (offered is null || offered.Description != current.Description
-          || offered.JsonSchema.GetRawText() != current.JsonSchema.GetRawText())
+      if (offered is null || !AgentToolDeclaration.Matches(tool, offered))
         throw new InvalidOperationException($"Tool '{call.Name}' no longer matches its offered definition.");
       JsonElement arguments = tool.SupportsBackgroundOption ? StripBackgroundOption(call.Arguments) : call.Arguments;
       if (tool is HarnessTool harnessTool) {

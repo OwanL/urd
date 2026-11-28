@@ -20,7 +20,7 @@ internal sealed class SessionExecution : IDisposable {
   private readonly Func<ProviderConnection, LlmApi?, IChatClient> createChatClient; // Returns borrowed clients.
   private readonly LlmSelection selection;
   private readonly StartingContextBuilder startingContextBuilder;
-  private readonly HashSet<string> runtimeToolNames;
+  private readonly ToolCatalog toolCatalog;
   private StartingContext? startingContext;
   private readonly IRemoteMcpTools? remoteMcpTools;
   private readonly int maxRemoteToolCount;
@@ -45,7 +45,7 @@ internal sealed class SessionExecution : IDisposable {
 
   internal SessionExecution(SessionExecutionRecorder recorder, SessionBase session,
       Func<ProviderConnection, LlmApi?, IChatClient> createChatClient, LlmSelection selection,
-      StartingContextBuilder startingContextBuilder, IReadOnlyList<AgentTool>? tools = null,
+      StartingContextBuilder startingContextBuilder, ToolCatalog toolCatalog,
       PendingToolCalls? pendingToolCalls = null, ManualCompactionRequest? compaction = null, string? compactionSkipReason = null,
       IRemoteMcpTools? remoteMcpTools = null) {
     this.recorder = recorder;
@@ -54,14 +54,15 @@ internal sealed class SessionExecution : IDisposable {
     this.selection = selection;
     socketRun = selection.Connection.Route == ProviderRoute.ChatGpt ? new ChatGptSocketRun() : null;
     this.startingContextBuilder = startingContextBuilder;
-    runtimeToolNames = (tools ?? []).Select(tool => tool.Name).ToHashSet(StringComparer.Ordinal);
+    this.toolCatalog = toolCatalog;
+    IReadOnlyList<AgentTool> tools = toolCatalog.ForFamily(selection.Family);
     this.remoteMcpTools = remoteMcpTools;
-    maxRemoteToolCount = Math.Max(0, 128 - (tools?.Count ?? 0));
+    maxRemoteToolCount = Math.Max(0, 128 - tools.Count);
     pending = pendingToolCalls ?? new PendingToolCalls();
-    toolExecution = new SessionToolExecution(session, recorder, tools ?? [], pending, selection.SupportsImages, stop.Token);
-    if (tools?.OfType<AnswerAgentTool>().SingleOrDefault() is { } answerTool)
+    toolExecution = new SessionToolExecution(session, recorder, tools, pending, selection.SupportsImages, stop.Token);
+    if (tools.OfType<AnswerAgentTool>().SingleOrDefault() is { } answerTool)
       answerAgentDeclaration = AgentToolDeclaration.Create(answerTool);
-    auxiliary = new(recorder, createChatClient, tools ?? [], session.WorkingDirectory);
+    auxiliary = new(recorder, createChatClient, toolCatalog.Tools, session.WorkingDirectory);
     manualCompactionRequest = compaction;
     this.compactionSkipReason = compactionSkipReason;
     IsCompacting = compaction is not null;
@@ -199,7 +200,7 @@ internal sealed class SessionExecution : IDisposable {
     stop.Token.ThrowIfCancellationRequested();
     UserPreferences preferences = session.ReadPreferences();
     ModelHistory history = currentHistory ?? await recorder.ReadModelHistoryAsync(requestId);
-    StartingContext currentContext = startingContext ?? session.ReadStartingContext()
+    StartingContext currentContext = startingContext ?? RestoreContext(session.ReadStartingContext())
         ?? startingContextBuilder.Create(ContextInput(), stop.Token);
     HistoryCompactionPlan? plan = HistoryCompactor.CreatePlan(history, selection, currentContext, reason, focus,
         preferences.CompactionTriggerTokenCount);
@@ -233,17 +234,16 @@ internal sealed class SessionExecution : IDisposable {
 
   private StartingContextInput ContextInput() => new(session.Kind, selection.Family, session.WorkingDirectory);
 
+  private StartingContext? RestoreContext(StartingContext? saved) => saved is null ? null
+      : saved with { Tools = toolCatalog.Restore(saved.Tools, selection.Family) };
+
   private async Task PrepareStartingContextAsync(LlmRequest request) {
     Guid boundary = request.Context?.PreviousCompaction?.Id ?? Guid.Empty;
     if (startingContext?.BoundaryId == boundary)
       return;
-    startingContext = session.ReadStartingContext(boundary);
-    if (startingContext is { } saved) {
-      // Keep the saved selection, but do not offer tools the runtime no longer has.
-      if (saved.Tools.Any(tool => !runtimeToolNames.Contains(tool.Name)))
-        startingContext = saved with { Tools = saved.Tools.Where(tool => runtimeToolNames.Contains(tool.Name)).ToArray() };
+    startingContext = RestoreContext(session.ReadStartingContext(boundary));
+    if (startingContext is not null)
       return;
-    }
 
     UserPreferences captured = session.ReadPreferences();
     string[] newMessages = request.Context is { } history

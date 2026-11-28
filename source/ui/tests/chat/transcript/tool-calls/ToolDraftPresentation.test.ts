@@ -154,3 +154,42 @@ void test("bounds generic fragments and does not parse a disconnected tail", () 
   assert.equal(result.preview?.style === "code" && result.preview.text.length, 4096 + 3 + 3072);
   assert.equal(presentToolDraft(draft("read", '{"path":"src/', 'wrong.ts"}')).title, "src");
 });
+
+void test("presents file alias drafts with the same icons and previews", () => {
+  for (const name of ["Read", "read_file"]) {
+    const result = presentToolDraft(draft(name, '{"file_path":"src/app.ts"}'));
+    assert.equal(result.icon, "read");
+    assert.equal(result.title, "app.ts");
+  }
+  for (const name of ["Write", "write_file"]) {
+    const result = presentToolDraft(draft(name, '{"file_path":"src/app.ts","content":"hello'));
+    assert.equal(result.icon, "write");
+    assert.deepEqual(result.preview, { style: "code", text: "hello" });
+  }
+  for (const name of ["Edit", "replace"]) {
+    const result = presentToolDraft(
+      draft(name, '{"file_path":"src/app.ts","old_string":"old","new_string":"new'),
+    );
+    assert.equal(result.icon, "edit");
+    assert.equal(result.detail, "−1 +1");
+    assert.deepEqual(result.preview, {
+      style: "edit",
+      parts: [
+        { kind: "removed", text: "− old" },
+        { kind: "added", text: "+ new" },
+      ],
+    });
+    const tail = presentToolDraft({
+      ...draft(name, '{"file_path":"a","new_string":"start', "end"),
+      field: "new_string",
+    });
+    assert.deepEqual(tail.preview, {
+      style: "edit",
+      parts: [
+        { kind: "added", text: "+ start" },
+        { kind: "neutral", text: "…" },
+        { kind: "added", text: "+ end" },
+      ],
+    });
+  }
+});

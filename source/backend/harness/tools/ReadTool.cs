@@ -20,7 +20,11 @@ internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
     }
     """);
 
-  public override async Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) {
+  public override Task<ToolOutput> RunAsync(JsonElement arguments, ToolContext context, CancellationToken cancellation) =>
+    ReadAsync(arguments, context, "offset", cancellation);
+
+  internal async Task<ToolOutput> ReadAsync(JsonElement arguments, ToolContext context, string continuationArgument,
+      CancellationToken cancellation) {
     try {
       string path = ToolArguments.RequireString(arguments, "path");
       int offset = ToolArguments.OptionalInteger(arguments, "offset", 1, 1);
@@ -28,7 +32,7 @@ internal sealed class ReadTool(FileMutationQueue files) : AgentTool {
       string absolutePath = ToolPaths.Resolve(path, context.WorkingDirectory);
       // Admission precedes any I/O await, so reads observe earlier mutations in the reply.
       return await files.ReadAfterMutationsAsync(absolutePath,
-        token => FileReader.ReadAsync(absolutePath, offset, limit, context.ModelAcceptsImages, token), cancellation).ConfigureAwait(false);
+        token => FileReader.ReadAsync(absolutePath, offset, limit, context.ModelAcceptsImages, token, continuationArgument), cancellation).ConfigureAwait(false);
     } catch (OperationCanceledException) {
       return new ToolOutput("read cancelled.", [], IsError: true);
     } catch (DecoderFallbackException) {

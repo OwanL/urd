@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Urd.Backend.Tests.Support;
 using Urd.Core.Execution;
+using Urd.Core.Providers;
 using Urd.Core.Tools;
 using Urd.Core.Usage;
 using Xunit;
@@ -21,17 +22,20 @@ public sealed class ConversationRunnerTests {
     Guid execution = await fixture.StartExecutionAsync("main input");
     await mainWaiting.Task.WaitAsync(TestTimeout);
 
+    string directory = Path.GetDirectoryName(fixture.Database.Path)!;
+    await File.WriteAllTextAsync(Path.Combine(directory, "notes.txt"), "explored");
     AgentTool[] tools = [
-      new TestAgentTool("read", (_, _, _) => Task.FromResult(new ToolOutput("explored", []))),
+      new ReadTool(new FileMutationQueue()),
       new TestAgentTool("write", (_, _, _) => throw new InvalidOperationException("Excluded from auxiliary runs.")),
       new TestAgentTool("bash", (_, _, _) => Task.FromResult(new ToolOutput("shelled", [])))
     ];
     int scriptedCalls = 2;
     var client = new ScriptedChatClient(token => Script(token));
-    var runner = new ConversationRunner(fixture.Session.Recorder, _ => client, tools, fixture.Session.WorkingDirectory);
+    var runner = new ConversationRunner(fixture.Session.Recorder, _ => client, tools, directory);
     ChatMessage[] input = [new(ChatRole.System, "Choose resources."), new(ChatRole.User, "explore")];
 
-    string answer = await runner.RunAsync("examination", TestLlmSelection.DefaultResolution, input, null,
+    var gemini = new AuxiliaryModelResolution(TestLlmSelection.Default with { Family = ModelFamily.Google }, false);
+    string answer = await runner.RunAsync("examination", gemini, input, null,
         CancellationToken.None).WaitAsync(TestTimeout);
 
     Assert.Equal("done", answer);
@@ -39,7 +43,7 @@ public sealed class ConversationRunnerTests {
     Assert.Equal(0, client.DisposeCalls);
     Assert.Equal("fixture-model", client.Options[0]!.ModelId);
     string[] offered = [.. client.Options[0]!.Tools!.Select(tool => tool.Name)];
-    Assert.Equal(["read", "bash"], offered);
+    Assert.Equal(["read_file", "bash"], offered);
     Assert.Equal("examination", Assert.IsType<UsageContext>(
         client.Options[0]!.AdditionalProperties![UsageContext.PropertyName]).Purpose);
 
@@ -63,12 +67,12 @@ public sealed class ConversationRunnerTests {
             row.IsDBNull(3) ? null : (long?)row.GetInt64(3), row.IsDBNull(4) ? null : row.GetString(4)));
     (string CallId, string Name, bool Started, long? Outcome, string? ResultJson) tool = Assert.Single(stored);
     Assert.Equal("call-1", tool.CallId);
-    Assert.Equal("read", tool.Name);
+    Assert.Equal("read_file", tool.Name);
     Assert.True(tool.Started);
     Assert.Equal(0L, tool.Outcome);
     Assert.Contains("explored", tool.ResultJson);
     Assert.Equal(1L, fixture.Database.Scalar(
-        "SELECT COUNT(*) FROM auxiliary_observed_calls WHERE name = 'read';")); // raw-sql: observations are recorded before dispatch
+        "SELECT COUNT(*) FROM auxiliary_observed_calls WHERE name = 'read_file';")); // raw-sql: observations are recorded before dispatch
 
     // The caller's input is untouched and the main history stays free of auxiliary messages.
     Assert.Equal("explore", input[1].Text);
@@ -85,7 +89,7 @@ public sealed class ConversationRunnerTests {
 
     IAsyncEnumerable<ChatResponseUpdate> Script(CancellationToken token) =>
         --scriptedCalls == 0 ? TextUpdates(["done"], token)
-        : ToolBatch(token, new FunctionCallContent("call-1", "read", new Dictionary<string, object?> { ["path"] = "notes.txt" }));
+        : ToolBatch(token, new FunctionCallContent("call-1", "read_file", new Dictionary<string, object?> { ["file_path"] = "notes.txt" }));
   }
 
   [Fact]

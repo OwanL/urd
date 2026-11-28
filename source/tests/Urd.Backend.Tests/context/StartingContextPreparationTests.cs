@@ -279,16 +279,18 @@ public sealed class StartingContextPreparationTests {
         return Task.CompletedTask;
       }, "Use the resources.");
       await using var catalog = Catalog(root, [rootDocument, nestedDocument, skill]);
-      var builder = new StartingContextBuilder(new ToolCatalog([TestTool("read"), TestTool("write"), TestTool("grep")]),
+      var files = new FileMutationQueue();
+      var tools = new ToolCatalog([new ReadTool(files), new WriteTool(files), TestTool("grep")]);
+      var builder = new StartingContextBuilder(tools,
           new InstructionResourceDiscovery(catalog, packaged));
       var preferences = new UserPreferences(project, null) {
         ProtectedResources = new() { Tools = ["write"], Skills = [], Instructions = [] }
       };
-      var inherited = new StartingContext([], [AgentToolDeclaration.Create(TestTool("read")),
+      var inherited = new StartingContext([], [AgentToolDeclaration.Create(tools.ForFamily(ModelFamily.Anthropic)[0]),
           AgentToolDeclaration.Create(TestTool("parent_only"))]) { InstructionPaths = [rootDocument] };
 
       StartingContext context = await builder.PrepareAsync(
-          new(SessionKind.Subagent, ModelFamily.Other, project), Guid.NewGuid(), "Use the resources.",
+          new(SessionKind.Subagent, ModelFamily.Google, project), Guid.NewGuid(), "Use the resources.",
           preferences, new HashSet<string>(StringComparer.Ordinal), pruner, CancellationToken.None, inherited)
           .WaitAsync(TestTimeout);
 
@@ -296,7 +298,7 @@ public sealed class StartingContextPreparationTests {
       Assert.Contains("Root rule.", text, StringComparison.Ordinal);
       Assert.DoesNotContain("Nested rule.", text, StringComparison.Ordinal);
       Assert.Contains("Local skill.", text, StringComparison.Ordinal);
-      Assert.Equal(new[] { "read", "write" }, context.Tools.Select(tool => tool.Name));
+      Assert.Equal(new[] { "read_file", "write_file" }, context.Tools.Select(tool => tool.Name));
       Assert.Equal(new[] { rootDocument }, context.InstructionPaths);
       Assert.Equal(1, auxiliary.Calls);
       Assert.All(statuses, status => Assert.Equal("skills", status.Category));

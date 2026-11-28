@@ -8,7 +8,7 @@ internal static class FileReader {
   private static readonly byte[] pngSignature = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
 
   public static async Task<ToolOutput> ReadAsync(string path, int offset, int limit,
-      bool modelAcceptsImages, CancellationToken cancellation) {
+      bool modelAcceptsImages, CancellationToken cancellation, string continuationArgument = "offset") {
     await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite,
       8192, FileOptions.Asynchronous | FileOptions.SequentialScan);
     byte[] header = new byte[32];
@@ -16,7 +16,7 @@ internal static class FileReader {
     string? mime = ImageMime(header.AsSpan(0, headerLength));
     stream.Position = 0;
     if (mime is null)
-      return await TextFilePage.ReadAsync(stream, path, offset, limit, cancellation).ConfigureAwait(false);
+      return await TextFilePage.ReadAsync(stream, path, offset, limit, cancellation, continuationArgument).ConfigureAwait(false);
     return await ReadImageAsync(stream, mime, modelAcceptsImages, cancellation).ConfigureAwait(false);
   }
 

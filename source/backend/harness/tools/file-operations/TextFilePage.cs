@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Urd.Core.Tools;
 
 // Scans UTF-8 text while retaining only the current line and selected bounded page.
-internal sealed class TextFilePage(string path, int offset, int limit) {
+internal sealed class TextFilePage(string path, int offset, int limit, string continuationArgument) {
   private static readonly UTF8Encoding utf8 = new(false, true);
   private readonly char[] line = new char[ToolOutputLimits.MaxBytes + 1];
   private readonly List<string> output = [];
@@ -16,9 +16,9 @@ internal sealed class TextFilePage(string path, int offset, int limit) {
   private bool pagingNoticeOverflow;
 
   public static async Task<ToolOutput> ReadAsync(Stream stream, string path, int offset, int limit,
-      CancellationToken cancellation) {
+      CancellationToken cancellation, string continuationArgument = "offset") {
     using var reader = new StreamReader(stream, utf8, detectEncodingFromByteOrderMarks: false, bufferSize: 8192, leaveOpen: true);
-    var page = new TextFilePage(path, offset, limit);
+    var page = new TextFilePage(path, offset, limit, continuationArgument);
     char[] buffer = new char[8192];
     int count;
     while ((count = await reader.ReadAsync(buffer, cancellation).ConfigureAwait(false)) != 0) {
@@ -76,9 +76,9 @@ internal sealed class TextFilePage(string path, int offset, int limit) {
     }
     string text = string.Join("\n", output);
     if (cutoff is not null)
-      return text + $"\n\n[Showing lines {offset}-{nextOffset - 1} of {lineNumber}{(cutoff == "bytes" ? " (50KB limit)" : "")}. Use offset={nextOffset} to continue.]";
+      return text + $"\n\n[Showing lines {offset}-{nextOffset - 1} of {lineNumber}{(cutoff == "bytes" ? " (50KB limit)" : "")}. Use {continuationArgument}={nextOffset} to continue.]";
     return nextOffset <= lineNumber
-      ? text + $"\n\n[{lineNumber - nextOffset + 1} more lines in file. Use offset={nextOffset} to continue.]" : text;
+      ? text + $"\n\n[{lineNumber - nextOffset + 1} more lines in file. Use {continuationArgument}={nextOffset} to continue.]" : text;
   }
 
   private void CompleteLine(bool endOfFile) {

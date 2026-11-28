@@ -25,7 +25,7 @@ internal sealed class ActiveExecution(SessionBase session, UrdStore store, Async
     var identity = new ExecutionIdentity(session.Id, executionId, session.HistoryRevision);
     var recorder = new SessionExecutionRecorder(session, store, sessionLock, identity, subagents);
     var work = new SessionExecution(recorder, session, createChatClient, selection,
-        startingContextBuilder, tools.Tools, pending, compaction, compactionSkipReason,
+        startingContextBuilder, tools, pending, compaction, compactionSkipReason,
         (subagents as SessionManager)?.RemoteMcpTools);
     Current = new SessionExecutionDriver(session, sessionLock, work);
     RetainedTask = Current.RunAsync(executionStart.Task, firstRequest);

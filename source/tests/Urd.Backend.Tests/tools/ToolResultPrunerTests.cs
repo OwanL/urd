@@ -58,10 +58,25 @@ public sealed class ToolResultPrunerTests {
     Assert.Equal(TextResultRules.Normalize(gitOutput), Prune("bash", new ToolOutput(gitOutput, []), "git log").Text);
   }
 
-  [Fact]
-  public void ReadResultsBypassPruning() {
+  [Theory]
+  [InlineData("read")]
+  [InlineData("Read")]
+  [InlineData("read_file")]
+  public void ReadAliasesBypassPruning(string name) {
     ToolOutput output = new(RepeatedLines(), []);
-    Assert.Same(output, Prune("read", output));
+    Assert.Same(output, Prune(name, output));
+  }
+
+  [Theory]
+  [InlineData("write")]
+  [InlineData("edit")]
+  [InlineData("Write")]
+  [InlineData("Edit")]
+  [InlineData("write_file")]
+  [InlineData("replace")]
+  public void WriteAndEditAliasesUseExistingPruning(string name) {
+    ToolOutput output = new(RepeatedLines(), []);
+    Assert.Equal("same repeated status line\n  (... 23 identical lines)\n", Prune(name, output).Text);
   }
 
   [Fact]

@@ -43,7 +43,8 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
 
     // Auxiliary runs admit exactly read and bash, foreground only. Definitions must stay
     // identical to ToolInvoker's expectation, so capability filtering keeps full declarations.
-    AgentTool[] allowed = [.. tools.Where(tool => tool.Name is "read" or "bash")];
+    AgentTool[] allowed = [.. tools.Where(tool => tool.Name is "read" or "bash")
+        .Select(tool => FileToolVariants.For(tool, selection.Family))];
     AIFunctionDeclaration[] offered = [.. allowed.Select(AgentToolDeclaration.Create)];
     List<ChatMessage> messages = [.. input]; // Isolated copy; the caller's history is never mutated.
     AuxiliaryConversationRecorder recorder = await CreateConversationAsync(purpose, model, messages, offered, cancellation);

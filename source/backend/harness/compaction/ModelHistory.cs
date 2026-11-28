@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Urd.Core.Providers;
 
 namespace Urd.Core.Compaction;
 
@@ -7,6 +8,8 @@ namespace Urd.Core.Compaction;
 internal sealed record ModelHistory(
     IReadOnlyList<HistoryMessage> Messages, SavedHistoryCompaction? PreviousCompaction = null,
     long? UsageBasedContextTokens = null) {
+  internal ContextUsageCheckpoint? UsageCheckpoint { get; init; }
+
   internal IReadOnlyList<ChatMessage> ReadMessages() => EnumerateMessages().ToArray();
 
   internal IEnumerable<ChatMessage> EnumerateMessages() {
@@ -24,6 +27,14 @@ internal sealed record HistoryMessage(HistoryMessageLocation Location, bool Star
   internal Guid? AgentQuestionId { get; init; }
   internal bool IsUserTurnStart => StartsUserTurn && Message.Role == ChatRole.User;
   internal bool IsAssistantContinuation => !StartsUserTurn && Message.Role == ChatRole.Assistant;
+}
+
+// Provider usage for an unchanged prefix of the current request's history.
+internal sealed record ContextUsageCheckpoint(LlmSelection Selection, long Tokens, int UnmeasuredMessages) {
+  internal bool Matches(LlmSelection selection) => Selection.ModelId == selection.ModelId
+      && Selection.EffectiveApi == selection.EffectiveApi && Selection.Family == selection.Family
+      && Selection.SupportsImages == selection.SupportsImages
+      && ProviderManager.SameBinding(Selection.Connection, selection.Connection);
 }
 
 // Replaces all history before FirstRetainedMessageLocation with Summary.

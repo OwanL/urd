@@ -41,7 +41,7 @@ internal sealed class AnthropicInferenceClient(HttpClient httpClient, TimeSpan? 
     TimeSpan timeout = readTimeout ?? defaultReadTimeout;
     try {
       using var request = AnthropicRequest.Create(state, original, history, options, cancellationToken);
-      estimate?.Prepare(history, options);
+      estimate?.Prepare(history, options, original);
       using var response = await ReadAsync<HttpResponseMessage>(
           ct => new(httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct)),
           "provider response headers").ConfigureAwait(false);

@@ -3,12 +3,14 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Urd.Core.Compaction;
 using Urd.Core.Usage;
 
 namespace Urd.Core.Execution;
 
 // One model exchange. Prompt accounting runs alongside the stream; output is counted in bounded batches.
-internal sealed class RequestContextEstimate(Func<RequestContextEstimate, CancellationToken, Task> publish) : IAsyncDisposable {
+internal sealed class RequestContextEstimate(Func<RequestContextEstimate, CancellationToken, Task> publish,
+    (long Tokens, int UnmeasuredMessages)? checkpoint = null) : IAsyncDisposable {
   internal const string PropertyName = "urd.request_context_estimate";
   internal const string ToolArgumentDeltaProperty = "urd.context_tool_arguments_delta";
   private const int MaxBatchCharacters = 16_384;
@@ -27,15 +29,20 @@ internal sealed class RequestContextEstimate(Func<RequestContextEstimate, Cancel
   internal Task? FlushDelay { get; private set; }
 
   internal long? UsedTokens => Volatile.Read(ref promptTokens) is >= 0 and var input
-      ? input + Volatile.Read(ref outputTokens) : null;
+      ? ContextTokenBudget.AddSaturating(input, Volatile.Read(ref outputTokens)) : null;
 
-  internal void Prepare(IEnumerable<ChatMessage> messages, ChatOptions options) {
+  internal void Prepare(IEnumerable<ChatMessage> projected, ChatOptions options, IReadOnlyList<ChatMessage> original) {
     // A rejected request retries the same prompt; keep its original counting task.
     preparation ??= Task.Run(async () => {
       try {
-        if (TryCountPrompt(messages, options, lifetime.Token) is not long tokens) return;
+        // The checkpoint already covers the instructions and tools. Slice the adapted input
+        // before provider projection, which can insert messages and move the suffix boundary.
+        long? tokens = checkpoint is { } measured
+            ? TryCountPrompt(original.Skip(original.Count - measured.UnmeasuredMessages), null, lifetime.Token)
+            : TryCountPrompt(projected, options, lifetime.Token);
+        if (tokens is not long additional) return;
 
-        Volatile.Write(ref promptTokens, tokens);
+        Volatile.Write(ref promptTokens, ContextTokenBudget.AddSaturating(checkpoint?.Tokens ?? 0, additional));
         await publish(this, lifetime.Token);
       } catch (OperationCanceledException) when (lifetime.IsCancellationRequested) {
         // The owning attempt stopped or completed before the estimate was ready.
@@ -105,7 +112,7 @@ internal sealed class RequestContextEstimate(Func<RequestContextEstimate, Cancel
     }
   }
 
-  private static long? TryCountPrompt(IEnumerable<ChatMessage> messages, ChatOptions options, CancellationToken cancellation) {
+  private static long? TryCountPrompt(IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellation) {
     try {
       cancellation.ThrowIfCancellationRequested();
       return O200kTokens.Instance is null ? null : CountPrompt(messages, options, cancellation);
@@ -115,9 +122,9 @@ internal sealed class RequestContextEstimate(Func<RequestContextEstimate, Cancel
     }
   }
 
-  private static long? CountPrompt(IEnumerable<ChatMessage> messages, ChatOptions options, CancellationToken cancellation) {
+  private static long? CountPrompt(IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellation) {
     var count = new PromptCount();
-    count.Add(options.Instructions);
+    count.Add(options?.Instructions);
     // Count the changing suffix before using the shared density for very long histories.
     foreach (ChatMessage message in messages.Reverse()) {
       cancellation.ThrowIfCancellationRequested();
@@ -126,7 +133,7 @@ internal sealed class RequestContextEstimate(Func<RequestContextEstimate, Cancel
       count.Add(message.AuthorName);
       if (message.Contents.Any(content => !count.AddContent(content))) return null;
     }
-    foreach (AITool tool in options.Tools ?? []) {
+    foreach (AITool tool in options?.Tools ?? []) {
       cancellation.ThrowIfCancellationRequested();
       if (tool is not AIFunctionDeclaration function) return null;
       count.Tokens += 8;

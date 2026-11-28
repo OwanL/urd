@@ -94,7 +94,7 @@ internal sealed class OpenAIInferenceClient(HttpClient httpClient, TimeSpan? rea
         client = CreateClient(state, options.ModelId!, progress, turnClient ?? httpClient, copilotRequest,
             turnClient is null ? promptCache : null);
         if (estimate is not null && input is not null)
-          estimate.Prepare(ContextEstimateInput(history, input, scope), options);
+          estimate.Prepare(ContextEstimateInput(history, input, scope), options, input);
       } catch (Exception error) when (CanClassify(error, cancellationToken)) {
         throw ProviderOperationException.FromProviderError(error, contextWindow: true, credentials: state.Credentials);
       }

@@ -396,6 +396,7 @@ internal sealed class SessionExecution : IDisposable {
     IReadOnlyList<ChatMessage> messages;
     IReadOnlyList<AIFunctionDeclaration> offeredTools;
     ChatOptions options;
+    (long Tokens, int UnmeasuredMessages)? baseline = null;
     try {
       stop.Token.ThrowIfCancellationRequested();
       if (allowAutomaticCompaction)
@@ -435,6 +436,8 @@ internal sealed class SessionExecution : IDisposable {
       List<ChatMessage> input = [.. context.Instructions, .. request.Messages];
       if (reminder is not null)
         input.Add(reminder);
+      if (request.Context?.UsageCheckpoint is { } checkpoint && checkpoint.Matches(selection))
+        baseline = (checkpoint.Tokens, checkpoint.UnmeasuredMessages + (reminder is null ? 0 : 1));
       messages = LlmMessageProjection.AdaptForModel(input, selection.SupportsImages);
     } catch (Exception failure) {
       session.PromptCache.Reset();
@@ -445,7 +448,7 @@ internal sealed class SessionExecution : IDisposable {
     ContextStamp? stamp = request.Stamp;
 
     await using RequestContextEstimate? estimate = RequestContextEstimate.SupportsModel(selection.ModelId)
-        ? new(recorder.PublishContextEstimateAsync) : null;
+        ? new(recorder.PublishContextEstimateAsync, baseline) : null;
     if (estimate is not null) {
       Volatile.Write(ref contextEstimate, estimate);
       options.AdditionalProperties[RequestContextEstimate.PropertyName] = estimate;

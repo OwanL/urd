@@ -181,7 +181,10 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
     if (observedTokens is { } known)
       observedTokens = ContextTokenBudget.AddSaturating(known,
           ContextTokenBudget.EstimateMessages(entries.Skip(observedThrough).Select(entry => entry.Message)));
-    return new(entries.AsReadOnly(), boundary, observedTokens);
+    return new(entries.AsReadOnly(), boundary, observedTokens) {
+      UsageCheckpoint = requestId is Guid current
+          ? ReadUsageCheckpoint(transaction, sessionId, historyRevision, current, boundary?.Id, entries) : null
+    };
 
     void FinishGroup() {
       if (previous is null)
@@ -207,6 +210,42 @@ internal sealed class LlmContextReader(Database database, ToolResultCodec toolRe
           ContextTokenBudget.EstimateMessages(messages.Where(message => message.Role == ChatRole.Tool)));
       observedThrough = entries.Count;
     }
+  }
+
+  private ContextUsageCheckpoint? ReadUsageCheckpoint(SqliteTransaction transaction, Guid sessionId, long revision,
+      Guid requestId, Guid? boundary, List<HistoryMessage> entries) {
+    var checkpoint = database.QuerySingleOrDefault(transaction, $"""
+      SELECT r.ordinal, q.request_index, q.usage_json, COALESCE(r.llm_selection_json, d.llm_selection_json) AS selection
+      FROM execution_requests current JOIN execution_runs active ON active.run_id = current.run_id
+      JOIN execution_runs r ON r.session_id = $session AND r.history_revision = $revision
+      JOIN execution_requests q ON q.run_id = r.run_id
+      LEFT JOIN input_decisions d ON d.session_id = r.session_id AND d.input_id = r.input_id
+      WHERE current.request_id = $request AND r.ordinal >= ({StoredContextUsage.RevisionFloorSql})
+          AND (r.ordinal < active.ordinal OR (r.ordinal = active.ordinal AND q.request_index < current.request_index))
+          AND r.ordinal >= COALESCE((SELECT MAX(omission.ordinal) FROM execution_runs omission
+              WHERE omission.session_id = $session AND omission.history_revision = $revision
+                  AND omission.ordinal <= active.ordinal AND omission.continuation_omitted_request_id IS NOT NULL), 0)
+          AND q.attempt = 2 AND q.outcome = {(int)ExecutionOutcome.Completed}
+          AND q.compaction_id IS $boundary AND q.usage_json IS NOT NULL
+      ORDER BY r.ordinal DESC, q.request_index DESC LIMIT 1;
+      """, row => (Ordinal: row.Long("ordinal"), RequestIndex: row.Int("request_index"),
+          Tokens: StoredContextUsage.ReadTokens(row.String("usage_json")),
+          Selection: LlmSelectionJson.Read(row.NullableString("selection"))),
+      ("$session", sessionId), ("$revision", revision), ("$request", requestId), ("$boundary", boundary));
+    if (checkpoint.Tokens is not long tokens || checkpoint.Selection is not { } selection)
+      return null;
+
+    // The reported output includes the assistant's calls, not their results. Background
+    // completions claimed as input by that request are already covered by its input count.
+    int covered = entries.Count;
+    while (covered > 0 && IsAfterCheckpoint(entries[covered - 1]))
+      covered--;
+    return new(selection, tokens, entries.Count - covered);
+
+    bool IsAfterCheckpoint(HistoryMessage entry) => entry.Location.ExecutionOrdinal > checkpoint.Ordinal
+        || (entry.Location.ExecutionOrdinal == checkpoint.Ordinal
+            && (entry.Location.RequestIndexInExecution > checkpoint.RequestIndex
+                || (entry.Location.RequestIndexInExecution == checkpoint.RequestIndex && entry.Message.Role == ChatRole.Tool)));
   }
 
   // Orders the unioned context shapes within each request.

@@ -170,11 +170,15 @@ historical tool calls. Ordinary sends and compaction do not create omission deci
 ## Context meter
 
 The session snapshot reports `measured`, `estimated`, or `lastMeasured` context usage.
-A conversation send can estimate the projected prompt for a recognized text model (including
-Sol 6.2) and add observable output in batches, including Responses tool-argument deltas.
-Prompt counting runs alongside inference, outside the session lock. It samples large text
-and bounds structured JSON work. Images and unsupported representations can leave the
-last measurement in place. Encrypted reasoning and provider framing are not known counts.
+For recognized text models (including Sol 6.2), the meter uses the latest completed request's
+reported input plus output when the checkpoint is compatible. It tokenizes only newer messages,
+including results from tool calls made by the checkpointed request. A history edit, compaction, continuation omission
+or incompatible model can invalidate this checkpoint. Without one, the meter estimates the full
+prompt. Observable output is added in batches, including Responses tool-argument deltas.
+Counting runs alongside inference, outside the session lock. It samples large text and bounds
+structured JSON work. New images and unsupported representations can leave the last measurement
+in place. Provider framing, encrypted reasoning and changes in the tools offered are not counted
+exactly.
 
 Estimates are in-memory, scoped to one send attempt, and do not affect provider usage,
 accounting or compaction. Session notices keep the browser up to date without polling or

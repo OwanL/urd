@@ -732,8 +732,10 @@ public sealed class ProviderSessionExecutionTests {
     Assert.Equal(settlement, Assert.Single(reopenedHistory.Settlements));
   }
 
-  [Fact]
-  public async Task ContextMeterEstimatesAcrossAResponsesToolLoopAndThenUsesReportedCounts() {
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ContextMeterUsesCompatibleProviderCheckpointsAcrossRequests(bool changeModel) {
     const string model = "gpt-6.2-sol";
     using var database = new TemporaryDatabase();
     using var timeout = new CancellationTokenSource(TestTimeout);
@@ -797,21 +799,27 @@ public sealed class ProviderSessionExecutionTests {
     Assert.Equal(new SessionContextUsage(190, SessionContextUsageSource.Measured),
         (await fixture.Session.ReadSnapshotAsync(timeout.Token)).ContextUsage);
     toolResult.SetResult();
-    long nextPrompt = await WaitForEstimateAsync(streamed + 4_000);
-    Assert.InRange(nextPrompt - streamed, 4_000, 8_000);
+    long nextPrompt = await WaitForEstimateAsync(above: 0);
+    // The checkpoint already covers the starting prompt and generated response, not the tool result.
+    Assert.InRange(nextPrompt - 190, 6_000, 6_050);
     secondBody.SetResult();
     Assert.Equal(ExecutionOutcome.Completed, (await fixture.Session.WaitForExecutionFinishAsync(receipt.ExecutionId!.Value)
         .WaitAsync(timeout.Token)).Outcome);
     Assert.Equal(new SessionContextUsage(20_017, SessionContextUsageSource.Measured),
         (await fixture.Session.ReadSnapshotAsync(timeout.Token)).ContextUsage);
 
-    var next = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "one more", selection));
+    LlmSelection nextSelection = changeModel ? selection with { ModelId = "gpt-5.4" } : selection;
+    var next = await fixture.Session.SubmitUserMessageAsync(new(Guid.NewGuid(), 0, "one more", nextSelection));
     Guid stopped = Assert.IsType<Guid>(next.ExecutionId);
-    _ = await WaitForEstimateAsync(above: 0);
+    long newTurnPrompt = await WaitForEstimateAsync(above: 0);
+    if (changeModel)
+      Assert.InRange(newTurnPrompt, 6_000, 19_999); // Count the full prompt, not a different model's checkpoint.
+    else
+      Assert.InRange(newTurnPrompt - 20_017, 1, 12);
     await fixture.Session.RequestStopAsync(stopped).WaitAsync(timeout.Token);
     Assert.Equal(ExecutionOutcome.Cancelled, (await fixture.Session.WaitForExecutionFinishAsync(stopped)
         .WaitAsync(timeout.Token)).Outcome);
-    Assert.Equal(new SessionContextUsage(20_017, SessionContextUsageSource.LastMeasured),
+    Assert.Equal(changeModel ? null : new SessionContextUsage(20_017, SessionContextUsageSource.LastMeasured),
         (await fixture.Session.ReadSnapshotAsync(timeout.Token)).ContextUsage);
 
     async Task<long> WaitForEstimateAsync(long above) {

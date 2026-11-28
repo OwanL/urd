@@ -43,10 +43,10 @@ internal sealed class ProviderRequests(
       IReadOnlyList<ChatMessage> input = messages as IReadOnlyList<ChatMessage> ?? messages.ToArray();
       ChatOptions prepared = UsageStream.PrepareOptions(options, out UsageContext context);
       Func<DateTimeOffset?, Task>? publishRetry = TakeRetryStatus(prepared);
-      bool canRetryPrepass = prepared.AdditionalProperties?.Remove(PrepassRetry.PropertyName) == true;
       string? imageModel = options.ModelId is { Length: > 0 and <= 256 } modelId && !modelId.Any(char.IsControl)
           && input.Any(message => message.Contents.Any(ContainsImage)) ? modelId : null;
       RateLimitRetry? rateLimitRetry = null;
+      bool retriedUnavailable = false;
       while (true) {
         ProviderState state = await getCredentials(expectedBinding.Id, generation, token);
         token.ThrowIfCancellationRequested();
@@ -57,7 +57,7 @@ internal sealed class ProviderRequests(
         var (transport, wireOptions) = SelectInference(state, prepared, modelApi);
         await using (var stream = ObserveInference(transport, input, wireOptions, context).GetAsyncEnumerator(token)) {
           while (true) {
-            var (hasUpdate, failure) = await ReadUpdateAsync(stream, state, imageModel, observed, canRetryPrepass, token);
+            var (hasUpdate, failure) = await ReadUpdateAsync(stream, state, imageModel, observed, !retriedUnavailable, token);
             if (!hasUpdate) {
               rejected = failure;
               if (rejected?.IsRetryableRateLimit == true)
@@ -85,8 +85,8 @@ internal sealed class ProviderRequests(
         if (rejected.IsRetryableRateLimit) {
           await rateLimitRetry!.WaitAsync(rejected.RetryAfter, publishRetry, token);
         } else {
-          canRetryPrepass = false;
-          await PrepassRetry.WaitAsync(rejected.RetryAfter, retryClock, token);
+          retriedUnavailable = true;
+          await ServiceUnavailableRetry.WaitAsync(rejected.RetryAfter, retryClock, token);
         }
       }
     } finally {
@@ -163,11 +163,11 @@ internal sealed class ProviderRequests(
 
   private async ValueTask<(bool HasUpdate, ProviderOperationException? Rejected)> ReadUpdateAsync(
       IAsyncEnumerator<ChatResponseUpdate> stream, ProviderState state, string? imageModel, bool observed,
-      bool canRetryPrepass, CancellationToken cancellationToken) {
+      bool canRetryUnavailable, CancellationToken cancellationToken) {
     try {
       return (await stream.MoveNextAsync(), null);
     } catch (ProviderOperationException failure) when (!observed &&
-        (failure.IsRetryableRateLimit || canRetryPrepass && PrepassRetry.CanRetry(failure))) {
+        (failure.IsRetryableRateLimit || canRetryUnavailable && ServiceUnavailableRetry.CanRetry(failure))) {
       return (false, failure);
     } catch (ProviderOperationException failure) when (imageModel is not null && failure.Failure == ProviderFailure.ImageInputUnsupported) {
       using var held = await gate.AcquireAsync(cancellationToken);

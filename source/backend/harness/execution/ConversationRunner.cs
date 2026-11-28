@@ -23,10 +23,9 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
   // returns null for an accepted answer or corrective user input; one corrected final
   // answer is permitted (tool turns are not counted), a second rejected one throws.
   internal async Task<string> RunAsync(string purpose, AuxiliaryModelResolution model,
-      IReadOnlyList<ChatMessage> input, Func<string, string?>? validateResult, CancellationToken cancellation,
-      bool retryServiceUnavailable = false) {
+      IReadOnlyList<ChatMessage> input, Func<string, string?>? validateResult, CancellationToken cancellation) {
     try {
-      return await RunCoreAsync(purpose, model, input, validateResult, retryServiceUnavailable, cancellation);
+      return await RunCoreAsync(purpose, model, input, validateResult, cancellation);
     } catch (AuxiliaryExecutionException failure) {
       await parent.ReportAuxiliaryFailureAsync(failure);
       throw;
@@ -34,8 +33,7 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
   }
 
   private async Task<string> RunCoreAsync(string purpose, AuxiliaryModelResolution model,
-      IReadOnlyList<ChatMessage> input, Func<string, string?>? validateResult, bool retryServiceUnavailable,
-      CancellationToken cancellation) {
+      IReadOnlyList<ChatMessage> input, Func<string, string?>? validateResult, CancellationToken cancellation) {
     ArgumentException.ThrowIfNullOrWhiteSpace(purpose);
     ArgumentNullException.ThrowIfNull(model);
     ArgumentNullException.ThrowIfNull(input);
@@ -61,7 +59,7 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
       // The request is durable before any provider contact and before any tool result.
       await RequireAcceptedAsync(recorder.StartRequestAsync(requestId), cancellation);
       LlmResponseRunner.Result response = await StreamResponseAsync(recorder, client, purpose, selection,
-          messages, offered, requestId, text, retryServiceUnavailable, cancellation);
+          messages, offered, requestId, text, cancellation);
       Exception? failure = response.Failure;
 
       if (failure is null) {
@@ -134,8 +132,7 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
 
   private async Task<LlmResponseRunner.Result> StreamResponseAsync(AuxiliaryConversationRecorder recorder,
       IChatClient client, string purpose, LlmSelection selection, IReadOnlyList<ChatMessage> messages,
-      IReadOnlyList<AIFunctionDeclaration> offered, Guid requestId, StringBuilder text, bool retryServiceUnavailable,
-      CancellationToken cancellation) {
+      IReadOnlyList<AIFunctionDeclaration> offered, Guid requestId, StringBuilder text, CancellationToken cancellation) {
     ChatOptions options = new() {
       ModelId = selection.ModelId,
       Reasoning = selection.ReadReasoningEffort() is { } effort ? new ReasoningOptions { Effort = effort } : null,
@@ -144,8 +141,6 @@ internal sealed class ConversationRunner(SessionExecutionRecorder parent,
         [UsageContext.PropertyName] = new UsageContext(parent.Identity.SessionId, parent.Identity.ExecutionId, purpose)
       }
     };
-    if (retryServiceUnavailable)
-      options.AdditionalProperties[PrepassRetry.PropertyName] = true;
     IReadOnlyList<ChatMessage> adapted = LlmMessageProjection.AdaptForModel(messages, selection.SupportsImages);
     try {
       return await LlmResponseRunner.RunAsync(client, adapted, options, requestId,

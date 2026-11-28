@@ -32,6 +32,7 @@ public sealed class GitHubCopilotProviderTests {
   public async Task DiscoversSelectableModelsAndStreamsUsingTheirFrozenApi(string model, LlmApi api, string path) {
     using var database = new TemporaryDatabase();
     using UrdStore store = UrdStore.Open(database.Path);
+    int inferenceRequests = 0;
     var handler = new ControlledProviderHandler((request, _) => {
       Assert.Equal("api.individual.githubcopilot.com", request.RequestUri!.Host);
       Assert.Equal($"Bearer {AccessToken}", request.Headers.Authorization?.ToString());
@@ -42,6 +43,11 @@ public sealed class GitHubCopilotProviderTests {
       }
       Assert.Equal(path, request.RequestUri.AbsolutePath);
       Assert.Equal("user", Assert.Single(request.Headers.GetValues("X-Initiator")));
+      if (Interlocked.Increment(ref inferenceRequests) == 2)
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) {
+          RequestMessage = request,
+          Content = new StringContent("{}", Encoding.UTF8, "application/json")
+        });
       return Task.FromResult(Reply(api switch {
         LlmApi.OpenAIResponses => ProviderModelStreams.Responses(model: model),
         LlmApi.OpenAIChatCompletions => ProviderModelStreams.ChatText("hello", model),
@@ -49,7 +55,8 @@ public sealed class GitHubCopilotProviderTests {
         _ => throw new InvalidOperationException($"Unexpected fixture protocol: {api}")
       }, "text/event-stream", request));
     });
-    var manager = new ProviderManager(store, () => new Uri("http://localhost/auth/callback"), handler, copilotClientId: ClientId);
+    var manager = new ProviderManager(store, () => new Uri("http://localhost/auth/callback"), handler,
+        copilotClientId: ClientId, retryClock: new ImmediateRetryClock());
     try {
       ProviderConnection connection = await manager.AddGitHubCopilotAsync("GitHub Copilot");
       store.Providers.SetCredentials(connection.Id, 0, new(ClientId, "42", "octocat"),
@@ -92,13 +99,14 @@ public sealed class GitHubCopilotProviderTests {
         Assert.Equal(3, diagnostic.Usage?.InputTokens);
         Assert.Equal(2, diagnostic.Usage?.OutputTokens);
       }
-      Assert.Equal(3, handler.Requests.Count);
+      Assert.Equal(4, handler.Requests.Count);
+      Assert.Equal(handler.Requests[2], handler.Requests[3]);
 
       ProviderDisconnectResult disconnected = await manager.DisconnectAsync(connection.Id).WaitAsync(TestTimeout);
       Assert.True(disconnected.LocalCredentialsCleared);
       Assert.Null(disconnected.RemoteRevocationConfirmed);
       Assert.Empty((await manager.GetModelCatalogAsync(connection.Id)).Models);
-      Assert.Equal(3, handler.Requests.Count);
+      Assert.Equal(4, handler.Requests.Count);
     } finally {
       await manager.ShutdownAsync().WaitAsync(TestTimeout);
       manager.Dispose();
@@ -201,6 +209,11 @@ public sealed class GitHubCopilotProviderTests {
         [new(ChatRole.User, "Say hello")], new() { ModelId = model }))
       updates.Add(update);
     return updates;
+  }
+
+  private sealed class ImmediateRetryClock : TimeProvider {
+    public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period) =>
+        base.CreateTimer(callback, state, TimeSpan.Zero, period);
   }
 
   private const string AnthropicStream = """

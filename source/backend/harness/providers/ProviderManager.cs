@@ -24,6 +24,7 @@ public sealed class ProviderManager : IDisposable {
   private readonly GitHubCopilotModels copilotModels;
   private readonly ProviderSignIns signIns;
   private readonly ProviderRequests requests;
+  private readonly TimeProvider retryClock;
   private readonly Dictionary<Guid, Task<ProviderState>> refreshes = [];
   private readonly Dictionary<Guid, Task<ProviderDisconnectResult>> disconnects = [];
   private readonly Dictionary<Guid, long> signInRequired = [];
@@ -54,9 +55,10 @@ public sealed class ProviderManager : IDisposable {
         ? GitHubCopilotAuthentication.DefaultClientId : copilotClientId.Trim();
     copilot = new(client, this.copilotClientId, copilotClock);
     modelProbe = new(client, store.Usage, prices);
+    this.retryClock = retryClock ?? TimeProvider.System;
     copilotModels = new(client);
     requests = new(gate, storage, modelSettings, new(client, connectSocket: connectSocket, diagnose: diagnose), new(client),
-        GetCredentialsAsync, ThrowIfStopping, EnsureAvailable, RequireCurrentGrant, store.Usage, prices, retryClock ?? TimeProvider.System);
+        GetCredentialsAsync, ThrowIfStopping, EnsureAvailable, RequireCurrentGrant, store.Usage, prices, this.retryClock);
     signIns = new(storage, authentication, gate, callbackUri, id => requests.Cancel(id), copilot, RefreshModelCatalogAsync);
   }
 
@@ -308,9 +310,10 @@ public sealed class ProviderManager : IDisposable {
     if (string.IsNullOrWhiteSpace(modelId) || modelId.Length > 256 || modelId.Any(char.IsControl))
       throw new ArgumentException("A model ID must be nonempty and at most 256 characters.", nameof(modelId));
     return requests.RunRequestAsync(connectionId,
-        (state, token) => state.Connection.Route == ProviderRoute.GitHubCopilot
-            ? requests.TestCopilotModelAsync(state, modelId, token)
-            : modelProbe.TestModelAsync(state.Connection, state.Credentials, modelId, token), cancellationToken);
+        (state, token) => ServiceUnavailableRetry.RunOnceAsync(
+            () => state.Connection.Route == ProviderRoute.GitHubCopilot
+                ? requests.TestCopilotModelAsync(state, modelId, token)
+                : modelProbe.TestModelAsync(state.Connection, state.Credentials, modelId, token), retryClock, token), cancellationToken);
   }
 
   public async Task ShutdownAsync() {

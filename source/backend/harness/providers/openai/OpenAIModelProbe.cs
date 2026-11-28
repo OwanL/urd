@@ -53,28 +53,34 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
         connection, modelId, new(null, null, "provider test"),
         [new Microsoft.Extensions.AI.ChatMessage(Microsoft.Extensions.AI.ChatRole.User, TestPrompt)],
         new Microsoft.Extensions.AI.ChatOptions { ModelId = modelId }, prices);
+    using var readStop = new ProviderCancellation(Timeout.InfiniteTimeSpan, ct);
+    var progress = new InferenceStreamProgress(readStop, Timeout.InfiniteTimeSpan) { Transport = connection.Endpoint.Scheme };
     try {
       ct.ThrowIfCancellationRequested();
       return connection.Api switch {
-        LlmApi.OpenAIResponses => await TestResponsesAsync(connection, credentials, modelId, observation, ct).ConfigureAwait(false),
-        LlmApi.OpenAIChatCompletions => await TestChatAsync(connection, credentials, modelId, observation, ct).ConfigureAwait(false),
+        LlmApi.OpenAIResponses => await TestResponsesAsync(connection, credentials, modelId, observation, progress, ct).ConfigureAwait(false),
+        LlmApi.OpenAIChatCompletions => await TestChatAsync(connection, credentials, modelId, observation, progress, readStop, ct).ConfigureAwait(false),
         _ => throw new ProviderOperationException(ProviderFailure.InvalidProviderResponse)
       };
     } catch (Exception error) when (CanClassify(error, ct)) {
       ct.ThrowIfCancellationRequested();
-      throw ProviderOperationException.FromProviderError(error, credentials: credentials);
+      throw ProviderOperationException.FromProviderError(error, credentials: credentials,
+          preStreamHttpStatus: progress.PreStreamHttpStatus);
     } finally {
       observation?.Finish();
     }
   }
 
   private async Task<ProviderModelTestResult> TestResponsesAsync(ProviderConnection connection,
-      ProviderCredentials? credentials, string modelId, UsageObservation? observation, CancellationToken ct) {
-    var client = new ResponsesClient(ProviderSdkAuthentication.Create(connection, credentials), new ResponsesClientOptions {
+      ProviderCredentials? credentials, string modelId, UsageObservation? observation, InferenceStreamProgress progress,
+      CancellationToken ct) {
+    var clientOptions = new ResponsesClientOptions {
       Endpoint = connection.Endpoint,
       Transport = new HttpClientPipelineTransport(httpClient),
       RetryPolicy = new ClientRetryPolicy(0)
-    });
+    };
+    clientOptions.AddPolicy(progress, PipelinePosition.BeforeTransport);
+    var client = new ResponsesClient(ProviderSdkAuthentication.Create(connection, credentials), clientOptions);
     var options = new CreateResponseOptions {
       Model = modelId,
       StreamingEnabled = true,
@@ -86,6 +92,7 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
     int completed = 0;
     ProviderUsage? usage = null;
     await foreach (var update in client.CreateResponseStreamingAsync(options, ct).ConfigureAwait(false)) {
+      progress.RecordUpdate();
       ObserveUsage(observation, update, (update as StreamingResponseOutputTextDeltaUpdate)?.Delta,
           (update as StreamingResponseCompletedUpdate)?.Response?.Model);
       switch (update) {
@@ -114,15 +121,17 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
   }
 
   private async Task<ProviderModelTestResult> TestChatAsync(ProviderConnection connection,
-      ProviderCredentials? credentials, string modelId, UsageObservation? observation, CancellationToken ct) {
-    var client = new ChatClient(modelId, ProviderSdkAuthentication.Create(connection, credentials), Options(connection));
+      ProviderCredentials? credentials, string modelId, UsageObservation? observation, InferenceStreamProgress progress,
+      ProviderCancellation readStop, CancellationToken ct) {
+    var clientOptions = Options(connection);
+    clientOptions.AddPolicy(progress, PipelinePosition.BeforeTransport);
+    var client = new ChatClient(modelId, ProviderSdkAuthentication.Create(connection, credentials), clientOptions);
     var options = new ChatCompletionOptions { StoredOutputEnabled = false };
-    using var readStop = new ProviderCancellation(Timeout.InfiniteTimeSpan, ct);
     ProviderModelTestResult result;
     try {
       await using var stream = client.CompleteChatStreamingAsync([new UserChatMessage(TestPrompt)], options, readStop.Token)
           .GetAsyncEnumerator(readStop.Token);
-      result = await ReadChatAsync(stream, readStop, connection.Id, modelId, observation, ct).ConfigureAwait(false);
+      result = await ReadChatAsync(stream, readStop, connection.Id, modelId, observation, progress, ct).ConfigureAwait(false);
     } finally {
       await readStop.CancelAsync().ConfigureAwait(false);
     }
@@ -131,13 +140,15 @@ internal sealed class OpenAIModelProbe(HttpClient httpClient, UsageStorage? usag
   }
 
   private static async Task<ProviderModelTestResult> ReadChatAsync(IAsyncEnumerator<StreamingChatCompletionUpdate> stream,
-      ProviderCancellation readStop, Guid connectionId, string modelId, UsageObservation? observation, CancellationToken ct) {
+      ProviderCancellation readStop, Guid connectionId, string modelId, UsageObservation? observation,
+      InferenceStreamProgress progress, CancellationToken ct) {
     var text = new StringBuilder();
     bool truncated = false;
     int completed = 0;
     ProviderUsage? usage = null;
     while (await stream.MoveNextAsync().ConfigureAwait(false)) {
       StreamingChatCompletionUpdate update = stream.Current;
+      progress.RecordUpdate();
       ObserveUsage(observation, update, string.Concat(update.ContentUpdate.Select(part => part.Text)), update.Model);
       foreach (var part in update.ContentUpdate) AppendPreview(text, part.Text, ref truncated);
       if (update.FinishReason is { } finish) {

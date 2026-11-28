@@ -15,7 +15,7 @@ using static Urd.Backend.Tests.Support.TestAsync;
 
 namespace Urd.Backend.Tests.Execution;
 
-public sealed class PrepassProviderRetryTests {
+public sealed class Model503RetryTests {
   private const string TitleInstruction = "Name this session from its first user message";
   private const string Prompt = "orbit compass launch";
 
@@ -101,11 +101,37 @@ public sealed class PrepassProviderRetryTests {
   }
 
   [Fact]
-  public async Task OrdinaryRequestDoesNotRetryAnHttp503() {
+  public async Task OrdinaryRequestRetriesPreStreamHttp503WithSameWireRequest() {
     using var database = new TemporaryDatabase();
     using var store = UrdStore.Open(database.Path);
     var clock = new RetryClock();
-    var handler = new ControlledProviderHandler((request, _) => Task.FromResult(Unavailable(request, "1")));
+    int attempts = 0;
+    var handler = new ControlledProviderHandler((request, _) => Task.FromResult(
+        Interlocked.Increment(ref attempts) == 1 ? Unavailable(request, "1") : StreamingResponse(request)));
+    using var providers = CreateProviderManager(store, handler, clock);
+    using IChatClient client = providers.CreateChatClient(await ConnectAsync(providers));
+
+    try {
+      var response = await client.GetResponseAsync(
+          [new(ChatRole.User, "go")], new() { ModelId = "main-model" }).WaitAsync(TestTimeout);
+
+      Assert.Equal("hello", response.Text);
+      Assert.Equal(2, handler.Requests.Count);
+      Assert.Equal(handler.Requests[0], handler.Requests[1]);
+      Assert.Equal(TimeSpan.FromSeconds(1), Assert.Single(clock.Delays));
+    } finally {
+      await providers.ShutdownAsync().WaitAsync(TestTimeout);
+    }
+  }
+
+  [Theory]
+  [InlineData("2", 2)]
+  [InlineData("3", 1)]
+  public async Task OrdinaryRequestLimitsPreStreamHttp503Retries(string retryAfter, int expectedAttempts) {
+    using var database = new TemporaryDatabase();
+    using var store = UrdStore.Open(database.Path);
+    var clock = new RetryClock();
+    var handler = new ControlledProviderHandler((request, _) => Task.FromResult(Unavailable(request, retryAfter)));
     using var providers = CreateProviderManager(store, handler, clock);
     using IChatClient client = providers.CreateChatClient(await ConnectAsync(providers));
 
@@ -115,12 +141,51 @@ public sealed class PrepassProviderRetryTests {
 
       Assert.Equal(ProviderFailure.ProviderUnavailable, failure.Failure);
       Assert.Contains("HTTP 503", failure.Message, StringComparison.Ordinal);
+      Assert.Equal(expectedAttempts, handler.Requests.Count);
+      if (expectedAttempts == 2) {
+        Assert.Equal(handler.Requests[0], handler.Requests[1]);
+        Assert.Equal(TimeSpan.FromSeconds(2), Assert.Single(clock.Delays));
+      } else {
+        Assert.Empty(clock.Delays);
+      }
+    } finally {
+      await providers.ShutdownAsync().WaitAsync(TestTimeout);
+    }
+  }
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public async Task ConnectionFailuresAndCatalogRejectionsDoNotRetry(bool catalog) {
+    using var database = new TemporaryDatabase();
+    using var store = UrdStore.Open(database.Path);
+    var clock = new RetryClock();
+    var handler = new ControlledProviderHandler((request, _) => catalog
+        ? Task.FromResult(Unavailable(request, "1"))
+        : Task.FromException<HttpResponseMessage>(new HttpRequestException(HttpRequestError.ConnectionError, "Connection failed")));
+    using var providers = CreateProviderManager(store, handler, clock);
+    ProviderConnection connection = await ConnectAsync(providers);
+    using IChatClient client = providers.CreateChatClient(connection);
+
+    try {
+      var failure = await Assert.ThrowsAsync<ProviderOperationException>(() => catalog
+          ? providers.RefreshModelCatalogAsync(connection.Id).WaitAsync(TestTimeout)
+          : client.GetResponseAsync([new(ChatRole.User, "go")], new() { ModelId = "main-model" }).WaitAsync(TestTimeout));
+
+      Assert.Equal(ProviderFailure.ProviderUnavailable, failure.Failure);
       Assert.Single(handler.Requests);
       Assert.Empty(clock.Delays);
     } finally {
       await providers.ShutdownAsync().WaitAsync(TestTimeout);
     }
   }
+
+  private static HttpResponseMessage StreamingResponse(HttpRequestMessage request) => new(HttpStatusCode.OK) {
+    RequestMessage = request,
+    Content = new StreamContent(new MemoryStream(Encoding.UTF8.GetBytes(ProviderModelStreams.Responses(model: "main-model")))) {
+      Headers = { ContentType = new("text/event-stream") }
+    }
+  };
 
   private static ProviderManager CreateProviderManager(UrdStore store, HttpMessageHandler handler, TimeProvider retryClock) =>
       new(store, () => new Uri("http://127.0.0.1:1234/auth/callback"), handler, retryClock: retryClock);

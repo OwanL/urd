@@ -155,10 +155,10 @@ revoke the OAuth app's grant in GitHub if remote revocation is needed.
    visible entries in provider order. Custom discovery may be unsupported: supply an
    explicit model ID to `/model-tests` without first fetching a catalog.
 5. With separate approval, POST `/model-tests` once. The fixed short greeting prompt
-   requests streaming output with `store:false`, no tools, conversation, generation
-   knobs or automatic retries. Only a positive native terminal followed by stream
-   cleanup counts as success. The preview is limited to 4096 characters; absent usage
-   stays unknown. This is **not a spending cap** and does not create a saved chat.
+   requests streaming output with `store:false`, no tools, conversation or generation
+   knobs. The shared HTTP 503 retry policy below applies. Only a positive native terminal
+   followed by stream cleanup counts as success. The preview is limited to 4096 characters;
+   absent usage stays unknown. This is **not a spending cap** and does not create a saved chat.
 
 Configuration/authentication commands and catalog refresh remain manager-owned if the
 HTTP caller disconnects. Diagnostic cancellation follows its caller; network diagnostics
@@ -205,10 +205,11 @@ credential or binding replacement, disconnect and shutdown cancel a retry wait. 
 shows the countdown for its conversation request as live state; it is not saved or resumed after
 restart. Retries do not replay tool calls or switch providers.
 
-A prepass model request that receives an explicit HTTP 503 before any stream event gets one
-retry after a random delay of 500–999 ms, or longer if `Retry-After` requires it. If
-`Retry-After` exceeds two seconds or the retry also returns a 503, prepass uses its existing
-fallback. Main conversation requests, connection failures and other HTTP errors gain no new retries.
+Any model inference request that receives an explicit HTTP 503 before any stream event gets
+one retry after a random delay of 500–999 ms, or longer if `Retry-After` requires it. If
+`Retry-After` exceeds two seconds or the retry also returns a 503, the caller handles the failure
+as usual (for example, prepass falls back). The same rule applies to chat, compaction, prepass
+and model tests. It does not retry connection failures, partial streams, authentication or catalog reads.
 
 ChatGPT maps system instructions to `developer` messages at the request boundary; the plan
 Responses endpoint rejects `system` messages. Saved starting context and other routes keep

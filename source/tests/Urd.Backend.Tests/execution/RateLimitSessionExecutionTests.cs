@@ -17,8 +17,10 @@ using static Urd.Backend.Tests.Support.TestAsync;
 namespace Urd.Backend.Tests.Execution;
 
 public sealed class RateLimitSessionExecutionTests {
-  [Fact]
-  public async Task RateLimitsBeforeAndAfterToolExecutionRetryWithoutRepeatingTheTool() {
+  [Theory]
+  [InlineData(HttpStatusCode.TooManyRequests)]
+  [InlineData(HttpStatusCode.ServiceUnavailable)]
+  public async Task EarlyHttpRejectionsBeforeAndAfterToolExecutionRetryWithoutRepeatingTheTool(HttpStatusCode status) {
     using var first = new ScriptedOpenAIHandler(ProviderModelStreams.Responses(
         [ProviderModelStreams.Message, ProviderModelStreams.Call]));
     using var done = new ScriptedOpenAIHandler(ProviderModelStreams.Responses());
@@ -27,7 +29,7 @@ public sealed class RateLimitSessionExecutionTests {
     var clock = new RetryClock();
     int attempts = 0, effects = 0;
     var handler = new ControlledProviderHandler((request, cancellation) => Interlocked.Increment(ref attempts) switch {
-      1 or 3 => Task.FromResult(RateLimited(request, 1)),
+      1 or 3 => Task.FromResult(Rejected(request, status, 1)),
       2 => firstTransport.SendAsync(request, cancellation),
       4 => doneTransport.SendAsync(request, cancellation),
       _ => throw new InvalidOperationException("Unexpected provider request.")
@@ -96,15 +98,18 @@ public sealed class RateLimitSessionExecutionTests {
     Assert.All(usage, attempt => Assert.NotNull(attempt.FinishedAt));
   }
 
-  [Fact]
-  public async Task StopDuringBackoffCancelsTheWaitAndClearsRetryStatus() {
+  [Theory]
+  [InlineData(HttpStatusCode.TooManyRequests, 60)]
+  [InlineData(HttpStatusCode.ServiceUnavailable, 1)]
+  public async Task StopDuringBackoffCancelsTheWaitAndClearsRetryStatus(HttpStatusCode status, int retryAfter) {
     var clock = new RetryClock();
-    var handler = new ControlledProviderHandler((request, _) => Task.FromResult(RateLimited(request, 60)));
+    var handler = new ControlledProviderHandler((request, _) => Task.FromResult(Rejected(request, status, retryAfter)));
     await using var fixture = await Fixture.OpenAsync(handler, () => { }, clock);
     Task<SessionExecutionResult> execution = fixture.SendAsync();
     RetryClock.Delay delay = await clock.NextDelayAsync();
 
-    Assert.Equal(clock.GetUtcNow() + delay.Due, (await fixture.Session.ReadSnapshotAsync()).RateLimitRetryAt);
+    DateTimeOffset? retryAt = status == HttpStatusCode.TooManyRequests ? clock.GetUtcNow() + delay.Due : null;
+    Assert.Equal(retryAt, (await fixture.Session.ReadSnapshotAsync()).RateLimitRetryAt);
     await fixture.Session.StopExecutionAsync().WaitAsync(TestTimeout);
     Assert.Equal(ExecutionOutcome.Cancelled, (await execution).Outcome);
     clock.Advance(delay);
@@ -112,10 +117,12 @@ public sealed class RateLimitSessionExecutionTests {
     Assert.Single(handler.Requests);
   }
 
-  [Fact]
-  public async Task BindingChangeDuringBackoffCancelsTheWaitWithoutSendingAnotherRequest() {
+  [Theory]
+  [InlineData(HttpStatusCode.TooManyRequests, 60)]
+  [InlineData(HttpStatusCode.ServiceUnavailable, 1)]
+  public async Task BindingChangeDuringBackoffCancelsTheWaitWithoutSendingAnotherRequest(HttpStatusCode status, int retryAfter) {
     var clock = new RetryClock();
-    var handler = new ControlledProviderHandler((request, _) => Task.FromResult(RateLimited(request, 60)));
+    var handler = new ControlledProviderHandler((request, _) => Task.FromResult(Rejected(request, status, retryAfter)));
     await using var fixture = await Fixture.OpenAsync(handler, () => { }, clock);
     Task<SessionExecutionResult> execution = fixture.SendAsync();
     RetryClock.Delay delay = await clock.NextDelayAsync();
@@ -199,10 +206,15 @@ public sealed class RateLimitSessionExecutionTests {
     });
   }
 
-  private static HttpResponseMessage RateLimited(HttpRequestMessage request, int seconds) => new(HttpStatusCode.TooManyRequests) {
+  private static HttpResponseMessage RateLimited(HttpRequestMessage request, int seconds) =>
+      Rejected(request, HttpStatusCode.TooManyRequests, seconds);
+
+  private static HttpResponseMessage Rejected(HttpRequestMessage request, HttpStatusCode status, int seconds) => new(status) {
     RequestMessage = request,
     Headers = { RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(seconds)) },
-    Content = new StringContent("{\"error\":{\"message\":\"rate limited\",\"type\":\"rate_limit_error\"}}")
+    Content = new StringContent(status == HttpStatusCode.TooManyRequests
+        ? """{"error":{"message":"rate limited","type":"rate_limit_error"}}"""
+        : """{"error":{"message":"unavailable","type":"server_error"}}""")
   };
 
   // Tests advance only after the actual retry timer is armed. No wall-clock waits or live servers.

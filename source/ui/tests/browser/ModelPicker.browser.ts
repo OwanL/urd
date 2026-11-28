@@ -14,7 +14,8 @@ const selection = () => page.getByRole("status", { name: "Selected model" });
 before(async () => {
   server = await createServer({ configFile: false, server: { port: 0 }, appType: "custom" });
   server.middlewares.use((request, response, next) => {
-    if (request.url !== "/model-picker-test") return next();
+    const path = new URL(request.url ?? "/", "http://localhost").pathname;
+    if (path !== "/model-picker-test") return next();
     response.setHeader("Content-Type", "text/html");
     response.end(
       '<!doctype html><script type="module" src="/tests/browser/ModelPickerFixture.tsx"></script>',
@@ -26,6 +27,7 @@ before(async () => {
 });
 
 beforeEach(async () => {
+  await page.setViewportSize({ width: 900, height: 600 });
   await page.goto(`${server.resolvedUrls!.local[0]}model-picker-test`);
   await trigger().waitFor();
 });
@@ -33,6 +35,28 @@ beforeEach(async () => {
 after(async () => {
   await browser?.close();
   await server?.close();
+});
+
+void test("bounds a long catalog to a compact scrolling popover", async () => {
+  await page.setViewportSize({ width: 900, height: 900 });
+  await page.goto(`${server.resolvedUrls!.local[0]}model-picker-test?many-models`);
+  await trigger().click();
+  assert.equal(await page.getByRole("option").count(), 20);
+
+  const popover = page.getByRole("dialog", { name: "Choose model" });
+  const bounds = await popover.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return { top: rect.top, bottom: rect.bottom, height: rect.height };
+  });
+  assert.ok(bounds.height <= 400, `Expected a 400px height cap, got ${bounds.height}px`);
+  assert.ok(bounds.top >= 0);
+  assert.ok(bounds.bottom <= 900);
+  assert.equal(
+    await page
+      .getByRole("listbox", { name: "Models" })
+      .evaluate((element) => element.scrollHeight > element.clientHeight),
+    true,
+  );
 });
 
 void test("Enter does not choose the first model before the user moves or searches", async () => {

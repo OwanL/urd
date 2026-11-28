@@ -56,10 +56,13 @@ export function Popover({
       frame = 0;
       const viewport = { width: window.innerWidth, height: window.innerHeight };
       element.style.maxWidth = `min(var(--popover-max-width, 28rem), ${Math.max(0, viewport.width - 16)}px)`;
+      element.style.maxHeight = "";
+      const cssMaxHeight = Number.parseFloat(getComputedStyle(element).maxHeight);
+      const heightLimit = Number.isFinite(cssMaxHeight) ? cssMaxHeight : Number.POSITIVE_INFINITY;
       const bounds = element.getBoundingClientRect();
-      const height = Math.max(
-        bounds.height,
-        element.scrollHeight + element.offsetHeight - element.clientHeight,
+      const height = Math.min(
+        Math.max(bounds.height, element.scrollHeight + element.offsetHeight - element.clientHeight),
+        heightLimit,
       );
       const placed = placePopover(
         control.getBoundingClientRect(),
@@ -69,7 +72,7 @@ export function Popover({
       );
       element.style.left = `${placed.left}px`;
       element.style.top = `${placed.top}px`;
-      element.style.maxHeight = `${placed.maxHeight}px`;
+      element.style.maxHeight = `${Math.min(heightLimit, placed.maxHeight)}px`;
       element.dataset.placement = placed.placement;
       element.style.visibility = "visible";
     };

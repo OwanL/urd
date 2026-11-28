@@ -20,7 +20,7 @@
   width: min(48rem, calc(100vw - 1rem));
   min-width: min(38rem, calc(100vw - 1rem));
   max-width: calc(100vw - 1rem);
-  max-height: min(31rem, calc(100vh - 1rem));
+  max-height: min(25rem, calc(100vh - 1rem));
   flex-direction: column;
   overflow: hidden;
 }

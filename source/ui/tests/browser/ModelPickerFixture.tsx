@@ -56,6 +56,23 @@ const models = [
   },
 ];
 
+if (new URLSearchParams(window.location.search).has("many-models")) {
+  models.push(
+    ...Array.from({ length: 16 }, (_, index) => ({
+      key: `three/extra-${index}`,
+      connectionId: "three",
+      modelId: `extra-${index}`,
+      modelLabel: `Extra Model ${index + 1}`,
+      providerLabel: "Provider Three",
+      inputPrice: 1,
+      outputPrice: 2,
+      priceSource: "Fixture rates",
+      priceCapturedAt: "2026-11-28T00:00:00Z",
+      supportsImages: false,
+    })),
+  );
+}
+
 document.body.insertAdjacentHTML(
   "afterbegin",
   `<style>

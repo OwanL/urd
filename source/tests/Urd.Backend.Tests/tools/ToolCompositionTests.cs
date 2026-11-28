@@ -27,8 +27,8 @@ public sealed class ToolCompositionTests {
       toolFreeId = store.Sessions.CreatePrimary(Guid.NewGuid()).Id;
       int round = 0;
       using var client = new ScriptedChatClient(token => ++round == 1
-          ? ToolBatch(token, new FunctionCallContent("write", "write", new Dictionary<string, object?> {
-            ["path"] = "note.txt", ["content"] = "original"
+          ? ToolBatch(token, new FunctionCallContent("write", "write_file", new Dictionary<string, object?> {
+            ["file_path"] = "note.txt", ["content"] = "original"
           })) : Complete(token));
       var preferences = new PreferenceManager(store);
       preferences.SetWorkingDirectory(first);
@@ -39,7 +39,7 @@ public sealed class ToolCompositionTests {
         sessionId = session.Id;
         await SubmitAsync(session);
         Assert.Equal("original", await File.ReadAllTextAsync(Path.Combine(first, "note.txt")));
-        Assert.All(client.Options, options => Assert.Equal(new[] { "answer_agent", "ask_agent", "ask_user", "bash", "cancel_pending_calls", "edit", "list_agents", "list_pending_calls", "read", "web_read", "web_search", "write" },
+        Assert.All(client.Options, options => Assert.Equal(new[] { "answer_agent", "ask_agent", "ask_user", "bash", "cancel_pending_calls", "list_agents", "list_pending_calls", "read_file", "replace", "web_read", "web_search", "write_file" },
             options!.Tools!.Select(tool => tool.Name).Order(StringComparer.Ordinal)));
       } finally {
         await manager.ShutdownSessionsAsync().WaitAsync(TestTimeout);
@@ -48,8 +48,9 @@ public sealed class ToolCompositionTests {
     using UrdStore reopened = UrdStore.Open(database.Path);
     int nextRound = 0;
     using var nextClient = new ScriptedChatClient(token => ++nextRound == 1
-        ? ToolBatch(token, new FunctionCallContent("edit", "edit", new Dictionary<string, object?> {
-          ["path"] = "note.txt", ["edits"] = new[] { new { oldText = "original", newText = "updated" } }
+        ? ToolBatch(token, new FunctionCallContent("edit", "replace", new Dictionary<string, object?> {
+          ["file_path"] = "note.txt", ["instruction"] = "Update the note.",
+          ["old_string"] = "original", ["new_string"] = "updated"
         })) : Complete(token));
     var reopenedPreferences = new PreferenceManager(reopened);
     reopenedPreferences.SetWorkingDirectory(second);

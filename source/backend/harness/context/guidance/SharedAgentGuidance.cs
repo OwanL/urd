@@ -20,6 +20,7 @@ internal static class SharedAgentGuidance {
       - If the user or calling agent is working under incorrect assumptions or gives poor direction, or you disagree with them, push back firmly.
       - Commit verified, task-related work in logical chunks with useful descriptions. Never include unrelated changes.
       - If unrelated changes get in the way, ask whether to commit, stash or discard them.
+      - Avoid Git worktrees. If you need an isolated checkout and repository rules allow it, get the user's approval before creating a separate clone. Set any required environment variables for that clone.
       - Keep temporary notes, logs and other artifacts in an OS temp directory. Files meant for the repository belong in the appropriate place within it.
       - Communicate briefly in plain language, with clear paths and scan-friendly formatting. Focus on decisions, material limitations and useful results rather than routine successes or internal troubleshooting.
       - Read the sections that own the behavior you are changing and follow references needed to resolve the task. Read the full normative contract when changing its invariants. Stop when the relevant requirements and constraints are understood.

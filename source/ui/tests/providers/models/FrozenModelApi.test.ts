@@ -32,7 +32,7 @@ void test("picker freezes Copilot protocol without rewriting the provider bindin
     ],
   });
   const options = new ModelOptions({
-    list: async () => [copilot, custom],
+    listAvailable: async () => [copilot, custom],
     getModels: async (id) => readCatalog(id),
     getModelSettings: async () => [],
     getCredentials: async () => {

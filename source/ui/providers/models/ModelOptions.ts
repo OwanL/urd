@@ -34,13 +34,13 @@ export class ModelOptions {
   private revision = 0;
   private readonly client: Pick<
     ProviderClient,
-    "list" | "getModels" | "getModelSettings" | "refreshModels" | "getCredentials"
+    "listAvailable" | "getModels" | "getModelSettings" | "refreshModels" | "getCredentials"
   >;
 
   constructor(
     client: Pick<
       ProviderClient,
-      "list" | "getModels" | "getModelSettings" | "refreshModels" | "getCredentials"
+      "listAvailable" | "getModels" | "getModelSettings" | "refreshModels" | "getCredentials"
     >,
   ) {
     this.client = client;
@@ -58,7 +58,7 @@ export class ModelOptions {
     const revision = ++this.revision;
     let providers: readonly ProviderConnection[] | null = null;
     try {
-      providers = await this.client.list(signal);
+      providers = await this.client.listAvailable(signal);
       if (!this.isCurrent(revision)) return canceledRead(revision);
       let firstError: unknown | null = null;
       const results = await Promise.all(
@@ -115,7 +115,7 @@ export class ModelOptions {
     const revision = ++this.revision;
     let providers: readonly ProviderConnection[] | null = null;
     try {
-      providers = await this.client.list();
+      providers = await this.client.listAvailable();
       if (!this.isCurrent(revision)) return canceledRead(revision);
       const result = await this.discoverProviders(providers, revision, undefined, automatic);
       if (!this.isCurrent(revision)) return canceledRead(revision);

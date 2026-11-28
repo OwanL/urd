@@ -5,6 +5,7 @@ import type { ProviderConnection } from "../ProviderConnection.ts";
 import { ConnectionForm } from "./ConnectionForm.tsx";
 import { ProviderBucketSuggestions } from "./ProviderBucketSuggestions.tsx";
 import { ProviderChooser } from "./ProviderChooser.tsx";
+import { ProviderConnectionConfirmation } from "./ProviderConnectionConfirmation.tsx";
 import { ProviderConnectionDetail } from "./ProviderConnectionDetail.tsx";
 import { ProviderSettingsFeedback } from "./ProviderSettingsFeedback.tsx";
 import { ProviderSettingsOverview } from "./ProviderSettingsOverview.tsx";
@@ -209,6 +210,7 @@ export function ProviderSettings({
               canNavigate={canNavigate}
               onChoose={choose}
               onOpenConnection={open}
+              onRemoveConnection={(item) => actions.requestConfirmation("remove", item)}
             />
           )}
           {screen === "custom" && (
@@ -251,6 +253,17 @@ export function ProviderSettings({
         </>
       )}
 
+      {state.confirmation && (
+        <ProviderConnectionConfirmation
+          state={state}
+          incompleteSetup={
+            providerSetupState(
+              state.confirmation.connection,
+              state.credentials[state.confirmation.connection.id],
+            ) === "incomplete"
+          }
+        />
+      )}
       <ProviderSettingsFeedback state={state} />
     </section>
   );

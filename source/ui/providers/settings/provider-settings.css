@@ -102,6 +102,17 @@
   min-width: 0;
 }
 
+.provider-settings .provider-settings-setup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.provider-settings .provider-settings-remove-setup {
+  margin-right: 8px;
+}
+
 .provider-settings .provider-settings-connections:empty {
   display: none;
 }

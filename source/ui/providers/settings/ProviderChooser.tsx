@@ -40,6 +40,7 @@ export function ProviderChooser({
   canNavigate,
   onChoose,
   onOpenConnection,
+  onRemoveConnection,
 }: {
   state: ProviderSettingsState;
   unfinished: readonly ProviderConnection[];
@@ -48,6 +49,7 @@ export function ProviderChooser({
   canNavigate: boolean;
   onChoose: (choice: ProviderChoice) => void;
   onOpenConnection: (connection: ProviderConnection, setup?: boolean) => void;
+  onRemoveConnection: (connection: ProviderConnection) => void;
 }) {
   return (
     <>
@@ -78,7 +80,7 @@ export function ProviderChooser({
             <h4>{title}</h4>
             <ul class="provider-settings-connections">
               {items.map((item) => (
-                <li key={item.id}>
+                <li key={item.id} class="provider-settings-setup-row">
                   <button
                     type="button"
                     class="provider-settings-connection"
@@ -88,6 +90,15 @@ export function ProviderChooser({
                     <strong>{connectionTitle(item)}</strong>
                     <span class="provider-settings-secondary">{connectionStatus(state, item)}</span>
                     <Icon name="chevron" />
+                  </button>
+                  <button
+                    type="button"
+                    class="provider-settings-remove-setup provider-settings-danger"
+                    disabled={!canEdit}
+                    aria-label={`Remove saved setup for ${connectionTitle(item)}`}
+                    onClick={() => onRemoveConnection(item)}
+                  >
+                    Remove
                   </button>
                 </li>
               ))}

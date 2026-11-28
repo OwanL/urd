@@ -13,7 +13,7 @@ const unavailable: BucketSetup = {
   error: true,
 };
 
-/** Finds the first saved provider able to suggest models for every bucket. */
+/** Finds the first available provider able to suggest models for every bucket. */
 export function useBucketSuggestions(
   client: ProviderClient,
   refreshPreferences: () => Promise<void> | undefined,
@@ -37,7 +37,7 @@ export function useBucketSuggestions(
       let partial: BucketSetup | null = null;
       let failed = false;
       try {
-        for (const connection of await client.list(abort.signal)) {
+        for (const connection of await client.listAvailable(abort.signal)) {
           let result: BucketSetup | null = null;
           await offerBucketsAfterRefresh(
             connection,

@@ -287,8 +287,11 @@ if Ollama runs elsewhere; the endpoint must be reachable from the Urd server, no
 browser. Start Ollama and install a tool-capable model before using it with Urd. Urd discovers
 models from Ollama; it does not download them or check their tool support. **Custom endpoint**
 is for other compatible server URLs. The same chooser is used during onboarding.
-Its **Finish setup** section resumes saved configurations that still need credentials;
-**Check setup** keeps failed/unknown reads reachable. Successful authentication offers **Done**
+Its **Finish setup** section resumes saved configurations that still need credentials and
+allows their confirmed removal without completing setup; **Check setup** keeps failed/unknown
+reads reachable. Production model pickers and bucket suggestions use only `/available`
+connections, so unfinished or currently unusable connections remain manageable here without
+appearing as model providers. Successful authentication offers **Done**
 to return to the main list in Settings. In onboarding, **Next** becomes available when a usable
 provider has models instead. Selecting a set-up provider opens its connection view; Back
 returns to the list and search can

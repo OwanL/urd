@@ -48,7 +48,7 @@ void test("automatic discovery skips signed-out providers without losing cached 
   const discoveryIds: string[] = [];
   const credentialIds: string[] = [];
   const models = new ModelOptions({
-    list: async () => [firstConnection, signedOut],
+    listAvailable: async () => [firstConnection, signedOut],
     getModels: async (id) => catalog(id, "cached", "Cached"),
     getModelSettings: async () => [],
     getCredentials: async (id) => {
@@ -109,7 +109,7 @@ void test("Copilot automatic discovery reads the sign-in catalog without a secon
   });
   let posts = 0;
   const models = new ModelOptions({
-    list: async () => [copilot],
+    listAvailable: async () => [copilot],
     getModels: async (id) => modelCatalog(id, "from-sign-in"),
     getModelSettings: async () => [],
     getCredentials: async () => assert.fail("Copilot catalog reads should not check credentials"),
@@ -132,7 +132,7 @@ void test("Copilot automatic discovery reads the sign-in catalog without a secon
 
 void test("catalog reference pricing remains nullable in picker options", async () => {
   const models = new ModelOptions({
-    list: async () => [firstConnection],
+    listAvailable: async () => [firstConnection],
     getModels: async (connectionId) => ({
       connectionId,
       refreshedAt: "2026-11-28T00:00:00Z",
@@ -166,7 +166,7 @@ void test("credential failures remain visible and stale discovery does not post"
   const credentials = deferred<ProviderCredentialStatus>();
   const started = deferred<void>();
   const models = new ModelOptions({
-    list: async () => [firstConnection],
+    listAvailable: async () => [firstConnection],
     getModels: async (id) => catalog(id, "cached", "Cached"),
     getModelSettings: async () => [],
     getCredentials: async () => {
@@ -181,7 +181,7 @@ void test("credential failures remain visible and stale discovery does not post"
   assert.equal((result.error as Error).message, "credentials failed");
 
   const stale = new ModelOptions({
-    list: async () => [firstConnection],
+    listAvailable: async () => [firstConnection],
     getModels: async (id) => catalog(id, "cached", "Cached"),
     getModelSettings: async () => [],
     getCredentials: async () => {
@@ -224,7 +224,7 @@ void test("cached reads publish options and discover only providers without a re
         isDisconnecting: false,
       };
     },
-    list: async () => [firstConnection, secondConnection],
+    listAvailable: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) =>
       catalog(
         connectionId,
@@ -294,7 +294,7 @@ void test("cached read failures preserve successful providers and mark failed pr
       planAccessGranted: null,
       isDisconnecting: false,
     }),
-    list: async () => [firstConnection, secondConnection],
+    listAvailable: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) => {
       if (connectionId === secondConnection.id) throw new Error("cached read failed");
       return catalog(connectionId, "cached", "Cached model", "refreshed");
@@ -327,7 +327,7 @@ void test("discovery failures do not discard options from successful providers",
       planAccessGranted: null,
       isDisconnecting: false,
     }),
-    list: async () => [firstConnection, secondConnection],
+    listAvailable: async () => [firstConnection, secondConnection],
     getModels: async () => catalog(firstConnection.id, "cached", "Cached model"),
     getModelSettings: async () => [],
     refreshModels: async (connectionId) => {
@@ -358,7 +358,7 @@ void test("empty provider lists are known and do not attempt discovery", async (
       planAccessGranted: null,
       isDisconnecting: false,
     }),
-    list: async () => [],
+    listAvailable: async () => [],
     getModels: async () => {
       throw new Error("unexpected cache read");
     },
@@ -391,7 +391,7 @@ void test("provider changes can rediscover every provider", async () => {
       planAccessGranted: null,
       isDisconnecting: false,
     }),
-    list: async () => [firstConnection, secondConnection],
+    listAvailable: async () => [firstConnection, secondConnection],
     getModels: async (connectionId) => catalog(connectionId, "cached", "Cached", "refreshed"),
     getModelSettings: async () => [],
     refreshModels: async (connectionId) => {
@@ -422,7 +422,7 @@ void test("provider changes prevent an older manual refresh from publishing over
       planAccessGranted: null,
       isDisconnecting: false,
     }),
-    list: async () => [listCalls++ === 0 ? firstConnection : currentConnection],
+    listAvailable: async () => [listCalls++ === 0 ? firstConnection : currentConnection],
     getModels: async () => catalog(currentConnection.id, "cached", "Cached model"),
     getModelSettings: async () => [],
     refreshModels: async () => {
@@ -481,7 +481,7 @@ void test("catalog identity defaults and explicit settings are matched without m
       planAccessGranted: null,
       isDisconnecting: false,
     }),
-    list: async () => [connection],
+    listAvailable: async () => [connection],
     getModels: async () => ({
       connectionId: connection.id,
       refreshedAt: null,

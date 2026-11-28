@@ -6,7 +6,6 @@ import { authorizationLink } from "./ProviderSignInTab.ts";
 import { copilotSignInError } from "./ProviderSettingsPresentation.ts";
 import { ProviderApiKeyForm } from "./ProviderApiKeyForm.tsx";
 import { ProviderModelCatalog } from "./ProviderModelCatalog.tsx";
-import { ProviderConnectionConfirmation } from "./ProviderConnectionConfirmation.tsx";
 import { ConnectionForm } from "./ConnectionForm.tsx";
 import type { ProviderSettingsState } from "./useProviderSettings.ts";
 
@@ -224,9 +223,6 @@ export function ProviderConnectionDetail({
           </div>
         )}
       </details>
-      {state.confirmation?.connection.id === connection.id && (
-        <ProviderConnectionConfirmation state={state} />
-      )}
     </>
   );
 }

@@ -1,4 +1,13 @@
 export const maximumCompactionTriggerTokenCount = 2_147_483_647;
+// Matches the server's ContextTokenBudget default. Reset still sends null, not this number.
+export const defaultCompactionTriggerTokenCount = 150_000;
+export const compactionSlider = { min: 5_000, max: 300_000, step: 5_000 } as const;
+
+// Exact overrides can be off-scale or between steps. Move only the thumb, not the draft.
+export function compactionSliderPosition(tokenCount: number): number {
+  const { min, max, step } = compactionSlider;
+  return Math.min(max, Math.max(min, Math.round(tokenCount / step) * step));
+}
 
 export function compactionTriggerInput(value: number | null): string {
   return value === null ? "" : String(value);
@@ -36,6 +45,6 @@ export function parseCompactionTriggerInput(value: string): CompactionTriggerInp
 function invalidInput(): CompactionTriggerInputResult {
   return {
     valid: false,
-    error: "Enter a whole number from 1 to 2,147,483,647, or leave blank for Automatic.",
+    error: "Enter a whole number from 1 to 2,147,483,647, or leave blank for the default.",
   };
 }

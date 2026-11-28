@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  compactionSliderPosition,
   compactionTriggerInput,
+  defaultCompactionTriggerTokenCount,
   maximumCompactionTriggerTokenCount,
   reconcileCompactionTriggerDraft,
   parseCompactionTriggerInput,
 } from "../../preferences/CompactionTriggerInput.ts";
 
-void test("compaction trigger input maps blank to Automatic and preserves valid integer values", () => {
+void test("compaction trigger input maps blank to the default and preserves valid integer values", () => {
   assert.deepEqual(parseCompactionTriggerInput(""), { valid: true, value: null });
   assert.deepEqual(parseCompactionTriggerInput("1"), { valid: true, value: 1 });
   assert.deepEqual(parseCompactionTriggerInput("4096"), { valid: true, value: 4_096 });
@@ -17,6 +19,21 @@ void test("compaction trigger input maps blank to Automatic and preserves valid 
   });
   assert.equal(compactionTriggerInput(null), "");
   assert.equal(compactionTriggerInput(4_096), "4096");
+});
+
+void test("compaction slider fits the default and rounds only the thumb for exact overrides", () => {
+  assert.equal(compactionSliderPosition(defaultCompactionTriggerTokenCount), 150_000);
+  for (const [exact, thumb] of [
+    [1, 5_000],
+    [78_123, 80_000],
+    [2_147_483_647, 300_000],
+  ] as const) {
+    assert.equal(compactionSliderPosition(exact), thumb);
+    assert.deepEqual(parseCompactionTriggerInput(compactionTriggerInput(exact)), {
+      valid: true,
+      value: exact,
+    });
+  }
 });
 
 void test("compaction trigger refresh preserves edits but follows the latest saved value after reverting", () => {

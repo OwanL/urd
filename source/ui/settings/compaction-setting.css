@@ -1,0 +1,89 @@
+.compaction-setting {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+.compaction-setting-heading,
+.compaction-setting-value,
+.compaction-setting-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+.compaction-setting-heading,
+.compaction-setting-footer {
+  justify-content: space-between;
+}
+.compaction-setting-heading label {
+  font-weight: 600;
+}
+.compaction-setting-value {
+  font-variant-numeric: tabular-nums;
+}
+.compaction-setting-value button,
+.compaction-exact-input {
+  min-height: 32px;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--text-primary);
+  font: inherit;
+}
+.compaction-setting-value button {
+  background: transparent;
+  text-decoration: underline dotted var(--text-secondary);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.compaction-setting-value button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.compaction-exact-input {
+  width: 13ch;
+  max-width: 100%;
+  border-color: var(--border-subtle);
+  background: var(--surface-input);
+}
+.compaction-setting-default,
+.compaction-slider-limits {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.compaction-slider {
+  width: 100%;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.compaction-slider:disabled {
+  cursor: default;
+}
+.compaction-slider:focus-visible,
+.compaction-exact-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.compaction-slider-limits {
+  display: flex;
+  justify-content: space-between;
+  margin-top: -4px;
+}
+.compaction-setting-footer {
+  margin-top: 4px;
+}
+.compaction-setting-footer p {
+  margin: 0;
+}
+.compaction-setting-footer .general-settings-actions {
+  margin-inline-start: auto;
+}
+.compaction-setting-footer button[aria-disabled="true"] {
+  opacity: 0.5;
+  background: transparent;
+  cursor: default;
+}

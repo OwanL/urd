@@ -66,6 +66,17 @@ public sealed class FileToolVariantTests : IDisposable {
   }
 
   [Fact]
+  public async Task ClaudeReadUsesOneBasedOffsetAndLineLimit() {
+    await File.WriteAllTextAsync(Path.Combine(directory, "test.txt"), "first\nsecond\nthird");
+    AgentTool read = FileToolVariants.For(new ReadTool(files), ModelFamily.Anthropic);
+    var page = await Run(read, new { file_path = "test.txt", offset = 2, limit = 1 });
+    Assert.False(page.IsError, page.Text);
+    Assert.StartsWith("second", page.Text, StringComparison.Ordinal);
+    Assert.DoesNotContain("third", page.Text, StringComparison.Ordinal);
+    Assert.Contains("Use offset=3 to continue.", page.Text, StringComparison.Ordinal);
+  }
+
+  [Fact]
   public async Task RequiredArgumentsAndClaudeRangesAreValidated() {
     await File.WriteAllTextAsync(Path.Combine(directory, "x"), "a");
     AgentTool read = FileToolVariants.For(new ReadTool(files), ModelFamily.Anthropic);

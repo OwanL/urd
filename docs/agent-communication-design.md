@@ -240,12 +240,18 @@ evidence are retained to make the implemented scope explicit; UI presentation fo
 
 ### Subagent presentation
 
-Subagent calls have dedicated transcript rows with the child title and report. Selecting a
-resolved child opens its read-only transcript in the same tab; breadcrumbs return to the primary
-or an ancestor, and nested child rows can be opened in turn. Completed children remain accessible
-through their parent call. The tab's agent menu lists live descendants and opens their paths;
-it is available by hover or explicit control. The child composer displays session indicators,
-but does not accept messages. The child transcript cannot be edited.
+Subagent calls have single-line transcript rows with the child title, model, elapsed assignment
+time, and API-equivalent cost. Cost includes the child and its descendants exactly once. The
+shared Session cost popover shows the split between the child and its descendants, and marks
+incomplete usage. Elapsed time covers only the child's assignment, including waits, and freezes
+at settlement. Visible rows refresh metadata while the child is live.
+
+Selecting a resolved child opens its read-only transcript and report in the same tab; breadcrumbs
+return to the primary or an ancestor, and nested child rows can be opened in turn. For failures or
+unresolved links the parent call's report remains available on demand from the elapsed-time control.
+Completed children remain accessible through their parent call. The tab's agent menu lists live
+descendants and opens their paths by hover or explicit control. The child composer displays session
+indicators but does not accept messages. The child transcript cannot be edited.
 
 ### Agent question presentation (2026-11-19)
 

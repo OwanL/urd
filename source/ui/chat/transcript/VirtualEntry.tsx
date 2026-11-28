@@ -198,6 +198,7 @@ function EntryRow({
       presentation={subagent}
       root={root}
       paused={paused}
+      modelNames={statusContext.modelNames}
     />
   ) : descriptor.tool && toolLabel && agentExchange ? (
     <AgentToolExchange

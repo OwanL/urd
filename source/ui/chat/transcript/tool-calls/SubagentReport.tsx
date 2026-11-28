@@ -77,7 +77,7 @@ function Report({
           // The originating call can settle just before its background return is published.
           const delay = completionRetryDelays[attempts++];
           if (returned && outcome !== null && delay !== undefined) timer = setTimeout(read, delay);
-          else if (hasCompletion || full) setError(true);
+          else setError(true);
         })
         .catch(() => {
           if (!controller.signal.aborted) setError(true);
@@ -143,9 +143,9 @@ function Report({
           {expanded ? "Show less" : "Show full report"}
         </button>
       )}
-      {expanded && shownDetail === null && !error && (
+      {!error && (preview === null || (expanded && shownDetail === null)) && (
         <span class="subagent-report-status" role="status">
-          Loading full report…
+          {expanded ? "Loading full report…" : "Loading report…"}
         </span>
       )}
       {error && (

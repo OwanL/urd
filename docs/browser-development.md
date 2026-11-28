@@ -178,13 +178,15 @@ colours remain distinct. Transcript text uses the Markdown renderer. Tool icons 
 inspection card by hover, click or keyboard; hover alone preserves composer focus. The card
 refreshes when a running call finishes. File rows offer Copy path and Reveal in Explorer.
 
-Subagent calls use dedicated rows showing the child title and report. Visible rows refresh pending
-titles until they publish or the child settles. Selecting a resolved child opens its read-only
-transcript within the primary tab, including after the child completes. Breadcrumbs navigate back
-to the primary or an ancestor, and nested children open in turn. The tab's agent menu exposes live
-descendants by hover or its explicit control. The child composer displays its own model, working
-time, cost and context when available. Messages, editing and manual compaction are unavailable.
-Live child views refresh while visible; completed transcripts remain available through their parent call.
+Subagent calls use single-line rows showing the child title, model, elapsed assignment time, and
+cost including descendants. Visible rows refresh pending titles and live metrics. Selecting a
+resolved child opens its read-only transcript within the primary tab, including after the child
+completes. The elapsed-time control opens the report for failed or unresolved calls. Breadcrumbs
+navigate back to the primary or an ancestor, and nested children open in turn. The tab's agent menu
+exposes live descendants by hover or its explicit control. The child composer displays its own
+model, working time, cost and context when available. Messages, editing and manual compaction are
+unavailable. Live child views refresh while visible; completed transcripts remain available
+through their parent call.
 
 A pending `ask_user` replaces the tab’s working dot with a steady amber `?` without selecting
 or moving the tab. It stays until the last pending question is answered or withdrawn; a muted

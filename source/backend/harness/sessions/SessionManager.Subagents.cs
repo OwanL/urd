@@ -12,11 +12,7 @@ public sealed partial class SessionManager {
         return store.Sessions.ReadSubagentDiscoveries(registry.LiveDescendantIds(primaryId));
       }, cancellation);
 
-  public Task<SubagentDiscovery?> FindSubagentByCallAsync(Guid parentId, Guid requestId, string callId,
-      CancellationToken cancellation = default) => registry.RunOpenAsync(() => {
-        // A retained child without a title has no remaining naming work.
-        SubagentDiscovery? child = store.Sessions.FindSubagentByCall(parentId, requestId, callId);
-        return child is { TitlePending: true } && registry.FindChild(child.Id) is null
-            ? child with { TitlePending = false } : child;
-      }, cancellation);
+  public Task<SubagentCall?> FindSubagentByCallAsync(Guid parentId, Guid requestId, string callId,
+      CancellationToken cancellation = default) => registry.RunOpenAsync(() =>
+        store.Sessions.ReadSubagentCall(parentId, requestId, callId, id => registry.FindChild(id) is not null), cancellation);
 }

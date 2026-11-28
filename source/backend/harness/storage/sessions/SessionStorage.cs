@@ -151,7 +151,57 @@ internal sealed class SessionStorage(Database database) {
         ORDER BY ids.key;
         """, ReadDiscovery, ("$ids", JsonSerializer.Serialize(childIds))));
 
-  internal SubagentDiscovery? FindSubagentByCall(Guid parentId, Guid requestId, string callId) => database.Read(transaction => {
+  internal SubagentDiscovery? FindSubagentByCall(Guid parentId, Guid requestId, string callId) =>
+      database.Read(transaction => FindSubagentByCall(transaction, parentId, requestId, callId));
+
+  internal SubagentCall? ReadSubagentCall(Guid parentId, Guid requestId, string callId, Func<Guid, bool> isLive) =>
+      database.Read(transaction => {
+        if (FindSubagentByCall(transaction, parentId, requestId, callId) is not { } child)
+          return null;
+
+        // Every bounded child owns one assignment. Its working-time interval covers that run,
+        // including waits, but not the parent call's selection and resource cleanup.
+        bool live = isLive(child.Id);
+        var run = database.QuerySingleOrDefault(transaction, """
+            SELECT r.run_id, r.outcome, r.working_started_at, s.completed_working_ms, s.working_time_incomplete
+            FROM sessions s LEFT JOIN execution_runs r ON r.session_id = s.session_id
+            WHERE s.session_id = $session ORDER BY r.ordinal DESC LIMIT 1;
+            """, row => (Id: row.NullableGuid("run_id"), Finished: row.NullableInt("outcome") is not null,
+                StartedAt: row.NullableTimestamp("working_started_at"), Elapsed: row.Long("completed_working_ms"),
+                Incomplete: row.Bool("working_time_incomplete")), ("$session", child.Id));
+        string? modelId = run.Id is Guid runId ? LlmSelectionJson.Read(database.Scalar<string?>(transaction,
+            SnapshotReader.SnapshotSelectionSql, ("$session", child.Id), ("$run", runId)))?.ModelId : null;
+        DateTimeOffset? startedAt = live && !run.Finished ? run.StartedAt : null;
+        long? elapsed = run.Finished && (!run.Incomplete || run.Elapsed > 0) ? run.Elapsed : null;
+        return new SubagentCall(child.Id, child.ParentId, child.Title, live && child.TitlePending, live,
+            modelId, startedAt, elapsed, run.Incomplete, ReadSubagentCost(transaction, child.Id));
+      });
+
+  private SubagentCost ReadSubagentCost(SqliteTransaction transaction, Guid sessionId) =>
+      database.QuerySingleOrDefault(transaction, """
+        WITH RECURSIVE tree(id) AS (
+          SELECT $session
+          UNION ALL
+          SELECT child.session_id FROM tree JOIN sessions child ON child.parent_session_id = tree.id
+        )
+        SELECT SUM(cost_nano_usd) FILTER (WHERE tree.id = $session) AS own_cost,
+            SUM(cost_nano_usd) FILTER (WHERE tree.id <> $session) AS descendant_cost,
+            SUM(cost_nano_usd) AS total_cost,
+            COALESCE(MAX(cost_nano_usd IS NULL OR problem IS NOT NULL) FILTER (WHERE tree.id = $session), 0) AS own_partial,
+            COALESCE(MAX(cost_nano_usd IS NULL OR problem IS NOT NULL) FILTER (WHERE tree.id <> $session), 0) AS descendant_partial,
+            EXISTS(SELECT 1 FROM sessions WHERE parent_session_id = $session) AS has_descendants
+        FROM tree JOIN usage_requests u ON u.session_id = tree.id;
+        """, row => {
+          const decimal nanoDollarsPerDollar = 1_000_000_000m;
+          bool ownPartial = row.Bool("own_partial"), descendantPartial = row.Bool("descendant_partial");
+          return new SubagentCost(
+              new(row.NullableLong("own_cost") / nanoDollarsPerDollar, ownPartial),
+              new(row.NullableLong("descendant_cost") / nanoDollarsPerDollar, descendantPartial),
+              new(row.NullableLong("total_cost") / nanoDollarsPerDollar, ownPartial || descendantPartial),
+              row.Bool("has_descendants"));
+        }, ("$session", sessionId))!;
+
+  private SubagentDiscovery? FindSubagentByCall(SqliteTransaction transaction, Guid parentId, Guid requestId, string callId) {
     var exact = database.QuerySingleOrDefault(transaction, """
         SELECT s.session_id, s.parent_session_id, t.title
         FROM sessions s LEFT JOIN session_prepass_title t ON t.session_id = s.session_id
@@ -180,7 +230,7 @@ internal sealed class SessionStorage(Database database) {
         LIMIT 2;
         """, row => row.Guid("request_id"), ("$parent", parentId), ("$call", callId));
     return requests.Count == 1 && requests[0] == requestId ? children[0].Child : null;
-  });
+  }
 
   private static SubagentDiscovery ReadDiscovery(SqliteDataReader row) {
     string? title = row.NullableString("title");

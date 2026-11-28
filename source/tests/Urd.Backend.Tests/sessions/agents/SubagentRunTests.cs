@@ -635,6 +635,12 @@ public sealed class SubagentRunTests {
       await nestedEntered.Task.WaitAsync(TestTimeout);
       child = ChildForCall(fixture, "outer");
       nested = ChildForCall(fixture, "inner");
+      SubagentCall live = await ReadOwnedCallAsync(nested, "inner");
+      Assert.True(live.Live);
+      Assert.Equal("subagent-fixture", live.ModelId);
+      Assert.NotNull(live.StartedAt);
+      Assert.Null(live.ElapsedMilliseconds);
+      Assert.False(live.DurationIncomplete);
       Assert.Collection(await fixture.Manager.ListLiveSubagentsAsync(parent.Id).WaitAsync(TestTimeout),
           item => {
             Assert.Equal(child.Id, item.Id);
@@ -665,8 +671,14 @@ public sealed class SubagentRunTests {
     Assert.Empty(await fixture.Manager.ListLiveSubagentsAsync(parent.Id).WaitAsync(TestTimeout));
     await AssertOwnedChild(fixture, parent.Id, child.Id, "outer");
     await AssertOwnedChild(fixture, child.Id, nested.Id, "inner");
-    await AssertExactOwnerAsync(child, "outer");
-    await AssertExactOwnerAsync(nested, "inner");
+    foreach (SubagentCall retained in new[] { await ReadOwnedCallAsync(child, "outer"),
+        await ReadOwnedCallAsync(nested, "inner") }) {
+      Assert.False(retained.Live);
+      Assert.Equal("subagent-fixture", retained.ModelId);
+      Assert.Null(retained.StartedAt);
+      Assert.True(retained.ElapsedMilliseconds is >= 0);
+      Assert.False(retained.DurationIncomplete);
+    }
     Assert.All(StoredTools.Read(fixture.Database).Where(call => call.Name == "subagent"),
         call => Assert.Equal(ExecutionOutcome.Completed, call.Outcome));
     Assert.Contains(client.Requests.SelectMany(messages => messages).SelectMany(message => message.Contents)
@@ -695,12 +707,14 @@ public sealed class SubagentRunTests {
       }
     }
 
-    async Task AssertExactOwnerAsync(SessionRecord record, string callId) {
+    async Task<SubagentCall> ReadOwnedCallAsync(SessionRecord record, string callId) {
       Guid requestId = Assert.Single(StoredTools.Read(fixture.Database), call => call.CallId == callId).RequestId;
       Assert.Equal(requestId, record.OwningRequestId);
-      SubagentDiscovery? found = await fixture.Manager.FindSubagentByCallAsync(record.ParentSessionId!.Value,
+      SubagentCall? found = await fixture.Manager.FindSubagentByCallAsync(record.ParentSessionId!.Value,
           requestId, callId).WaitAsync(TestTimeout);
-      Assert.Equal(record.Id, found?.Id);
+      Assert.NotNull(found);
+      Assert.Equal(record.Id, found.Id);
+      return found;
     }
 
     async IAsyncEnumerable<ChatResponseUpdate> NestedResponse(

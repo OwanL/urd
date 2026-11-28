@@ -21,6 +21,7 @@ export type IconName =
   | "tool"
   | "background"
   | "subagents"
+  | "layers"
   | "return"
   | "ask"
   | "warning";
@@ -54,6 +55,7 @@ const paths: Record<IconName, string> = {
     "M3.375 19.5c.375-3.375 2.25-5.25 5.625-5.25S14.25 16.125 14.625 19.5" +
     "M14.625 8.25a2.625 2.625 0 1 1 5.25 0 2.625 2.625 0 1 1-5.25 0Z" +
     "M16.125 14.25c2.625.15 4.125 1.65 4.5 4.5",
+  layers: "m12 4 9 5-9 5-9-5 9-5ZM21 14l-9 5-9-5",
   return: "M9 10 4 15l5 5M20 4v7a4 4 0 0 1-4 4H4",
   ask: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z",
   warning:

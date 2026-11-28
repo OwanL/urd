@@ -25,7 +25,7 @@ internal static class SubagentRoutes {
     if (parentId == Guid.Empty || requestId == Guid.Empty || string.IsNullOrWhiteSpace(callId))
       return Results.BadRequest();
 
-    SubagentDiscovery? child = await sessions.FindSubagentByCallAsync(parentId, requestId, callId, http.RequestAborted);
+    SubagentCall? child = await sessions.FindSubagentByCallAsync(parentId, requestId, callId, http.RequestAborted);
     return child is null ? Results.NotFound() : Results.Ok(child);
   }
 

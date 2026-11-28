@@ -28,6 +28,7 @@ import type { PrepassDetails, PrepassDetailsQuery } from "./transcript/Prepass.t
 import type { ContinuationReceipt, ContinuationSubmission } from "./inputs/Continuation.ts";
 import type { MessageEditReceipt, MessageEditSubmission } from "./inputs/MessageEdit.ts";
 import type { SessionIdPage } from "./SessionIdPage.ts";
+import type { SubagentCall } from "./SubagentCall.ts";
 import type { SessionSnapshot, SubagentViewSnapshot } from "./SessionSnapshot.ts";
 import type { UserQuestion } from "./inputs/UserQuestion.ts";
 import type { StopReceipt } from "./inputs/Stop.ts";
@@ -117,7 +118,7 @@ export class SessionClient {
     requestId: string,
     callId: string,
     signal?: AbortSignal,
-  ): Promise<(SubagentLink & { readonly titlePending: boolean }) | null> {
+  ): Promise<SubagentCall | null> {
     const path = `/${encodeURIComponent(parentId)}/subagents/by-call/${encodeURIComponent(requestId)}/${encodeURIComponent(callId)}`;
     try {
       return await requestJson(this.url(path), "GET", undefined, signal);

@@ -10,27 +10,8 @@ import {
   toolRowStatus,
   type ToolRowStatus,
 } from "./ToolRowPresentation.ts";
+import { subscribeToToolRowClock } from "./ToolRowClock.ts";
 import "./tool-row.css";
-
-const clockSubscribers = new Set<(now: number) => void>();
-let clockTimer: number | null = null;
-
-function subscribeToToolRowClock(update: (now: number) => void): () => void {
-  clockSubscribers.add(update);
-  if (clockTimer === null) {
-    clockTimer = window.setInterval(() => {
-      const now = Date.now();
-      for (const subscriber of clockSubscribers) subscriber(now);
-    }, 1_000);
-  }
-  return () => {
-    clockSubscribers.delete(update);
-    if (clockSubscribers.size === 0 && clockTimer !== null) {
-      window.clearInterval(clockTimer);
-      clockTimer = null;
-    }
-  };
-}
 
 const iconNames: Record<ToolCallLabel["icon"], IconName> = {
   terminal: "terminal",

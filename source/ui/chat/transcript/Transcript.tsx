@@ -338,6 +338,7 @@ function PlainTranscript({
                       presentation={subagent}
                       root={root}
                       paused={!visible || documentHidden}
+                      modelNames={statusContext.modelNames}
                     />
                   ) : descriptor.tool && label && agentExchange ? (
                     <AgentToolExchange

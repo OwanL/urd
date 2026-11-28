@@ -8,6 +8,18 @@
   padding-bottom: 0;
 }
 
+.subagent-row {
+  container-type: inline-size;
+}
+
+.subagent-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 7.25rem) 4rem 5.5rem;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+}
+
 .subagent-heading {
   margin: 5px 0 2px;
   color: var(--text-secondary);
@@ -20,6 +32,7 @@
   align-items: center;
   gap: 4px;
   width: fit-content;
+  min-width: 0;
   max-width: 100%;
   min-height: 26px;
   padding: 0 4px;
@@ -56,15 +69,132 @@ button.subagent-title:hover {
 }
 
 .subagent-title:focus-visible,
+.subagent-metric-control:focus-visible,
 .subagent-report-action:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
 
-.subagent-report:not(:empty) {
-  margin: 1px 0 6px 4px;
-  padding-left: 9px;
-  border-left: 1px solid var(--border-subtle);
+.subagent-model,
+.subagent-elapsed,
+.subagent-cost {
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.subagent-model,
+.subagent-elapsed-value,
+.subagent-cost-amount {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subagent-model-short {
+  display: none;
+}
+
+.subagent-elapsed,
+.subagent-cost {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.subagent-elapsed > span,
+.subagent-metric-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  max-width: 100%;
+}
+
+.subagent-running {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border: 1px solid currentColor;
+  border-block-start-color: transparent;
+  border-radius: 50%;
+}
+
+.subagent-metric-control {
+  min-height: 28px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.subagent-cost-missing {
+  padding-inline-end: 4px;
+}
+
+.subagent-metric-control .icon {
+  width: 12px;
+  height: 12px;
+}
+
+.subagent-metric-control:hover,
+.subagent-metric-control[aria-expanded="true"] {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+@container (max-width: 440px) {
+  .subagent-line {
+    grid-template-columns: minmax(0, 1fr) min(26%, 4.75rem) min(24%, 3.85rem) min(28%, 4.75rem);
+    gap: 5px;
+  }
+  .subagent-model-full {
+    display: none;
+  }
+  .subagent-model-short {
+    display: inline;
+  }
+}
+
+.subagent-cost-popover,
+.subagent-report-popover {
+  padding: 8px 10px;
+}
+
+.subagent-cost-popover {
+  width: min(14rem, calc(100vw - 16px));
+  font-size: 12px;
+}
+
+.subagent-cost-breakdown {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
+.subagent-cost-breakdown dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.subagent-cost-total {
+  padding-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.subagent-cost-popover p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+}
+
+.subagent-report {
   color: var(--text-secondary);
   font-size: 13px;
 }

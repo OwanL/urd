@@ -11,9 +11,10 @@ Open the subagent from its title to read the report; don’t add an inline previ
 
 - **Cost** is this subagent’s own cost plus all of its descendants, recursively,
   counted once. The layers icon marks a total that includes descendant cost.
-  Select the amount to see “This subagent”, “Nested subagents”, and “Total”.
-  While work is ongoing, show cost so far. Don’t show missing prices as zero or a
-  known subtotal as a complete total.
+  Show “This subagent”, “Nested subagents”, and “Total” using the same
+  `HoverPopover` as the Session cost control, including its hover, click, and
+  keyboard behavior. While work is ongoing, show cost so far. Don’t show missing
+  prices as zero or a known subtotal as a complete total.
 - **Elapsed** is wall-clock time since this subagent started, frozen when its run
   ends. It isn’t summed across descendants. A queued run shows “Queued” rather
   than `0:00`; a running row pairs its time with a running indicator.

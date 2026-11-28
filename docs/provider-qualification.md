@@ -286,6 +286,22 @@ not which headers, routing, or SDK processing produced the difference. The SDK r
 is not evidence that the raw route permits any of those models. Keep Urd's model
 checks and runtime unchanged; a standalone route needs a provider-supported contract.
 
+Pie is not a control for Urd's direct route. The inspected Pi code in Pie uses a
+bundled OAuth client ID and VS Code Chat headers, exchanges the GitHub token for
+a Copilot service token, and attempts to enable models before listing them on
+sign-in. Pie's catalog sync also retains the previous catalog when a refresh finds
+no selectable models. Its production parser returned zero choices on a synthetic
+copy of Urd's eight-row, picker-disabled response shape. The empty picker is not
+explained by a filter Pie lacks. This is source and fixture evidence, not an
+observation of a live Pie account or a reason to copy its identity or policy writes.
+
+The [VS Code Language Model API](https://code.visualstudio.com/api/extension-guides/ai/language-model)
+is a separate model-only interface for extensions: it lists Copilot models with
+user consent and accepts caller-supplied messages and tools. A real local VS Code
+companion could be evaluated separately without moving Urd's conversation or tool
+execution. It would require VS Code and would not qualify Urd's standalone OAuth
+route. Off-editor use, message fidelity and live behavior are not qualified.
+
 Official documentation below was inspected **2026-11-04**; mutable docs are not
 version-pinned. Library/source pins are research evidence, not selected packages.
 

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urd · Prompt cache warning</title>
+  <link rel="stylesheet" href="../../../source/ui/base.css">
+  <style>
+    :root { --warning: #d5b77d; }
+    html, body { height: auto; overflow: visible; }
+    main { max-width: 700px; margin: 0 auto; padding: 32px 20px; }
+    header { margin-bottom: 22px; }
+    h1, h2, p { margin: 0; }
+    h1 { font-size: 21px; font-weight: 600; }
+    h2 { font-size: 12px; font-weight: 600; }
+    header p, .example-label p { color: var(--text-secondary); font-size: 12px; }
+    .example { margin-top: 18px; }
+    .example-label { margin-bottom: 7px; }
+    .composer {
+      position: relative;
+      padding: 10px 7px 7px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 12px;
+      background: var(--surface-input);
+    }
+    .placeholder { padding: 0 6px; color: var(--text-secondary); }
+    .composer-bar { display: flex; align-items: center; gap: 4px; min-height: 30px; margin-top: 8px; }
+    .model, .chip { padding: 4px 5px; color: var(--text-secondary); white-space: nowrap; }
+    .model { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+    .chip { font-size: 11px; font-variant-numeric: tabular-nums; }
+    .context { display: flex; align-items: center; padding-right: 2px; border-radius: 5px; }
+    .context.has-warning { background: var(--surface-hover); }
+    .warning-button, .send { display: grid; place-items: center; border: 0; border-radius: 5px; }
+    .warning-button { width: 30px; height: 30px; padding: 0; background: transparent; color: var(--warning); }
+    .warning-button:hover, .warning-button:focus-visible { background: #35302a; }
+    .send { flex: none; width: 30px; height: 30px; background: var(--accent); color: #151515; }
+    .composer-preview { position: relative; padding-top: 84px; }
+    .warning-popover {
+      position: absolute;
+      z-index: 1;
+      right: 40px;
+      bottom: 45px;
+      width: min(264px, calc(100% - 40px));
+      padding: 8px 10px;
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      background: var(--surface-popover);
+      box-shadow: 0 4px 18px #0007;
+      font-size: 12px;
+    }
+    .warning-title { display: flex; align-items: center; gap: 6px; color: var(--warning); font-weight: 600; }
+    .coverage { color: var(--text-secondary); font-size: 11px; }
+    .cache-rows { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; margin: 7px 0 0; padding-top: 6px; border-top: 1px solid var(--border-subtle); font-size: 11px; }
+    dt { color: var(--text-secondary); }
+    dd { margin: 0; font-variant-numeric: tabular-nums; }
+    @media (max-width: 420px) { main { padding: 22px 12px; } .time { display: none; } }
+  </style>
+</head>
+<body>
+  <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="warning" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M7.1 2.6a1 1 0 0 1 1.8 0l5.45 9.55a1 1 0 0 1-.87 1.5H2.52a1 1 0 0 1-.87-1.5ZM8 6v3m0 2.3v.1"/>
+    </symbol>
+    <symbol id="send" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 12V4M4.5 7.5 8 4l3.5 3.5"/>
+    </symbol>
+  </svg>
+  <main>
+    <header>
+      <h1>Prompt cache warning</h1>
+      <p>Composer mockup · synthetic data</p>
+    </header>
+    <section class="example" aria-labelledby="low">
+      <div class="example-label">
+        <h2 id="low">Low cache reuse</h2>
+        <p>Three comparable requests reported low reuse after the first request.</p>
+      </div>
+      <div class="composer-preview">
+        <div class="composer">
+          <p class="placeholder">Message…</p>
+          <div class="composer-bar">
+            <span class="model">GPT-5.4 <span aria-hidden="true">⌄</span></span>
+            <span class="chip time">1m 24s</span><span class="chip">$0.14</span>
+            <div class="context has-warning">
+              <span class="chip" aria-label="Context window: 10k of 128k">10k/128k</span>
+              <button type="button" class="warning-button" aria-label="Low prompt cache reuse" aria-controls="cache-details" aria-expanded="true">
+                <svg width="14" height="14" aria-hidden="true"><use href="#warning"/></svg>
+              </button>
+            </div>
+            <span class="send" aria-hidden="true"><svg width="16" height="16"><use href="#send"/></svg></span>
+          </div>
+        </div>
+        <div class="warning-popover" id="cache-details" role="region" aria-labelledby="cache-warning-title">
+          <div class="warning-title" id="cache-warning-title">
+            <svg width="13" height="13" aria-hidden="true"><use href="#warning"/></svg>
+            Low prompt cache reuse
+          </div>
+          <p><strong>12% cached</strong> after the first request</p>
+          <p class="coverage">3 measured requests · warning below 60%</p>
+          <dl class="cache-rows">
+            <dt>Last turn</dt><dd>10.0% cached · 9k uncached</dd>
+            <dt>Session</dt><dd>9.7% cached · 33.4k uncached</dd>
+          </dl>
+        </div>
+      </div>
+    </section>
+    <section class="example" aria-labelledby="healthy">
+      <div class="example-label">
+        <h2 id="healthy">Healthy reuse</h2>
+        <p>82% cached after the first request.</p>
+      </div>
+      <div class="composer">
+        <p class="placeholder">Message…</p>
+        <div class="composer-bar">
+          <span class="model">GPT-5.4 <span aria-hidden="true">⌄</span></span>
+          <span class="chip time">1m 24s</span><span class="chip">$0.06</span>
+          <div class="context"><span class="chip" aria-label="Context window: 10k of 128k">10k/128k</span></div>
+          <span class="send" aria-hidden="true"><svg width="16" height="16"><use href="#send"/></svg></span>
+        </div>
+      </div>
+    </section>
+    <section class="example" aria-labelledby="unknown">
+      <div class="example-label">
+        <h2 id="unknown">Cache usage not reported</h2>
+        <p>No warning: missing telemetry is not a miss.</p>
+      </div>
+      <div class="composer">
+        <p class="placeholder">Message…</p>
+        <div class="composer-bar">
+          <span class="model">Qwen 3.5 <span aria-hidden="true">⌄</span></span>
+          <span class="chip time">1m 24s</span><span class="chip">—</span>
+          <div class="context"><span class="chip" aria-label="Context window: 10k of 128k">10k/128k</span></div>
+          <span class="send" aria-hidden="true"><svg width="16" height="16"><use href="#send"/></svg></span>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script>
+    const details = document.querySelector("#cache-details");
+    const warning = document.querySelector(".warning-button");
+    function setOpen(open) {
+      warning.setAttribute("aria-expanded", String(open));
+      details.hidden = !open;
+    }
+    warning.addEventListener("click", () => setOpen(details.hidden));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !details.hidden) setOpen(false);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!warning.contains(event.target) && !details.contains(event.target)) setOpen(false);
+    });
+  </script>
+</body>
+</html>

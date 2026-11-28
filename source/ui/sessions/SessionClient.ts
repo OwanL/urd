@@ -120,7 +120,7 @@ export class SessionClient {
     requestId: string,
     callId: string,
     signal?: AbortSignal,
-  ): Promise<SubagentLink | null> {
+  ): Promise<(SubagentLink & { readonly titlePending: boolean }) | null> {
     const path = `/${encodeURIComponent(parentId)}/subagents/by-call/${encodeURIComponent(requestId)}/${encodeURIComponent(callId)}`;
     try {
       return await requestJson(this.url(path), "GET", undefined, signal);

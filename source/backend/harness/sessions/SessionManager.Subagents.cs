@@ -13,8 +13,10 @@ public sealed partial class SessionManager {
       }, cancellation);
 
   public Task<SubagentDiscovery?> FindSubagentByCallAsync(Guid parentId, Guid requestId, string callId,
-      CancellationToken cancellation = default) {
-    cancellation.ThrowIfCancellationRequested();
-    return Task.FromResult(store.Sessions.FindSubagentByCall(parentId, requestId, callId));
-  }
+      CancellationToken cancellation = default) => registry.RunOpenAsync(() => {
+        // A retained child without a title has no remaining naming work.
+        SubagentDiscovery? child = store.Sessions.FindSubagentByCall(parentId, requestId, callId);
+        return child is { TitlePending: true } && registry.FindChild(child.Id) is null
+            ? child with { TitlePending = false } : child;
+      }, cancellation);
 }

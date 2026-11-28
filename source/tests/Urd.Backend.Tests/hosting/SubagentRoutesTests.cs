@@ -74,11 +74,12 @@ public sealed class SubagentRoutesTests {
       using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
       JsonElement item = body.RootElement;
       Assert.Equal(JsonValueKind.Object, item.ValueKind);
-      Assert.Equal(new[] { "id", "parentId", "title" }, item.EnumerateObject().Select(property => property.Name)
+      Assert.Equal(new[] { "id", "parentId", "title", "titlePending" }, item.EnumerateObject().Select(property => property.Name)
           .OrderBy(name => name, StringComparer.Ordinal));
       Assert.Equal(expectedId, item.GetProperty("id").GetGuid());
       Assert.Equal(expectedParentId, item.GetProperty("parentId").GetGuid());
       Assert.Equal("Subagent", item.GetProperty("title").GetString());
+      Assert.False(item.GetProperty("titlePending").GetBoolean());
     }
 
     static string PathFor(Guid parentId, Guid requestId, string callId) =>

@@ -175,12 +175,12 @@ colours remain distinct. Transcript text uses the Markdown renderer. Tool icons 
 inspection card by hover, click or keyboard; hover alone preserves composer focus. The card
 refreshes when a running call finishes. File rows offer Copy path and Reveal in Explorer.
 
-Subagent calls use dedicated rows showing the child title and report. Selecting a resolved child
-opens its read-only transcript within the primary tab, including after the child completes;
-breadcrumbs navigate back to the primary or an ancestor, and nested children open in turn. The
-tab's agent menu exposes live descendants by hover or its explicit control. Child views have no
-composer or message editing. Live child views refresh while visible; completed transcripts remain
-available through their parent call.
+Subagent calls use dedicated rows showing the child title and report. Visible rows refresh pending
+titles until they publish or the child settles. Selecting a resolved child opens its read-only
+transcript within the primary tab, including after the child completes. Breadcrumbs navigate back
+to the primary or an ancestor, and nested children open in turn. The tab's agent menu exposes live
+descendants by hover or its explicit control. Child views have no composer or message editing.
+Live child views refresh while visible; completed transcripts remain available through their parent call.
 
 A pending `ask_user` replaces the tab’s working dot with a steady amber `?` without selecting
 or moving the tab. It stays until the last pending question is answered or withdrawn; a muted
@@ -285,7 +285,7 @@ npm run build
 | `npm run lint` / `npm run lint:fast` | Combined typed lint / syntax-only feedback. |
 | `npm run typecheck` / `npm run typecheck:watch` | Strict compiler once / persistent watch. |
 | `npm test` | Node unit tests discovered from `tests/**/*.test.ts`; no Chromium launch. For one file, use `node --test path/to/file.test.ts`. |
-| `npm run test:browser` | Chromium checks for browser viewer input and layout; requires Playwright Chromium (`npx playwright install chromium`). |
+| `npm run test:browser` | Chromium checks for browser viewer input/layout and selected live UI behavior; requires Playwright Chromium (`npx playwright install chromium`). |
 | `npm run build` / `npm run build:watch` | Bundle once / watch into `source/ui/dist`; neither runs a server. |
 | `npm run test:integration` | Real Server and SDK-to-loopback-provider test; requires built UI assets and the Release backend build. |
 | `npm run dev:browser:host` | Explicit temporary browser fixture host; real Urd plus a credential-free loopback model fixture, never saved accounts. |

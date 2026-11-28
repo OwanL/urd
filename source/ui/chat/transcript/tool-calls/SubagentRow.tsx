@@ -103,9 +103,9 @@ function useSubagentLink(
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
-    function retryMissing() {
-      // Closed legacy calls may never have a unique link, so bound their retries.
-      if (controller.signal.aborted || (isClosed && attempt >= childRetryDelays.length)) return;
+    let titlePending = false;
+    function retry() {
+      if (controller.signal.aborted) return;
       const delay = childRetryDelays[Math.min(attempt++, childRetryDelays.length - 1)];
       timer = setTimeout(read, delay);
     }
@@ -114,11 +114,19 @@ function useSubagentLink(
         .getSubagentForCall(lookup.sessionId, lookup.requestId, lookup.callId, controller.signal)
         .then((link) => {
           if (controller.signal.aborted) return;
-          if (link === null) retryMissing();
-          else if (link.parentId === lookup.sessionId) setResolved({ lookup, child: link });
+          if (link === null) {
+            // Closed legacy calls may never have a unique link, so bound their retries.
+            if (!isClosed || attempt < childRetryDelays.length) retry();
+            return;
+          }
+          if (link.parentId !== lookup.sessionId) return;
+          setResolved({ lookup, child: link });
+          titlePending = link.titlePending;
+          if (titlePending) retry();
         })
         .catch((failure: unknown) => {
-          if (failure instanceof RequestError && failure.status === 404) retryMissing();
+          if (titlePending && (!(failure instanceof RequestError) || failure.status >= 500))
+            retry();
         });
     }
     read();

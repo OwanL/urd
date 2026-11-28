@@ -191,8 +191,10 @@ internal sealed class SessionStorage(Database database) {
     return requests.Count == 1 && requests[0] == requestId ? children[0].Child : null;
   });
 
-  private static SubagentDiscovery ReadDiscovery(SqliteDataReader row) =>
-      new(row.Guid("session_id"), row.Guid("parent_session_id"), row.NullableString("title") ?? "Subagent");
+  private static SubagentDiscovery ReadDiscovery(SqliteDataReader row) {
+    string? title = row.NullableString("title");
+    return new(row.Guid("session_id"), row.Guid("parent_session_id"), title ?? "Subagent", TitlePending: title is null);
+  }
 
   internal bool HasAcceptedInput(Guid sessionId) => database.RunLocked(() => database.Scalar<bool>(null, """
       SELECT EXISTS(SELECT 1 FROM input_decisions WHERE session_id = $session AND decision = 1);

@@ -105,12 +105,12 @@ internal sealed class ProviderStorage(Database database) {
   }, missingIsChanged: true);
 
   internal bool SaveRefresh(Guid id, long expectedGeneration, long expectedCredentialVersion,
-      ProviderCredentials credentials) => database.Write(transaction => {
+      ProviderCredentials credentials, bool clearCatalog = false) => database.Write(transaction => {
     ProviderState? state = Read(transaction, id);
     if (state is null || state.Generation != expectedGeneration || state.CredentialVersion != expectedCredentialVersion)
       return false;
 
-    bool sameGrant = state.Credentials is { } previous
+    bool sameGrant = !clearCatalog && state.Credentials is { } previous
         && previous.RequiresSignIn == credentials.RequiresSignIn
         && previous.Scopes.ToHashSet(StringComparer.Ordinal).SetEquals(credentials.Scopes);
     Save(transaction, state with {

@@ -5,8 +5,9 @@ using System.Text.Json;
 
 namespace Urd.Core.Providers;
 
-// Borrows the manager's redirect-disabled transport. Only GitHub can advertise an allowlisted Copilot origin.
+// Borrows the manager's redirect-disabled transport. GitHub OAuth tokens go only to the fixed GitHub REST endpoints.
 internal sealed class GitHubCopilotAuthentication(HttpClient client, string? clientId, TimeProvider? clock = null) {
+  internal const string DefaultClientId = "Iv1.b507a08c87ecfe98";
   private const int MaximumResponseBytes = 64 * 1024;
   private const int MaximumTokenLength = 16 * 1024;
   private const int MaximumDeviceLifetimeSeconds = 15 * 60;
@@ -15,20 +16,16 @@ internal sealed class GitHubCopilotAuthentication(HttpClient client, string? cli
   private static readonly Uri verificationEndpoint = new("https://github.com/login/device");
   private static readonly Uri oauthTokenEndpoint = new("https://github.com/login/oauth/access_token");
   private static readonly Uri userEndpoint = new("https://api.github.com/user");
-  private static readonly Uri copilotUserEndpoint = new("https://api.github.com/copilot_internal/user");
+  private static readonly Uri copilotTokenEndpoint = new("https://api.github.com/copilot_internal/v2/token");
   private readonly TimeProvider time = clock ?? TimeProvider.System;
-  private readonly string? configuredClientId = clientId?.Trim();
+  private readonly string configuredClientId = string.IsNullOrWhiteSpace(clientId) ? DefaultClientId : clientId.Trim();
 
   internal static Uri DefaultEndpoint { get; } = new("https://api.individual.githubcopilot.com/");
-  internal bool IsConfigured => !string.IsNullOrEmpty(configuredClientId);
   internal bool IsExpired(DateTimeOffset expiresAt) => time.GetUtcNow() >= expiresAt;
 
   internal async Task<GitHubCopilotDeviceFlow> BeginAsync(CancellationToken cancellationToken) {
-    if (!IsConfigured)
-      throw new ProviderOperationException(ProviderFailure.CopilotNotConfigured);
-
     DateTimeOffset requestedAt = time.GetUtcNow();
-    using HttpRequestMessage request = Form(deviceCodeEndpoint, ("client_id", configuredClientId!), ("scope", "read:user"));
+    using HttpRequestMessage request = Form(deviceCodeEndpoint, ("client_id", configuredClientId), ("scope", "read:user"));
     using JsonDocument response = await ReadAsync(request, cancellationToken).ConfigureAwait(false);
     JsonElement root = response.RootElement;
     string deviceCode = RequireToken(root, "device_code");
@@ -55,58 +52,64 @@ internal sealed class GitHubCopilotAuthentication(HttpClient client, string? cli
     using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, expiry.Token);
     CancellationToken token = lifetime.Token;
     try {
-      var grant = await PollAsync(flow, token).ConfigureAwait(false);
+      string? githubToken = await PollAsync(flow, token).ConfigureAwait(false);
       token.ThrowIfCancellationRequested();
-      if (grant is not { } github || time.GetUtcNow() >= flow.ExpiresAt)
+      if (githubToken is null || time.GetUtcNow() >= flow.ExpiresAt)
         return null;
 
-      ProviderRegistration account = await ReadAccountAsync(github.AccessToken, token).ConfigureAwait(false);
+      ProviderRegistration account = await ReadAccountAsync(githubToken, token).ConfigureAwait(false);
       token.ThrowIfCancellationRequested();
       if (time.GetUtcNow() >= flow.ExpiresAt)
         return null;
       if (registration is not null && account.Subject != registration.Subject)
         throw new ProviderOperationException(ProviderFailure.SignInRejected);
 
-      Uri endpoint = await ReadCopilotEndpointAsync(github.AccessToken, token).ConfigureAwait(false);
+      ProviderCredentials credentials = await ExchangeAsync(githubToken, token).ConfigureAwait(false);
       token.ThrowIfCancellationRequested();
-      var credentials = new ProviderCredentials(null, github.AccessToken, null, null, github.ExpiresAt, [], CopilotEndpoint: endpoint);
       return time.GetUtcNow() < flow.ExpiresAt ? new(account, credentials) : null;
     } catch (OperationCanceledException) when (expiry.IsCancellationRequested && !cancellationToken.IsCancellationRequested) {
       return null;
     }
   }
 
-  internal static bool HasDirectGrant(ProviderCredentials credentials) =>
-      IsToken(credentials.AccessToken) && IsCopilotEndpoint(credentials.CopilotEndpoint);
+  internal async Task<ProviderCredentials> RefreshAsync(
+      ProviderRegistration registration, ProviderCredentials credentials, CancellationToken cancellationToken) {
+    cancellationToken.ThrowIfCancellationRequested();
+    if (registration.ClientId != configuredClientId || credentials.RequiresSignIn || !IsToken(credentials.RefreshToken))
+      return credentials with { RequiresSignIn = true };
 
-  internal static bool CanUseGrant(ProviderCredentials credentials, DateTimeOffset now) =>
-      HasDirectGrant(credentials) && (credentials.ExpiresAt is null || credentials.ExpiresAt > now);
-
-  internal static Uri GetEndpoint(ProviderCredentials credentials) =>
-      HasDirectGrant(credentials) ? credentials.CopilotEndpoint! : throw InvalidResponse();
-
-  private static bool IsCopilotEndpoint(Uri? endpoint) {
-    if (endpoint is not {
-      IsAbsoluteUri: true, Scheme: "https", IsDefaultPort: true,
-      Host: "api.githubcopilot.com" or "api.individual.githubcopilot.com" or "api.business.githubcopilot.com" or
-          "api.enterprise.githubcopilot.com"
-    })
-      return false;
-
-    // Uri normalizes dot segments and other syntax; only accept a bare origin as supplied.
-    ReadOnlySpan<char> input = endpoint.OriginalString.AsSpan();
-    if (!input.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-      return false;
-    ReadOnlySpan<char> authority = input[8..];
-    if (authority.EndsWith("/", StringComparison.Ordinal))
-      authority = authority[..^1];
-    if (authority.EndsWith(":443", StringComparison.Ordinal))
-      authority = authority[..^4];
-    return authority.Equals(endpoint.Host, StringComparison.OrdinalIgnoreCase);
+    try {
+      return await ExchangeAsync(credentials.RefreshToken!, cancellationToken).ConfigureAwait(false);
+    } catch (ProviderOperationException failure) when (failure.Failure == ProviderFailure.AuthenticationRequired) {
+      return credentials with { RequiresSignIn = true };
+    }
   }
 
-  private async Task<(string AccessToken, DateTimeOffset? ExpiresAt)?> PollAsync(
-      GitHubCopilotDeviceFlow flow, CancellationToken cancellationToken) {
+  internal static bool HasGrant(ProviderCredentials credentials) =>
+      IsToken(credentials.AccessToken) && IsToken(credentials.RefreshToken) && credentials.ExpiresAt is not null;
+
+  internal static Uri GetEndpoint(ProviderCredentials credentials) {
+    if (!IsToken(credentials.AccessToken))
+      throw InvalidResponse();
+
+    Uri? endpoint = null;
+    foreach (string part in credentials.AccessToken!.Split(';')) {
+      if (!part.StartsWith("proxy-ep=", StringComparison.OrdinalIgnoreCase))
+        continue;
+      if (endpoint is not null)
+        throw InvalidResponse();
+      endpoint = part[9..].ToLowerInvariant() switch {
+        "proxy.githubcopilot.com" => new("https://api.githubcopilot.com/"),
+        "proxy.individual.githubcopilot.com" => DefaultEndpoint,
+        "proxy.business.githubcopilot.com" => new("https://api.business.githubcopilot.com/"),
+        "proxy.enterprise.githubcopilot.com" => new("https://api.enterprise.githubcopilot.com/"),
+        _ => throw InvalidResponse()
+      };
+    }
+    return endpoint ?? DefaultEndpoint;
+  }
+
+  private async Task<string?> PollAsync(GitHubCopilotDeviceFlow flow, CancellationToken cancellationToken) {
     long interval = flow.IntervalSeconds;
     DateTimeOffset next = flow.FirstPollAt;
     while (next < flow.ExpiresAt) {
@@ -114,11 +117,10 @@ internal sealed class GitHubCopilotAuthentication(HttpClient client, string? cli
       if (delay > TimeSpan.Zero)
         await Task.Delay(delay, time, cancellationToken).ConfigureAwait(false);
       cancellationToken.ThrowIfCancellationRequested();
-      DateTimeOffset requestedAt = time.GetUtcNow();
-      if (requestedAt >= flow.ExpiresAt)
+      if (time.GetUtcNow() >= flow.ExpiresAt)
         return null;
 
-      using var request = Form(oauthTokenEndpoint, ("client_id", configuredClientId!), ("device_code", flow.DeviceCode),
+      using var request = Form(oauthTokenEndpoint, ("client_id", configuredClientId), ("device_code", flow.DeviceCode),
           ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"));
       using JsonDocument response = await ReadAsync(request, cancellationToken, allowDeviceError: true).ConfigureAwait(false);
       JsonElement root = response.RootElement;
@@ -126,8 +128,7 @@ internal sealed class GitHubCopilotAuthentication(HttpClient client, string? cli
         case null:
           if (!string.Equals(ReadString(root, "token_type"), "bearer", StringComparison.OrdinalIgnoreCase))
             throw InvalidResponse();
-          return (RequireToken(root, "access_token"), root.TryGetProperty("expires_in", out _)
-              ? requestedAt.AddSeconds(RequirePositiveInt(root, "expires_in")) : null);
+          return RequireToken(root, "access_token");
         case "authorization_pending":
           break;
         case "slow_down":
@@ -159,16 +160,22 @@ internal sealed class GitHubCopilotAuthentication(HttpClient client, string? cli
         !id.TryGetInt64(out long subject) || subject <= 0 ||
         login is not { Length: > 0 and <= 128 } || !login.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_'))
       throw InvalidResponse();
-    return new(configuredClientId!, subject.ToString(CultureInfo.InvariantCulture), login);
+    return new(configuredClientId, subject.ToString(CultureInfo.InvariantCulture), login);
   }
 
-  private async Task<Uri> ReadCopilotEndpointAsync(string githubToken, CancellationToken cancellationToken) {
-    using HttpRequestMessage request = ApiGet(copilotUserEndpoint, githubToken);
+  private async Task<ProviderCredentials> ExchangeAsync(string githubToken, CancellationToken cancellationToken) {
+    using HttpRequestMessage request = CopilotApiGet(copilotTokenEndpoint, githubToken);
     using JsonDocument response = await ReadAsync(request, cancellationToken).ConfigureAwait(false);
-    if (!response.RootElement.TryGetProperty("endpoints", out JsonElement endpoints) || endpoints.ValueKind != JsonValueKind.Object ||
-        !Uri.TryCreate(ReadString(endpoints, "api"), UriKind.Absolute, out Uri? endpoint) || !IsCopilotEndpoint(endpoint))
+    JsonElement root = response.RootElement;
+    string accessToken = RequireToken(root, "token");
+    if (!root.TryGetProperty("expires_at", out JsonElement expires) || expires.ValueKind != JsonValueKind.Number ||
+        !expires.TryGetInt64(out long seconds) || seconds <= time.GetUtcNow().ToUnixTimeSeconds() ||
+        seconds > DateTimeOffset.MaxValue.ToUnixTimeSeconds())
       throw InvalidResponse();
-    return endpoint;
+
+    var credentials = new ProviderCredentials(null, accessToken, githubToken, null, DateTimeOffset.FromUnixTimeSeconds(seconds), []);
+    _ = GetEndpoint(credentials);
+    return credentials;
   }
 
   private async Task<JsonDocument> ReadAsync(HttpRequestMessage request, CancellationToken cancellationToken,
@@ -179,14 +186,15 @@ internal sealed class GitHubCopilotAuthentication(HttpClient client, string? cli
     try {
       token.ThrowIfCancellationRequested();
       request.Headers.Accept.ParseAdd("application/json");
-      request.Headers.UserAgent.ParseAdd("Urd");
+      if (request.Headers.UserAgent.Count == 0)
+        request.Headers.UserAgent.ParseAdd("Urd");
       using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token)
           .ConfigureAwait(false);
       token.ThrowIfCancellationRequested();
       if (!(response.IsSuccessStatusCode || (allowDeviceError && response.StatusCode == HttpStatusCode.BadRequest)))
         throw new ProviderOperationException(response.StatusCode switch {
           HttpStatusCode.Unauthorized => ProviderFailure.AuthenticationRequired,
-          HttpStatusCode.Forbidden when request.RequestUri == copilotUserEndpoint => ProviderFailure.PlanAccessDenied,
+          HttpStatusCode.Forbidden when request.RequestUri == copilotTokenEndpoint => ProviderFailure.PlanAccessDenied,
           _ => ProviderFailure.ProviderUnavailable
         });
       if (response.Content.Headers.ContentLength > MaximumResponseBytes)
@@ -223,10 +231,20 @@ internal sealed class GitHubCopilotAuthentication(HttpClient client, string? cli
     }
   }
 
-  private static HttpRequestMessage Form(Uri endpoint, params (string Name, string Value)[] fields) =>
-      new(HttpMethod.Post, endpoint) {
-        Content = new FormUrlEncodedContent(fields.Select(field => KeyValuePair.Create(field.Name, field.Value)))
-      };
+  private static HttpRequestMessage Form(Uri endpoint, params (string Name, string Value)[] fields) {
+    var request = new HttpRequestMessage(HttpMethod.Post, endpoint) {
+      Content = new FormUrlEncodedContent(fields.Select(field => KeyValuePair.Create(field.Name, field.Value)))
+    };
+    request.Headers.UserAgent.ParseAdd(GitHubCopilotRequest.UserAgent);
+    return request;
+  }
+
+  private static HttpRequestMessage CopilotApiGet(Uri endpoint, string token) {
+    var request = new HttpRequestMessage(HttpMethod.Get, endpoint);
+    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+    GitHubCopilotRequest.ApplyIdentityHeaders(request);
+    return request;
+  }
 
   private static HttpRequestMessage ApiGet(Uri endpoint, string token) {
     var request = new HttpRequestMessage(HttpMethod.Get, endpoint);

@@ -305,6 +305,19 @@ methods send a prompt to a Copilot-owned session. The experimental stateless
 Decisions interface returns Boolean, choice, or rating results, not chat or tool
 calls. Neither is a drop-in model transport for Urd's conversation runtime.
 
+On **2026-11-28**, the owner explicitly selected Pi's VS Code Chat route for Urd despite
+that support boundary. Urd now bundles the same public OAuth client identity, exchanges the
+GitHub grant for a short-lived Copilot service token, applies the VS Code Chat identity
+headers to token, catalog and inference calls, and derives the allowlisted account API origin
+from that token. This supersedes the earlier implementation recommendation above; it does
+not turn the internal endpoints into a documented or supported standalone GitHub API.
+No automatic model-policy writes were adopted. An authorized live probe on the same date forced
+service-token exchange, fetched the account catalog and completed a basic `claude-haiku-4.5`
+Anthropic Messages call through Urd. Copilot appended an OpenAI-style `[DONE]` marker after the
+complete Anthropic `message_stop`; Urd accepts that marker only in that terminal position. This
+verifies the selected account and basic text path, not a supported contract, tools, images,
+continuation, cancellation, rate limits or other account policies.
+
 The [VS Code Language Model API](https://code.visualstudio.com/api/extension-guides/ai/language-model)
 is a separate model-only interface for extensions: it lists Copilot models with
 user consent and accepts caller-supplied messages and tools. A real local VS Code
@@ -318,7 +331,7 @@ version-pinned. Library/source pins are research evidence, not selected packages
 | Route | Documented access and request path | Focused implementation path | Qualification / limitation |
 | --- | --- | --- | --- |
 | **ChatGPT subscription** | Public-client OAuth/PKCE/OIDC with dynamic registration; bearer token → `POST https://api.openai.com/v1/responses`. Officially documented for open-source/local apps, with preview restrictions [O1–O5]. | OpenAI .NET `ResponsesClient` + MEAI Responses adapter; small route/auth/fidelity glue, not Codex. | Live OAuth, required scopes, catalog retrieval, selected `gpt-6-luna` text/tool/SQLite continuation, Stop and acknowledged revocation verified on 2026-11-08. Allowance/pricing, other models and forced refresh remain unqualified. Paid/remotely hosted offerings have a separate OpenAI interest process; a remote UI to one's local backend does not by itself establish eligibility for a different deployment. |
-| **GitHub Copilot subscription** | GitHub documents device OAuth and using app tokens with its SDK. Its SDK adopts the Copilot agent runtime, including experimental native in-process transport; neither transport meets Urd's boundary [G1]. | Independent Crush source demonstrates device OAuth → internal Copilot token exchange → OpenAI-compatible model transport [G2–G3]. | Technically evidenced, **not qualified**. No standalone supported subscription inference contract was established in the inspected official SDK/auth/REST docs. Own-app authorization, integration identity, account/model policy and endpoint stability need resolution; source availability is not permission to impersonate VS Code. |
+| **GitHub Copilot subscription** | GitHub documents device OAuth and using app tokens with its SDK. Its SDK adopts the Copilot agent runtime, including experimental native in-process transport; neither transport meets Urd's boundary [G1]. | Urd now follows Pi's device OAuth → internal Copilot token exchange → OpenAI-compatible model transport, with the VS Code Chat client identity selected by the owner [G2–G3]. | Implemented but still **not provider-qualified**: no supported standalone inference contract was established in the inspected official docs. Account/model policy and endpoint stability remain service-controlled. |
 | **OpenAI API key** | Bearer project API key → `POST https://api.openai.com/v1/responses`; SSE and client-executed functions [A1]. | Same official OpenAI/MEAI model-client family, separate credential and route settings. | Documented API access, not included ChatGPT-plan billing. Exact model/project permissions, billing and limits require a key and approved calls. Do not apply generic API-key options to the more restricted plan route. |
 | **Anthropic API key** | `POST https://api.anthropic.com/v1/messages`; API key (`x-api-key` remains supported; current docs also document bearer), API-version header; SSE `tool_use` / `tool_result` [A2]. | Official Anthropic C# `AsIChatClient()` for ordinary Messages; native inline-tool beta requires separate fidelity work [L1]. | API-only by owner decision. Qualify chosen SDK/API-version pair, model access and limits. No Claude consumer-plan work. Existing adapter's inline-tool drops/default settings are not resolved by successful authentication. |
 | **Local Ollama** | Native `/api/chat` supports NDJSON and ordinary tools [M1]; this implementation instead uses compatible `/v1/chat/completions`. | Official OpenAI/MEAI adapter with native reasoning-field preservation. Native OllamaSharp remains outside this checkpoint. | Existing 0.40.13 / local `qwen3.5:9b` qualified for text, tool/result, reasoning-bearing SQLite continuation and Stop as recorded above. No downloads or cloud routing. Broader tool reliability, other models and native discovery are not established. |

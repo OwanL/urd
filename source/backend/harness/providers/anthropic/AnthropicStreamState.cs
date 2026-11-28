@@ -23,6 +23,11 @@ internal sealed class AnthropicStreamState(LlmProviderScope scope, ChatOptions o
   private string? messageId, model, stopReason;
   private bool stopped, hasMessageDelta;
 
+  internal void AcceptDone() {
+    if (!stopped)
+      throw Invalid("Copilot done marker before message_stop");
+  }
+
   internal ChatResponseUpdate? Accept(SseItem<JsonElement> item) {
     JsonElement data = item.Data;
     string type = RequiredString(data, "type");

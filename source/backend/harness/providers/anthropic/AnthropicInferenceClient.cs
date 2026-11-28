@@ -61,17 +61,25 @@ internal sealed class AnthropicInferenceClient(HttpClient httpClient, TimeSpan? 
       using var input = new AnthropicSseInput(body);
       var parser = SseParser.Create(input, static (_, data) => {
         if (data.Length > AnthropicSseInput.MaximumEventBytes) throw Invalid("Anthropic SSE event exceeds the size limit");
-        return JsonSerializer.Deserialize<JsonElement>(data, Strict);
+        return data.SequenceEqual("[DONE]"u8) ? default : JsonSerializer.Deserialize<JsonElement>(data, Strict);
       });
       await using var stream = parser.EnumerateAsync(readStop.Token).GetAsyncEnumerator(readStop.Token);
       string stage = "the first provider stream event";
+      bool done = false;
       while (true) {
         input.BeginEvent();
         bool next = await ReadAsync(_ => stream.MoveNextAsync(), stage).ConfigureAwait(false);
         CheckRead(stage);
         if (!next) break;
         stage = "the next provider stream event";
-        if (guard.Accept(stream.Current) is { } update) yield return update;
+        if (stream.Current.Data.ValueKind == JsonValueKind.Undefined) {
+          if (done) throw Invalid("duplicate Copilot done marker");
+          guard.AcceptDone();
+          done = true;
+        } else {
+          if (done) throw Invalid("Anthropic event after Copilot done marker");
+          if (guard.Accept(stream.Current) is { } update) yield return update;
+        }
       }
     } finally {
       await readStop.CancelAsync().ConfigureAwait(false);

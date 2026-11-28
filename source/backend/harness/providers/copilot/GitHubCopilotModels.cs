@@ -15,7 +15,7 @@ internal sealed class GitHubCopilotModels(HttpClient client) {
     using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(GitHubCopilotAuthentication.GetEndpoint(credentials), "models"));
     request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credentials.AccessToken);
     request.Headers.Accept.ParseAdd("application/json");
-    request.Headers.UserAgent.ParseAdd("Urd");
+    GitHubCopilotRequest.ApplyIdentityHeaders(request);
     request.Headers.Add("X-GitHub-Api-Version", ApiVersion);
     try {
       using HttpResponseMessage response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);

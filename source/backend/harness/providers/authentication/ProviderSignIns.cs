@@ -21,8 +21,6 @@ internal sealed class ProviderSignIns(
         throw new ArgumentException("This connection does not use subscription sign-in.", nameof(connectionId));
       if (state.Disconnecting)
         throw new ProviderOperationException(ProviderFailure.Disconnecting);
-      if (state.Connection.Route == ProviderRoute.GitHubCopilot && !copilot.IsConfigured)
-        throw new ProviderOperationException(ProviderFailure.CopilotNotConfigured);
 
       if (!attempts.TryGetValue(connectionId, out attempt!) || attempt.Finished.Task.IsCompleted) {
         attempt = new(state);

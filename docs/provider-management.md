@@ -107,27 +107,32 @@ runtime fallback.
 
 ## GitHub Copilot device sign-in
 
-Set `URD_GITHUB_COPILOT_CLIENT_ID` in the server process environment to the client ID of
-an OAuth app configured for device flow and authorized for the Copilot service. Urd
-ships no shared client ID and does not act as VS Code. A valid GitHub login alone does
-not prove that GitHub grants that app or account access to Copilot inference.
+Urd follows Pi's VS Code Chat route. It bundles the public VS Code OAuth client ID and sends
+these client identity headers to the Copilot token, catalog and inference endpoints:
+`GitHubCopilotChat/0.35.0`, `vscode/1.107.0`, `copilot-chat/0.35.0` and integration ID
+`vscode-chat`. `URD_GITHUB_COPILOT_CLIENT_ID` can override the OAuth client ID for diagnostics,
+but a different app may not be authorized for the VS Code Chat service route. This integration
+uses undocumented Copilot endpoints and is not a supported standalone GitHub API contract.
 
 1. Add `/github-copilot`, then POST its `/sign-in`. Open `authorizationUrl` and enter
    the displayed `userCode` on GitHub. Urd polls only while that attempt is active.
-2. Urd verifies the GitHub account and reads the Copilot API origin from `/copilot_internal/user`.
-   It uses the original OAuth bearer token at that origin, without a separate token exchange,
-   and fetches `/models` automatically. This is an undocumented GitHub interface, not a
-   supported inference contract. A successful sign-in with `catalogRefreshFailed: true`
-   keeps the credentials; retry via `/{id}/models/refresh`. Sign-in does not send a test prompt.
-3. The account catalog controls model availability. Urd does not enable models or change
+2. Urd verifies the GitHub account, then exchanges the GitHub OAuth grant at
+   `/copilot_internal/v2/token`. The short-lived Copilot service token is the bearer for model
+   discovery and inference; the GitHub token is retained only to repeat that exchange.
+3. Urd derives the API origin from the service token's single `proxy-ep` field and limits it
+   to the known Individual, Business, Enterprise and generic Copilot API hosts. A token without
+   that field uses the Individual origin. Urd then fetches `/models` automatically. A successful
+   sign-in with `catalogRefreshFailed: true` keeps the credentials; retry via
+   `/{id}/models/refresh`. Sign-in does not send a test prompt.
+4. The account catalog controls model availability. Urd does not enable models or change
    policy. It lists selectable models with a supported transport, regardless of reported
    tool support. A frozen selection keeps its protocol; if discovery changes the model or
    protocol, reselect it. Urd does not switch protocols in response to an inference error.
 
 The saved connection's canonical endpoint is `https://api.individual.githubcopilot.com/`.
-Actual requests use the bare HTTPS origin advertised by GitHub, limited to the known Copilot
-API hosts. Missing or invalid routing metadata fails sign-in. Old exchanged credentials and
-expired OAuth grants require sign-in again. Disconnect clears local tokens and catalog;
+Actual requests use the service token's allowlisted account origin. Service tokens refresh
+before expiry by repeating the exchange with the retained GitHub grant. Credentials from the
+former direct-grant route require sign-in again. Disconnect clears local tokens and catalog;
 revoke the OAuth app's grant in GitHub if remote revocation is needed.
 
 ## ChatGPT flow

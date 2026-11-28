@@ -92,9 +92,12 @@ public sealed class ProviderRoutesTests {
   }
 
   [Fact]
-  public async Task CopilotConnectionCanBeSavedWithoutOAuthConfiguration() {
+  public async Task CopilotConnectionUsesBundledVsCodeOAuthConfiguration() {
     using var database = new TemporaryDatabase();
-    var handler = new ScriptedOpenAIHandler("{}", "application/json");
+    var handler = new ScriptedOpenAIHandler($$"""
+        {"device_code":"{{Secret}}","user_code":"ABCD-EFGH","verification_uri":"https://github.com/login/device",
+        "expires_in":600,"interval":60}
+        """, "application/json");
     await using var server = new RunningServer(RunningServer.OptionsFor(database),
         createProviders: (store, callbackUri) => new ProviderManager(store, callbackUri, handler));
     await server.WaitForReadyAsync();
@@ -108,11 +111,12 @@ public sealed class ProviderRoutesTests {
     Assert.Equal("gitHubCopilot", binding.GetProperty("route").GetString());
     Assert.Equal("GitHub Copilot", binding.GetProperty("name").GetString());
 
-    using var rejected = await SendAsync(server.Client, HttpMethod.Post, PathFor(connection, "/sign-in"),
-        expected: HttpStatusCode.Conflict);
-    JsonElement failure = await rejected.Content.ReadFromJsonAsync<JsonElement>(json);
-    Assert.Equal("copilotNotConfigured", failure.GetProperty("error").GetString());
-    Assert.Empty(handler.Requests);
+    ProviderSignIn signIn = await PostAsync<ProviderSignIn>(server.Client, PathFor(connection, "/sign-in"));
+    Assert.Equal(ProviderSignInStatus.Pending, signIn.Status);
+    Assert.Equal("ABCD-EFGH", signIn.UserCode);
+    ScriptedOpenAIRequest request = Assert.Single(handler.Requests);
+    Assert.Equal($"client_id={GitHubCopilotAuthentication.DefaultClientId}&scope=read%3Auser", request.Body);
+    await PostAsync<ProviderSignIn>(server.Client, $"/api/providers/sign-ins/{signIn.Id:D}/cancel");
   }
 
   [Fact]

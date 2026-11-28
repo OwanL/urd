@@ -100,8 +100,7 @@ public sealed class ModelSelectorTests {
     try {
       ProviderConnection connection = await manager.AddGitHubCopilotAsync("GitHub Copilot");
       ProviderState state = store.Providers.SetCredentials(connection.Id, 0, new("fixture", "account", null),
-          new(null, "synthetic-github-access", null, null, null, [],
-              CopilotEndpoint: new Uri("https://api.business.githubcopilot.com/")));
+          new(null, "synthetic-copilot-access", "synthetic-github-access", null, DateTimeOffset.UtcNow.AddHours(1), []));
       Assert.True(store.Providers.SaveCatalog(connection.Id, state.Generation, new(connection.Id, DateTimeOffset.UtcNow, [
         new("null-api", "Missing protocol"),
         new("chat-model", "Chat", Api: LlmApi.OpenAIChatCompletions),

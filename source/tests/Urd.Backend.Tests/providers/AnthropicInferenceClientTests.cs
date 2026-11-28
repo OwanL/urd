@@ -119,6 +119,7 @@ public sealed class AnthropicInferenceClientTests {
   [InlineData("max-tokens", ProviderFailure.IncompleteResponse)]
   [InlineData("wrong-finish", ProviderFailure.InvalidProviderResponse)]
   [InlineData("late-error", ProviderFailure.ProviderUnavailable)]
+  [InlineData("early-done", ProviderFailure.InvalidProviderResponse)]
   [InlineData("unknown-block", ProviderFailure.InvalidProviderResponse)]
   [InlineData("dispose-error", ProviderFailure.ProviderUnavailable)]
   public async Task PartialAndFailedStreamsNeverPublishAnExecutableCall(string variant, ProviderFailure failure) {
@@ -128,6 +129,7 @@ public sealed class AnthropicInferenceClientTests {
       "max-tokens" => End("max_tokens"),
       "wrong-finish" => End(),
       "late-error" => End("tool_use") + Event("error", """{"error":{"type":"overloaded_error","message":"Service busy."}}"""),
+      "early-done" => "data: [DONE]\n\n" + End("tool_use"),
       "unknown-block" => Event("content_block_start", """{"index":1,"content_block":{"type":"server_tool_use"}}"""),
       _ => End("tool_use")
     };
@@ -145,6 +147,19 @@ public sealed class AnthropicInferenceClientTests {
       Assert.DoesNotContain(update.Contents, part => part is FunctionCallContent);
     });
     Assert.Equal(17, AddUsage(observed).InputTokenCount);
+    Assert.True(stream.Disposed);
+  }
+
+  [Fact]
+  public async Task CopilotDoneSentinelAfterMessageStopIsAccepted() {
+    using var stream = new FixtureStream(messageStart + textBlock + End() + "data: [DONE]\n\n");
+    using var handler = new FakeHandler(Replies(stream));
+    using var transport = new HttpClient(handler);
+
+    List<ChatResponseUpdate> updates = await CollectAsync(new(transport), State(), History(), Options());
+
+    Assert.Equal("Found it.", Assert.Single(updates.SelectMany(update => update.Contents).OfType<TextContent>()).Text);
+    Assert.Equal(ChatFinishReason.Stop, updates[^1].FinishReason);
     Assert.True(stream.Disposed);
   }
 

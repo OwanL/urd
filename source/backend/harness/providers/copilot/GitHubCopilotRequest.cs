@@ -3,8 +3,16 @@ using Microsoft.Extensions.AI;
 
 namespace Urd.Core.Providers;
 
-// Adds Copilot request metadata without identifying Urd as a different client.
+// Copilot authenticates and routes this integration as VS Code Chat.
 internal sealed class GitHubCopilotRequest(IReadOnlyList<ChatMessage> messages) : PipelinePolicy {
+  internal const string UserAgent = "GitHubCopilotChat/0.35.0";
+
+  internal static void ApplyIdentityHeaders(HttpRequestMessage request) =>
+      ApplyIdentityHeaders((key, value) => {
+        request.Headers.Remove(key);
+        request.Headers.Add(key, value);
+      });
+
   internal static void ApplyHeaders(HttpRequestMessage request, IReadOnlyList<ChatMessage> messages) =>
       ApplyHeaders((key, value) => {
         request.Headers.Remove(key);
@@ -22,12 +30,19 @@ internal sealed class GitHubCopilotRequest(IReadOnlyList<ChatMessage> messages) 
   }
 
   private static void ApplyHeaders(Action<string, string> set, IReadOnlyList<ChatMessage> input) {
-    set("User-Agent", "Urd");
+    ApplyIdentityHeaders(set);
     set("X-GitHub-Api-Version", GitHubCopilotModels.ApiVersion);
     set("X-Initiator", input.Count == 0 || input[^1].Role == ChatRole.User ? "user" : "agent");
     set("Openai-Intent", "conversation-edits");
     if (input.Any(message => message.Contents.Any(ContainsImage)))
       set("Copilot-Vision-Request", "true");
+  }
+
+  private static void ApplyIdentityHeaders(Action<string, string> set) {
+    set("User-Agent", UserAgent);
+    set("Editor-Version", "vscode/1.107.0");
+    set("Editor-Plugin-Version", "copilot-chat/0.35.0");
+    set("Copilot-Integration-Id", "vscode-chat");
   }
 
   private static bool ContainsImage(AIContent content) => content switch {

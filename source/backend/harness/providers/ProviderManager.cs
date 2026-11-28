@@ -17,7 +17,8 @@ public sealed class ProviderManager : IDisposable {
   private readonly HttpMessageHandler handler;
   private readonly HttpClient client;
   private readonly ChatGptAuthentication authentication;
-  private readonly string? copilotClientId;
+  private readonly GitHubCopilotAuthentication copilot;
+  private readonly string copilotClientId;
   private readonly OpenAIModelProbe modelProbe;
   private readonly GitHubCopilotModels copilotModels;
   private readonly ProviderSignIns signIns;
@@ -32,7 +33,7 @@ public sealed class ProviderManager : IDisposable {
       Action<ProviderDiagnostic>? diagnose = null, string? copilotClientId = null)
       : this(store, callbackUri, new SocketsHttpHandler { AllowAutoRedirect = false }, prices: prices,
           connectSocket: ChatGptSocketRun.ConnectAsync, diagnose: diagnose,
-          copilotClientId: copilotClientId ?? Environment.GetEnvironmentVariable("URD_GITHUB_COPILOT_CLIENT_ID")) { }
+          copilotClientId: ResolveCopilotClientId(copilotClientId)) { }
 
   // The manager owns this handler; test transports cannot fall back to real network access.
   internal ProviderManager(UrdStore store, Func<Uri> callbackUri, HttpMessageHandler handler, Uri? issuer = null,
@@ -47,8 +48,9 @@ public sealed class ProviderManager : IDisposable {
     this.handler = handler;
     client = new(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
     authentication = new(handler, issuer);
-    this.copilotClientId = copilotClientId?.Trim();
-    var copilot = new GitHubCopilotAuthentication(client, this.copilotClientId, copilotClock);
+    this.copilotClientId = string.IsNullOrWhiteSpace(copilotClientId)
+        ? GitHubCopilotAuthentication.DefaultClientId : copilotClientId.Trim();
+    copilot = new(client, this.copilotClientId, copilotClock);
     modelProbe = new(client, store.Usage, prices);
     copilotModels = new(client);
     requests = new(gate, storage, modelSettings, new(client, connectSocket: connectSocket, diagnose: diagnose), new(client),
@@ -347,7 +349,8 @@ public sealed class ProviderManager : IDisposable {
         return state;
       if (!HasPlanAccess(state))
         throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
-      if (state.Connection.Route == ProviderRoute.GitHubCopilot || credentials.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1))
+      bool refreshRequired = !(credentials.ExpiresAt > DateTimeOffset.UtcNow.AddMinutes(1));
+      if (!refreshRequired)
         return state;
       if (state.Registration is null || string.IsNullOrEmpty(credentials.RefreshToken))
         throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
@@ -379,19 +382,25 @@ public sealed class ProviderManager : IDisposable {
 
   private async Task RefreshAsync(ProviderState state, TaskCompletionSource<ProviderState> completion) {
     Guid id = state.Connection.Id;
+    bool signInRejected = false;
     try {
       using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-      ProviderCredentials credentials = await authentication.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token);
+      ProviderCredentials credentials = state.Connection.Route == ProviderRoute.GitHubCopilot
+          ? await copilot.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token)
+          : await authentication.RefreshAsync(state.Registration!, state.Credentials!, timeout.Token);
+      signInRejected = credentials.RequiresSignIn;
+      bool endpointChanged = state.Connection.Route == ProviderRoute.GitHubCopilot &&
+          GitHubCopilotAuthentication.GetEndpoint(state.Credentials!) != GitHubCopilotAuthentication.GetEndpoint(credentials);
       using var held = await gate.AcquireAsync();
-      if (!storage.SaveRefresh(id, state.Generation, state.CredentialVersion, credentials))
+      if (!storage.SaveRefresh(id, state.Generation, state.CredentialVersion, credentials, endpointChanged))
         throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
       completion.TrySetResult(storage.Get(id));
     } catch (Exception failure) {
       // A lost refresh acknowledgement may have rotated the remote token; require explicit recovery.
       using var held = await gate.AcquireAsync();
-      bool requireSignIn = failure is not ProviderOperationException {
-        Failure: ProviderFailure.ProviderUnavailable or ProviderFailure.ConnectionChanged
-      };
+      bool requireSignIn = state.Connection.Route == ProviderRoute.GitHubCopilot
+          ? signInRejected || failure is ProviderOperationException { Failure: ProviderFailure.AuthenticationRequired }
+          : failure is not ProviderOperationException { Failure: ProviderFailure.ProviderUnavailable or ProviderFailure.ConnectionChanged };
       if (requireSignIn) {
         signInRequired[id] = state.Generation;
         try {
@@ -465,8 +474,6 @@ public sealed class ProviderManager : IDisposable {
 
     return state.Connection.Authentication switch {
       AuthenticationMethod.ApiKey => !string.IsNullOrWhiteSpace(credentials.ApiKey),
-      AuthenticationMethod.OAuth when state.Connection.Route == ProviderRoute.GitHubCopilot =>
-          state.Registration is not null && GitHubCopilotAuthentication.CanUseGrant(credentials, now),
       AuthenticationMethod.OAuth => HasPlanAccess(state) && (credentials.ExpiresAt > now.AddMinutes(1)
           ? !string.IsNullOrWhiteSpace(credentials.AccessToken)
           : state.Registration is not null && !string.IsNullOrEmpty(credentials.RefreshToken)),
@@ -492,7 +499,10 @@ public sealed class ProviderManager : IDisposable {
       throw new ProviderOperationException(ProviderFailure.AuthenticationRequired);
     if (!HasPlanAccess(current))
       throw new ProviderOperationException(ProviderFailure.PlanAccessDenied);
-    if (!current.Credentials.Scopes.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Credentials!.Scopes))
+    if (!current.Credentials.Scopes.ToHashSet(StringComparer.Ordinal).SetEquals(snapshot.Credentials!.Scopes) ||
+        current.Connection.Route == ProviderRoute.GitHubCopilot &&
+        GitHubCopilotAuthentication.GetEndpoint(current.Credentials) !=
+            GitHubCopilotAuthentication.GetEndpoint(snapshot.Credentials))
       throw new ProviderOperationException(ProviderFailure.ConnectionChanged);
   }
 
@@ -508,11 +518,11 @@ public sealed class ProviderManager : IDisposable {
       signInRequired.TryGetValue(state.Connection.Id, out long generation) && generation == state.Generation ||
       state.Connection.Route == ProviderRoute.GitHubCopilot &&
       (state.Registration is { } registration && !string.Equals(copilotClientId, registration.ClientId, StringComparison.Ordinal) ||
-       state.Credentials is { } credentials && !GitHubCopilotAuthentication.CanUseGrant(credentials, DateTimeOffset.UtcNow));
+       state.Credentials is { } credentials && !GitHubCopilotAuthentication.HasGrant(credentials));
 
   private static bool HasPlanAccess(ProviderState state) => state.Credentials is { } credentials &&
       (state.Connection.Route == ProviderRoute.GitHubCopilot
-          ? state.Registration is not null && GitHubCopilotAuthentication.HasDirectGrant(credentials)
+          ? state.Registration is not null && GitHubCopilotAuthentication.HasGrant(credentials)
           : credentials.Scopes.Contains("resource.invoke", StringComparer.Ordinal) &&
             credentials.Scopes.Contains("chatgpt.tokens.use.direct", StringComparer.Ordinal));
 
@@ -530,6 +540,13 @@ public sealed class ProviderManager : IDisposable {
     ObjectDisposedException.ThrowIf(disposed, this);
     if (stopping)
       throw new InvalidOperationException("Provider management is stopping.");
+  }
+
+  private static string ResolveCopilotClientId(string? configured) {
+    if (!string.IsNullOrWhiteSpace(configured))
+      return configured.Trim();
+    string? environment = Environment.GetEnvironmentVariable("URD_GITHUB_COPILOT_CLIENT_ID");
+    return string.IsNullOrWhiteSpace(environment) ? GitHubCopilotAuthentication.DefaultClientId : environment.Trim();
   }
 
   private static string ValidateName(string name) {

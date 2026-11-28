@@ -132,7 +132,8 @@
 }
 .browser-viewer-tab:hover,
 .browser-viewer-return:hover,
-.browser-viewer-tab[aria-selected="true"] {
+.browser-viewer-tab[aria-selected="true"],
+.browser-viewer-header .browser-bitwarden-control[aria-expanded="true"] {
   background: var(--surface-hover);
   color: var(--text-primary);
 }

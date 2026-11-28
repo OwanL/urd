@@ -29,13 +29,14 @@ internal sealed partial class BrowserHost : IAsyncDisposable {
   private DateTimeOffset? emptySince;
   private bool disposed;
 
-  internal BrowserHost(string dataRoot, Func<Guid, Task<bool>> hasPendingQuestion) {
+  internal BrowserHost(string dataRoot, Func<Guid, Task<bool>> hasPendingQuestion, string? bitwardenExtensionPath = null) {
     ArgumentNullException.ThrowIfNull(hasPendingQuestion);
     string root = Path.GetFullPath(dataRoot);
     profilePath = Path.Combine(root, "playwright-profile");
     cookiePath = Path.Combine(root, "playwright-profile.cookies.json");
     downloadRoot = Path.Combine(Path.GetTempPath(), "urd-browser-downloads");
     this.hasPendingQuestion = hasPendingQuestion;
+    this.bitwardenExtensionPath = bitwardenExtensionPath;
     sweeper = SweepAsync();
   }
 
@@ -91,12 +92,11 @@ internal sealed partial class BrowserHost : IAsyncDisposable {
   internal void Touch(Guid owner, Guid page) {
     lock (gate) {
       ObjectDisposedException.ThrowIf(disposed, this);
-      if (!pages.Touch(owner, page))
+      bool touched = pages.Touch(owner, page);
+      if (!owners.TryGetValue(owner, out OwnerEntry? entry) || (!touched && entry.Bitwarden?.Id != page))
         return;
-      if (owners.TryGetValue(owner, out OwnerEntry? entry)) {
-        entry.LastActivity = DateTimeOffset.UtcNow;
-        entry.DeferredUntil = null;
-      }
+      entry.LastActivity = DateTimeOffset.UtcNow;
+      entry.DeferredUntil = null;
     }
   }
 
@@ -282,9 +282,11 @@ internal sealed partial class BrowserHost : IAsyncDisposable {
     IReadOnlyList<BrowserPage<IPage>> owned = pages.List(owner);
     foreach (BrowserPage<IPage> page in owned)
       pages.Remove(owner, page.Id);
+    IPage? vault = entry.Bitwarden?.Page;
+    entry.Bitwarden = null;
     entry.Pages = 0;
     UpdateEmpty();
-    return owned.Select(page => page.Page).ToArray();
+    return vault is null ? owned.Select(page => page.Page).ToArray() : [.. owned.Select(page => page.Page), vault];
   }
 
   private async Task CloseRemovedPagesAsync(Guid owner, IPage[] removed) {
@@ -300,6 +302,8 @@ internal sealed partial class BrowserHost : IAsyncDisposable {
     public DateTimeOffset? DeferredUntil { get; set; }
     public int Active { get; set; }
     public int Pages { get; set; }
+    public BrowserPage<IPage>? Bitwarden { get; set; }
+    public Task<BrowserPage<IPage>>? OpeningBitwarden { get; set; }
     public int Downloads { get; set; }
     public bool Orphaned { get; set; }
     public List<string> Notices { get; } = [];

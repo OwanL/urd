@@ -9,23 +9,25 @@ import "../../chat/chat.css";
 import "../../chat/transcript/transcript.css";
 import "../../chat/composer/composer.css";
 
-window.fetch = async () =>
-  new Response(
-    JSON.stringify({
-      pages: [
-        {
-          id: "page",
-          ownerId: "owner",
-          title: "Example",
-          url: "https://example.com",
-          active: true,
-        },
-      ],
-    }),
-    {
-      headers: { "Content-Type": "application/json" },
-    },
-  );
+window.fetch = async (_input, init) => {
+  if (init?.method === "DELETE") return new Response(null, { status: 204 });
+  const body =
+    init?.method === "POST"
+      ? { id: "vault", ownerId: "session", title: "Bitwarden", url: "", active: false }
+      : {
+          bitwarden: location.hash === "#bitwarden",
+          pages: [
+            {
+              id: "page",
+              ownerId: "owner",
+              title: "Example",
+              url: "https://example.com",
+              active: true,
+            },
+          ],
+        };
+  return Response.json(body);
+};
 
 BrowserPageStream.prototype.send = () => true;
 BrowserPageStream.prototype.close = () => {};

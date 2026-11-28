@@ -16,6 +16,8 @@ interface BrowserWindowProps {
   open: boolean;
   pages: readonly BrowserPage[];
   selected: BrowserPage | undefined;
+  showingBitwarden: boolean;
+  bitwardenControl: ComponentChildren;
   onSelect(id: string): void;
   onMinimize(): void;
   onQuestion: (() => void) | undefined;
@@ -37,6 +39,8 @@ export function BrowserWindow({
   open,
   pages,
   selected,
+  showingBitwarden,
+  bitwardenControl,
   onSelect,
   onMinimize,
   onQuestion,
@@ -55,15 +59,17 @@ export function BrowserWindow({
     pointerEvents,
   } = useBrowserWindow(open);
   useLayoutEffect(() => {
-    if (open)
-      panel.current
-        ?.querySelector<HTMLElement>(".browser-page-surface")
-        ?.focus({ preventScroll: true });
+    if (!open) return;
+    const surface = panel.current?.querySelector<HTMLElement>(".browser-page-surface");
+    const bitwarden = panel.current?.querySelector<HTMLElement>(".browser-bitwarden-control");
+    (surface ?? bitwarden)?.focus({ preventScroll: true });
   }, [open, panel]);
-  if (!open || !selected) return null;
+  if (!open) return null;
+  const showTabs = pages.length > 1 || (!!bitwardenControl && pages.length > 0);
   const docked = mode !== "floating" && mode !== "maximized";
 
   const moveTabFocus = (event: KeyboardEvent) => {
+    if (!selected) return;
     const index = pages.indexOf(selected);
     const next =
       event.key === "Home"
@@ -104,11 +110,7 @@ export function BrowserWindow({
         }
       >
         <header class="browser-viewer-header" onPointerDown={onHeaderPointerDown}>
-          {pages.length === 1 ? (
-            <span class="browser-viewer-title" title={selected.url}>
-              {pageTitle(selected)}
-            </span>
-          ) : (
+          {showTabs ? (
             <nav
               class="browser-viewer-tabs"
               role="tablist"
@@ -122,8 +124,8 @@ export function BrowserWindow({
                     role="tab"
                     id={`${id}-${page.id}`}
                     aria-controls={`${id}-page`}
-                    aria-selected={page.id === selected.id}
-                    tabindex={page.id === selected.id ? 0 : -1}
+                    aria-selected={!showingBitwarden && page.id === selected?.id}
+                    tabindex={page.id === selected?.id ? 0 : -1}
                     class="browser-viewer-tab"
                     onClick={() => onSelect(page.id)}
                   >
@@ -132,6 +134,10 @@ export function BrowserWindow({
                 </Tooltip>
               ))}
             </nav>
+          ) : (
+            <span class="browser-viewer-title" title={selected?.url}>
+              {selected ? pageTitle(selected) : showingBitwarden ? "Bitwarden" : "Browser"}
+            </span>
           )}
           <div class="browser-viewer-grip" aria-hidden="true" />
           {onQuestion && (
@@ -139,6 +145,7 @@ export function BrowserWindow({
               Question
             </button>
           )}
+          {bitwardenControl}
           <label class="browser-layout-control" title="Window layout">
             <BrowserIcon name="layout" />
             <select
@@ -158,8 +165,11 @@ export function BrowserWindow({
         <div
           class="browser-viewer-body"
           id={`${id}-page`}
-          role={pages.length > 1 ? "tabpanel" : undefined}
-          aria-labelledby={pages.length > 1 ? `${id}-${selected.id}` : undefined}
+          role={showingBitwarden ? "region" : showTabs ? "tabpanel" : undefined}
+          aria-label={showingBitwarden ? "Bitwarden" : undefined}
+          aria-labelledby={
+            showTabs && !showingBitwarden && selected ? `${id}-${selected.id}` : undefined
+          }
         >
           {children}
         </div>

@@ -3,7 +3,7 @@ import { RequestError } from "./RequestError.ts";
 // Browser transport only: callers own cancellation of reads and explicit command retries.
 export async function requestJson<T>(
   url: URL,
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   body?: unknown,
   signal?: AbortSignal,
 ): Promise<T> {
@@ -33,7 +33,7 @@ export async function requestBlob(
 
 export async function requestEmpty(
   url: URL,
-  method: "POST",
+  method: "POST" | "DELETE",
   body: unknown,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -45,7 +45,7 @@ export async function requestEmpty(
 
 async function request(
   url: URL,
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   body?: unknown,
   signal?: AbortSignal,
   accept = "application/json",

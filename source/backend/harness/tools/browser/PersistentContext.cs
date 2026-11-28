@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Playwright;
 
@@ -16,26 +18,32 @@ internal sealed class PersistentContext : IAsyncDisposable {
   private readonly string profilePath;
   private readonly string cookiePath;
   private readonly string userAgentPath;
+  private readonly string? bitwardenExtensionPath;
+  private readonly string? bitwardenExtensionId;
   private IPlaywright? driver;
   private IBrowserContext? context;
   private bool ready;
   private bool closed;
 
-  private PersistentContext(string profilePath, string cookiePath) {
+  private PersistentContext(string profilePath, string cookiePath, string? bitwardenExtensionPath) {
     this.profilePath = profilePath;
     this.cookiePath = cookiePath;
+    this.bitwardenExtensionPath = bitwardenExtensionPath;
+    bitwardenExtensionId = bitwardenExtensionPath is null ? null : UnpackedExtensionId(bitwardenExtensionPath);
     userAgentPath = profilePath + ".user-agent";
   }
 
+  internal string? BitwardenUrl => bitwardenExtensionId is null ? null : $"chrome-extension://{bitwardenExtensionId}/popup/index.html";
   internal IBrowserContext Context => context ?? throw new InvalidOperationException("The browser is not running.");
 
   // True once the context closed or its browser disconnected; the host relaunches.
   internal bool IsClosed => closed || context?.IsClosed != false;
 
-  internal static async Task<PersistentContext> StartAsync(string profilePath, string cookiePath, CancellationToken cancellation) {
+  internal static async Task<PersistentContext> StartAsync(string profilePath, string cookiePath, string? bitwardenExtensionPath,
+      CancellationToken cancellation) {
     string executable = await WebBrowserInstall.EnsureAsync(WebBrowserInstall.DefaultCache, null, cancellation);
     cancellation.ThrowIfCancellationRequested();
-    var browser = new PersistentContext(profilePath, cookiePath);
+    var browser = new PersistentContext(profilePath, cookiePath, bitwardenExtensionPath);
     try {
       await browser.LaunchAsync(executable, cancellation);
       return browser;
@@ -74,13 +82,30 @@ internal sealed class PersistentContext : IAsyncDisposable {
         ExecutablePath = executable,
         ChromiumSandbox = true,
         Headless = true,
-        IgnoreDefaultArgs = ["--enable-automation"],
-        Args = ["--disable-blink-features=AutomationControlled"],
+        IgnoreDefaultArgs = bitwardenExtensionPath is null ? ["--enable-automation"] : ["--enable-automation", "--disable-extensions"],
+        Args = bitwardenExtensionPath is null ? ["--disable-blink-features=AutomationControlled"] : [
+          "--disable-blink-features=AutomationControlled",
+          $"--disable-extensions-except={bitwardenExtensionPath}", $"--load-extension={bitwardenExtensionPath}"
+        ],
         UserAgent = userAgent,
         ViewportSize = new ViewportSize { Width = 1280, Height = 800 },
         AcceptDownloads = true,
         Timeout = LaunchTimeoutMilliseconds
       });
+
+  // The pinned unpacked build has no manifest key. Match Chromium's GenerateIdForPath.
+  private static string UnpackedExtensionId(string path) {
+    if (OperatingSystem.IsWindows() && Path.IsPathFullyQualified(path) && path[1] == ':')
+      path = char.ToUpperInvariant(path[0]) + path[1..];
+    byte[] hash = SHA256.HashData((OperatingSystem.IsWindows() ? Encoding.Unicode : Encoding.UTF8).GetBytes(path));
+    return string.Create(32, hash, (id, bytes) => {
+      for (int i = 0; i < id.Length; i += 2) {
+        byte value = bytes[i / 2];
+        id[i] = (char)('a' + (value >> 4));
+        id[i + 1] = (char)('a' + (value & 15));
+      }
+    });
+  }
 
   private async Task<string?> ReadUserAgentAsync(string? browserVersion, CancellationToken cancellation) {
     if (string.IsNullOrEmpty(browserVersion) || !File.Exists(userAgentPath))
@@ -111,7 +136,7 @@ internal sealed class PersistentContext : IAsyncDisposable {
     List<SessionCookie>? saved = null;
     if (live is not null && ready && !live.IsClosed) {
       try {
-        saved = SessionCookies(await live.CookiesAsync());
+        saved = SessionCookies(await live.CookiesAsync(), bitwardenExtensionId);
       } catch (PlaywrightException) {
         // The browser may have died; the previous cookie file stays authoritative.
       }
@@ -165,8 +190,8 @@ internal sealed class PersistentContext : IAsyncDisposable {
 
   // A cookie with no expiry holds the -1 sentinel; both are session cookies that die with the
   // browser.
-  private static List<SessionCookie> SessionCookies(IReadOnlyList<BrowserContextCookiesResult> cookies) => cookies
-      .Where(cookie => cookie.Expires < 0)
+  private static List<SessionCookie> SessionCookies(IReadOnlyList<BrowserContextCookiesResult> cookies, string? extensionId) => cookies
+      .Where(cookie => cookie.Expires < 0 && cookie.Domain != extensionId)
       .Select(cookie => new SessionCookie(cookie.Name, cookie.Value, cookie.Domain, cookie.Path,
           cookie.Expires, cookie.HttpOnly, cookie.Secure,
           cookie.SameSite.ToString(), cookie.PartitionKey))

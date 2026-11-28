@@ -25,15 +25,15 @@ export function pageTitle(page: BrowserPage): string {
   }
 }
 
-export async function readBrowserPages(
-  sessionId: string,
-  signal?: AbortSignal,
-): Promise<readonly BrowserPage[]> {
-  const result = await requestJson<{ pages: readonly BrowserPage[] }>(
-    new URL(`/api/sessions/${encodeURIComponent(sessionId)}/browser`, location.origin),
-    "GET",
-    undefined,
-    signal,
-  );
-  return result.pages ?? [];
+interface BrowserPages {
+  pages: readonly BrowserPage[];
+  bitwarden: boolean;
+}
+
+export function readBrowserPages(sessionId: string, signal: AbortSignal): Promise<BrowserPages> {
+  return requestJson(browserPagesUrl(sessionId), "GET", undefined, signal);
+}
+
+export function browserPagesUrl(sessionId: string, path = ""): URL {
+  return new URL(`/api/sessions/${encodeURIComponent(sessionId)}/browser${path}`, location.origin);
 }

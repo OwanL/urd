@@ -9,27 +9,66 @@ namespace Urd.Server;
 internal static class BrowserViewerRoutes {
   private static readonly TimeSpan TitleTimeout = TimeSpan.FromSeconds(2);
 
-  internal static void MapBrowserViewer(this IEndpointRouteBuilder app, SessionManager sessions) {
+  internal static void MapBrowserViewer(this IEndpointRouteBuilder app, SessionManager sessions, Func<Uri?>? origin = null) {
     app.MapGet("/api/sessions/{primaryId:guid}/browser", (HttpContext http, Guid primaryId) =>
-        ListAsync(http, sessions, primaryId));
+        ListAsync(http, sessions, primaryId, origin?.Invoke()));
+    app.MapPost("/api/sessions/{primaryId:guid}/browser/bitwarden", (HttpContext http, Guid primaryId) =>
+        OpenBitwardenAsync(http, sessions, primaryId, origin?.Invoke()));
+    app.MapDelete("/api/sessions/{primaryId:guid}/browser/bitwarden/{pageId:guid}", (HttpContext http, Guid primaryId, Guid pageId) =>
+        CloseBitwardenAsync(http, sessions, primaryId, pageId, origin?.Invoke()));
     app.MapGet("/browser-view/{primaryId:guid}/{pageId:guid}", (HttpContext http, Guid primaryId, Guid pageId) =>
-        ViewAsync(http, sessions, primaryId, pageId));
+        ViewAsync(http, sessions, primaryId, pageId, origin?.Invoke()));
   }
 
-  private static async Task<IResult> ListAsync(HttpContext http, SessionManager sessions, Guid primaryId) {
+  private static async Task<IResult> ListAsync(HttpContext http, SessionManager sessions, Guid primaryId, Uri? origin) {
     IReadOnlyList<Guid>? owners = await sessions.BrowserViewerOwnersAsync(primaryId, http.RequestAborted);
     if (owners is null)
       return Results.NotFound();
     BrowserHost? host = sessions.BrowserHost;
+    bool bitwarden = host?.BitwardenEnabled == true && LanHostingRoutes.IsLocal(http, origin);
     if (host is null)
-      return Results.Ok(new { pages = Array.Empty<BrowserPageDto>() });
+      return Results.Ok(new { pages = Array.Empty<BrowserPageDto>(), bitwarden });
 
     var pages = owners.SelectMany(owner => {
       Guid? selected = host.Pages.Selected(owner)?.Id;
       return host.Pages.List(owner).Select(page => (Page: page, Active: page.Id == selected));
     }).ToArray();
     BrowserPageDto?[] details = await Task.WhenAll(pages.Select(item => DescribeAsync(host, item.Page, item.Active, http.RequestAborted)));
-    return Results.Ok(new { pages = details.OfType<BrowserPageDto>().ToArray() });
+    return Results.Ok(new { pages = details.OfType<BrowserPageDto>().ToArray(), bitwarden });
+  }
+
+  private static async Task<IResult> OpenBitwardenAsync(HttpContext http, SessionManager sessions, Guid primaryId, Uri? origin) {
+    if (!LanHostingRoutes.IsLocal(http, origin))
+      return Results.StatusCode(StatusCodes.Status403Forbidden);
+    BrowserHost? host = sessions.BrowserHost;
+    if (host?.BitwardenEnabled != true || !await sessions.CanOpenBrowserVaultAsync(primaryId, http.RequestAborted))
+      return Results.NotFound();
+    // A dispatched open outlives its HTTP request so it can always reconcile with session closure.
+    BrowserPage<IPage> page = await host.OpenBitwardenAsync(primaryId, CancellationToken.None);
+    bool admissible;
+    try {
+      admissible = await sessions.CanOpenBrowserVaultAsync(primaryId, CancellationToken.None);
+    } catch {
+      await host.CloseBitwardenAsync(primaryId, page.Id);
+      throw;
+    }
+    if (!admissible) {
+      await host.CloseBitwardenAsync(primaryId, page.Id);
+      return Results.NotFound();
+    }
+    return host.GetBitwarden(primaryId, page.Id) is null
+        ? Results.NotFound()
+        : Results.Ok(new BrowserPageDto(page.Id, primaryId, "Bitwarden", "", false));
+  }
+
+  private static async Task<IResult> CloseBitwardenAsync(HttpContext http, SessionManager sessions, Guid primaryId, Guid pageId, Uri? origin) {
+    if (!LanHostingRoutes.IsLocal(http, origin))
+      return Results.StatusCode(StatusCodes.Status403Forbidden);
+    BrowserHost? host = sessions.BrowserHost;
+    if (host is null || await sessions.BrowserViewerOwnersAsync(primaryId, http.RequestAborted) is null ||
+        !await host.CloseBitwardenAsync(primaryId, pageId))
+      return Results.NotFound();
+    return Results.NoContent();
   }
 
   private static async Task<BrowserPageDto?> DescribeAsync(BrowserHost host, BrowserPage<IPage> page, bool active,
@@ -51,7 +90,7 @@ internal static class BrowserViewerRoutes {
     }
   }
 
-  private static async Task ViewAsync(HttpContext http, SessionManager sessions, Guid primaryId, Guid pageId) {
+  private static async Task ViewAsync(HttpContext http, SessionManager sessions, Guid primaryId, Guid pageId, Uri? origin) {
     if (!http.WebSockets.IsWebSocketRequest) {
       http.Response.StatusCode = StatusCodes.Status400BadRequest;
       return;
@@ -60,6 +99,8 @@ internal static class BrowserViewerRoutes {
     BrowserHost? host = sessions.BrowserHost;
     BrowserPage<IPage>? page = host is null || owners is null ? null : owners
         .Select(owner => host.Pages.Get(owner, pageId)).FirstOrDefault(candidate => candidate is not null);
+    if (page is null && host is not null && owners is not null && LanHostingRoutes.IsLocal(http, origin))
+      page = host.GetBitwarden(primaryId, pageId);
     if (page is null) {
       http.Response.StatusCode = StatusCodes.Status404NotFound;
       return;

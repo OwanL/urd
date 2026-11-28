@@ -63,19 +63,21 @@ export class BrowserPageStream {
     this.framesSinceOpen = 0;
     this.handlers.stateChange("connecting", null);
     socket.onopen = () => {
+      if (socket !== this.socket) return;
       this.failures = 0;
       this.watchForFirstFrame();
       this.handlers.stateChange("open", null);
     };
     socket.onmessage = (event) => {
       // The protocol only replies with JPEG frames; unexpected text is ignored.
-      if (typeof event.data === "string") return;
+      if (socket !== this.socket || typeof event.data === "string") return;
       this.framesSinceOpen += 1;
       this.silentOpens = 0;
       this.clearFirstFrameTimer();
       this.handlers.frame(event.data as Blob);
     };
     socket.onclose = (event) => {
+      if (socket !== this.socket) return;
       this.socket = null;
       this.clearFirstFrameTimer();
       if (this.closed) return;

@@ -109,6 +109,24 @@ A disposable probe already showed frame display and click mapping on headless Ch
   agent is working, the agent's next action may fail or see a changed page, and it re-reads the
   page. Stop removes the agent.
 
+## Bitwarden
+
+Bitwarden is on by default. On first startup, Urd downloads and checksum-verifies a pinned
+Bitwarden extension from its official GitHub release. If the install fails, Urd starts without
+it and tries again on the next startup. You can also retry from **Settings → General → Bitwarden**
+on the local Urd address, then restart Urd. The extension does not auto-update. The browser
+stays headless. Use **Open Bitwarden** in the browser viewer to sign in or unlock. Bitwarden owns its vault and save prompts; to select a saved login on a
+site, use Bitwarden's inline suggestions. If the inline menu is off, enable it in Bitwarden's
+autofill settings. Disabling the extension takes effect on restart and does not delete its
+profile data. Device approval is a sign-in option, not an unlock method for a locked vault.
+
+The vault tab is available only through the local viewer. It doesn't appear in agent page
+listings or consume an agent page slot. This is not a security boundary: Bitwarden runs in
+Urd's shared Chromium profile; agents with shell access are not isolated from that profile.
+Urd relays viewer input and frames but doesn't save vault credentials separately. Once a
+password is autofilled into a site, page scripts and agent browser tools can read it. Stop
+any agent you don't want observing a sensitive handoff.
+
 ## Agent tool
 
 One `browser` tool. Navigation, a new document and `snapshot` without a ref return the full page

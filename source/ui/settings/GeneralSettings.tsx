@@ -7,6 +7,7 @@ import {
 import type { PreferencesState } from "../preferences/usePreferences.ts";
 import { WorkingDirectorySetting } from "./WorkingDirectorySetting.tsx";
 import { LanHostingSetting } from "./LanHostingSetting.tsx";
+import { BitwardenSetting } from "./BitwardenSetting.tsx";
 
 interface GeneralSettingsProps {
   state: PreferencesState;
@@ -118,7 +119,12 @@ export function GeneralSettings({
           {triggerError && <p role="alert">{triggerError}</p>}
         </div>
       </div>
-      {location.hostname === "127.0.0.1" && <LanHostingSetting />}
+      {location.hostname === "127.0.0.1" && (
+        <>
+          <LanHostingSetting />
+          <BitwardenSetting />
+        </>
+      )}
     </section>
   );
 }

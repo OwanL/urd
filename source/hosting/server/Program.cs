@@ -48,7 +48,7 @@ internal static class Program {
         }));
         if (options.ShowTray && OperatingSystem.IsWindowsVersionAtLeast(6, 1))
           tray = ServerTray.Show(options.DataRoot, origin, lanHosting, stopping.Cancel);
-      }, stopping.Token, warmInstructions: true);
+      }, stopping.Token, warmInstructions: true, installBitwarden: true);
       return 0;
     } catch (Exception failure) {
       await Console.Error.WriteLineAsync(failure.ToString());
@@ -63,14 +63,14 @@ internal static class Program {
   }
 
   internal static Task RunServerAsync(ServerOptions options, Action<Uri, LanHosting> onReady, CancellationToken stopping,
-      bool warmInstructions = false) =>
-      RunServerAsync(options, onReady, null, stopping, warmInstructions: warmInstructions);
+      bool warmInstructions = false, bool installBitwarden = false) =>
+      RunServerAsync(options, onReady, null, stopping, warmInstructions: warmInstructions, installBitwarden: installBitwarden);
 
   // Production borrows provider-managed clients. Tests may supply an owned client;
   // the run disposes it only after successful drain, never through a session.
   internal static async Task RunServerAsync(ServerOptions options, Action<Uri, LanHosting> onReady, Func<IChatClient>? createClient,
       CancellationToken stopping, Func<UrdStore, Func<Uri>, ProviderManager>? createProviders = null,
-      Func<MessageMarkdownService>? createMarkdown = null, bool warmInstructions = false) {
+      Func<MessageMarkdownService>? createMarkdown = null, bool warmInstructions = false, bool installBitwarden = false) {
     ArgumentNullException.ThrowIfNull(options);
     ArgumentNullException.ThrowIfNull(onReady);
     Directory.CreateDirectory(options.DataRoot);
@@ -90,6 +90,7 @@ internal static class Program {
     LanHosting? lanHosting = null;
     LauncherPipe? launcherPipe = null;
     Uri? servedOrigin = null;
+    using var bitwarden = new BitwardenInstallation(options.DataRoot);
     ExceptionDispatchInfo? runFailure = null;
     try {
       store = UrdStore.Open(Path.Combine(options.DataRoot, "urd.sqlite"));
@@ -114,7 +115,9 @@ internal static class Program {
           ?? throw new InvalidOperationException("The server is not ready."), "/mcp/auth/callback"), options.DataRoot);
       manager = new SessionManager(store, client is { } supplied ? (_, _) => supplied : providers.CreateChatClient,
           tools, preferences, new ModelSelector(providers), mcp);
-      manager.ConfigureBrowser(options.DataRoot);
+      if (installBitwarden)
+        await bitwarden.InitializeAsync(stopping);
+      manager.ConfigureBrowser(options.DataRoot, bitwarden.ActiveExtensionPath);
       eventHub = new SessionEventHub(manager);
       // Initial local limits reuse the exercised workload; transient parser memory is separate.
       markdown = createMarkdown?.Invoke() ?? new MessageMarkdownService(new(
@@ -126,6 +129,7 @@ internal static class Program {
           () => Volatile.Read(ref servedOrigin), lanAccess, errorLog, lan: false);
       app.MapMcpConnections(mcp);
       app.MapLanHosting(() => lanHosting, () => Volatile.Read(ref servedOrigin));
+      app.MapBitwarden(bitwarden, () => Volatile.Read(ref servedOrigin));
       var shutdownRequested = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
       using var lifetimeStop = app.Lifetime.ApplicationStopping.Register(() => shutdownRequested.TrySetResult());
       using var callerStop = stopping.Register(app.Lifetime.StopApplication);
@@ -250,7 +254,7 @@ internal static class Program {
         context.Features.Get<IHttpRequestBodyDetectionFeature>()?.CanHaveBody == true
             ? Results.BadRequest() : Results.NoContent());
     app.MapSessions(manager);
-    app.MapBrowserViewer(manager);
+    app.MapBrowserViewer(manager, servedOrigin);
     app.MapFiles();
     app.MapEvents(manager, eventHub);
     if (markdown is not null)

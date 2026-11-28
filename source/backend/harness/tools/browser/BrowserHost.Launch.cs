@@ -2,6 +2,9 @@ namespace Urd.Core.Tools;
 
 // Starts the shared browser on first use and exits it, saving cookies, when it retires.
 internal sealed partial class BrowserHost {
+  private readonly string? bitwardenExtensionPath;
+  internal bool BitwardenEnabled => bitwardenExtensionPath is not null;
+
   // Launches lazily, once; callers waiting on a shared launch each cancel only their own wait.
   private Task<PersistentContext> BeginLaunchAsync(CancellationToken cancellation) {
     Task<PersistentContext> shared;
@@ -25,7 +28,7 @@ internal sealed partial class BrowserHost {
   private async Task<PersistentContext> RunLaunchAsync(Task predecessor) {
     await Task.Yield();
     await predecessor;
-    return await PersistentContext.StartAsync(profilePath, cookiePath, shutdown.Token);
+    return await PersistentContext.StartAsync(profilePath, cookiePath, bitwardenExtensionPath, shutdown.Token);
   }
 
   private static async Task ExitBrowserAsync(Task<PersistentContext> pending) {

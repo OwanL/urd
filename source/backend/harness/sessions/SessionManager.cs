@@ -35,10 +35,12 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
   internal BrowserHost? BrowserHost { get; private set; }
 
   // Configure before publishing session routes or creating sessions.
-  public void ConfigureBrowser(string dataRoot) {
+  public void ConfigureBrowser(string dataRoot) => ConfigureBrowser(dataRoot, bitwardenExtensionPath: null);
+
+  internal void ConfigureBrowser(string dataRoot, string? bitwardenExtensionPath) {
     if (BrowserHost is not null)
       throw new InvalidOperationException("Browser is already configured.");
-    BrowserHost = new BrowserHost(dataRoot, sessionId => HasPendingUserQuestionAsync(sessionId));
+    BrowserHost = new BrowserHost(dataRoot, sessionId => HasPendingUserQuestionAsync(sessionId), bitwardenExtensionPath);
     BrowserHost.Changed += OnBrowserChanged;
   }
 
@@ -50,6 +52,10 @@ public sealed partial class SessionManager : IAsyncDisposable, ISubagentRunner, 
   // Registry ancestry identifies live candidates; only persisted ancestry grants viewer access.
   internal Task<IReadOnlyList<Guid>?> BrowserViewerOwnersAsync(Guid primaryId, CancellationToken cancellation = default) =>
       browserViewers.OwnersAsync(primaryId, cancellation);
+
+  internal Task<bool> CanOpenBrowserVaultAsync(Guid primaryId, CancellationToken cancellation = default) =>
+      registry.RunOpenAsync(() => store.Sessions.Read(primaryId) is { Kind: SessionKind.Primary } record &&
+          !(record.SnoozedUntil > DateTimeOffset.UtcNow), cancellation);
 
   public Guid BootId { get; } = Guid.NewGuid();
 

@@ -1,10 +1,11 @@
 // Viewer control glyphs the shared Icon set does not carry.
-export type BrowserIconName = "browser" | "layout" | "minimize";
+export type BrowserIconName = "browser" | "key" | "layout" | "minimize";
 
 const paths: Record<BrowserIconName, string> = {
   browser:
     "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20ZM2 12h20" +
     "M12 2c2.9 2.9 4.3 6.2 4.3 10s-1.4 7.1-4.3 10c-2.9-2.9-4.3-6.2-4.3-10S9.1 4.9 12 2Z",
+  key: "M14 3a6 6 0 0 0-5.7 7.9L3 16.2V21h4.8l1.9-1.9v-2.8h2.8l1.6-1.6A6 6 0 0 0 14 3ZM15.5 8.5h.01",
   layout: "M3 5h18v14H3ZM14 5v14",
   minimize: "M5 16h14",
 };

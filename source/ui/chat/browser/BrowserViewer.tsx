@@ -3,8 +3,10 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "preact/hook
 import { Tooltip } from "../../controls/Tooltip.tsx";
 import { pageTitle, readBrowserPages, type BrowserPage } from "./BrowserPage.ts";
 import { BrowserIcon } from "./BrowserIcon.tsx";
+import { BrowserIconButton } from "./BrowserIconButton.tsx";
 import { BrowserPageView } from "./BrowserPageView.tsx";
 import { BrowserWindow } from "./BrowserWindow.tsx";
+import { useBitwardenPage } from "./useBitwardenPage.ts";
 import "./browser-viewer.css";
 
 interface BrowserViewerProps {
@@ -29,6 +31,7 @@ export function BrowserViewer({
   children,
 }: BrowserViewerProps) {
   const [pages, setPages] = useState<readonly BrowserPage[]>([]);
+  const [bitwardenAvailable, setBitwardenAvailable] = useState(false);
   const [readFailure, setReadFailure] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [fromQuestion, setFromQuestion] = useState(false);
@@ -36,6 +39,11 @@ export function BrowserViewer({
   const trigger = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef<(() => void) | null>(null);
   const panelId = useId();
+  const {
+    state: bitwarden,
+    close: closeBitwarden,
+    toggle: toggleBitwarden,
+  } = useBitwardenPage(sessionId, active && open && bitwardenAvailable);
 
   useEffect(() => {
     if (!active) return;
@@ -43,15 +51,17 @@ export function BrowserViewer({
     readBrowserPages(sessionId, controller.signal)
       .then((result) => {
         if (controller.signal.aborted) return;
-        setPages(result);
+        const nextPages = result.pages ?? [];
+        setPages(nextPages);
+        setBitwardenAvailable(result.bitwarden === true);
         onOwnersChange([
-          ...new Set(result.filter((page) => page.active).map((page) => page.ownerId)),
+          ...new Set(nextPages.filter((page) => page.active).map((page) => page.ownerId)),
         ]);
         setReadFailure(null);
-        if (!result.length) setOpen(false);
+        if (!nextPages.length && !result.bitwarden) setOpen(false);
         setSelectedPageId((current) => {
-          if (result.some((page) => page.id === current)) return current;
-          return (result.find((page) => page.active) ?? result[0])?.id ?? null;
+          if (nextPages.some((page) => page.id === current)) return current;
+          return (nextPages.find((page) => page.active) ?? nextPages[0])?.id ?? null;
         });
       })
       .catch((failure) => {
@@ -67,10 +77,11 @@ export function BrowserViewer({
     const page = pages.find((item) => item.ownerId === openRequest.ownerId && item.active);
     if (!page) return;
     handledRequest.current = openRequest.sequence;
+    closeBitwarden();
     setSelectedPageId(page.id);
     setFromQuestion(true);
     setOpen(true);
-  }, [openRequest, pages, active]);
+  }, [openRequest, pages, active, closeBitwarden]);
 
   useLayoutEffect(() => {
     if (open || !returnFocus.current) return;
@@ -83,7 +94,16 @@ export function BrowserViewer({
     setOpen(false);
   };
   const selected = pages.find((page) => page.id === selectedPageId) ?? pages[0];
-  const launcher = pages.length > 0 && (
+  const showingBitwarden = bitwarden?.kind === "open";
+  const displayed = showingBitwarden ? bitwarden.page : selected;
+  const bitwardenNotice =
+    bitwarden?.kind === "opening"
+      ? "Opening Bitwarden…"
+      : bitwarden?.kind === "failed"
+        ? bitwarden.message
+        : null;
+  const canOpen = !!selected || bitwardenAvailable;
+  const launcher = canOpen && (
     <Tooltip
       content={
         <>
@@ -121,10 +141,32 @@ export function BrowserViewer({
       <div class="chat-pane">{children(launcher)}</div>
       <BrowserWindow
         id={panelId}
-        open={active && open && !!selected}
+        open={active && open && canOpen}
         pages={pages}
         selected={selected}
-        onSelect={setSelectedPageId}
+        showingBitwarden={showingBitwarden}
+        bitwardenControl={
+          bitwardenAvailable ? (
+            <BrowserIconButton
+              icon="key"
+              label={
+                showingBitwarden
+                  ? "Close Bitwarden"
+                  : bitwarden?.kind === "opening"
+                    ? "Cancel opening Bitwarden"
+                    : "Open Bitwarden"
+              }
+              aria-expanded={showingBitwarden}
+              aria-controls={`${panelId}-page`}
+              class="browser-bitwarden-control"
+              onClick={toggleBitwarden}
+            />
+          ) : undefined
+        }
+        onSelect={(id) => {
+          closeBitwarden();
+          setSelectedPageId(id);
+        }}
         onMinimize={() => minimize()}
         onQuestion={
           fromQuestion && onReturnToQuestion ? () => minimize(onReturnToQuestion) : undefined
@@ -135,7 +177,21 @@ export function BrowserViewer({
             {readFailure}
           </p>
         )}
-        {selected && <BrowserPageView sessionId={sessionId} page={selected} enabled={active} />}
+        {bitwardenNotice && (
+          <p class="browser-viewer-notice" role="status">
+            {bitwardenNotice}
+          </p>
+        )}
+        {displayed ? (
+          <BrowserPageView
+            key={displayed.id}
+            sessionId={sessionId}
+            page={displayed}
+            enabled={active}
+          />
+        ) : (
+          !bitwardenNotice && <p class="browser-viewer-notice">No browser pages.</p>
+        )}
       </BrowserWindow>
     </>
   );

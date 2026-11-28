@@ -35,6 +35,26 @@ async function openViewer(width = 1200, height = 800): Promise<Page> {
   return page;
 }
 
+void test("Bitwarden opens from the keyboard and returns to the selected browser page", async () => {
+  const page = await browser.newPage();
+  try {
+    await page.goto(`${server.resolvedUrls!.local[0]}geometry-test#bitwarden`);
+    await page.getByRole("button", { name: "Join browser" }).click();
+    const normal = page.getByRole("tab", { name: "Example" });
+    const key = page.getByRole("button", { name: "Open Bitwarden" });
+    await key.focus();
+    await key.press("Enter");
+    await page.getByRole("region", { name: "Bitwarden" }).locator("canvas").waitFor();
+    assert.equal(await normal.getAttribute("aria-selected"), "false");
+    await normal.click();
+    await page.getByRole("tabpanel", { name: "Example" }).locator("canvas").waitFor();
+    await key.waitFor();
+    assert.equal(await normal.getAttribute("aria-selected"), "true");
+  } finally {
+    await page.close();
+  }
+});
+
 async function rect(page: Page, selector: string): Promise<Rect> {
   const box = await page.locator(selector).boundingBox();
   assert.ok(box, `${selector} is visible`);

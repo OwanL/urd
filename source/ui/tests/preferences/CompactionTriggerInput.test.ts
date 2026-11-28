@@ -24,7 +24,9 @@ void test("compaction trigger input maps blank to the default and preserves vali
 void test("compaction slider fits the default and rounds only the thumb for exact overrides", () => {
   assert.equal(compactionSliderPosition(defaultCompactionTriggerTokenCount), 150_000);
   for (const [exact, thumb] of [
-    [1, 5_000],
+    [5_000, 40_000],
+    [40_000, 40_000],
+    [45_000, 45_000],
     [78_123, 80_000],
     [2_147_483_647, 300_000],
   ] as const) {

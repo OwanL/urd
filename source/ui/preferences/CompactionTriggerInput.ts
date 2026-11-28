@@ -1,7 +1,7 @@
 export const maximumCompactionTriggerTokenCount = 2_147_483_647;
 // Matches the server's ContextTokenBudget default. Reset still sends null, not this number.
 export const defaultCompactionTriggerTokenCount = 150_000;
-export const compactionSlider = { min: 5_000, max: 300_000, step: 5_000 } as const;
+export const compactionSlider = { min: 40_000, max: 300_000, step: 5_000 } as const;
 
 // Exact overrides can be off-scale or between steps. Move only the thumb, not the draft.
 export function compactionSliderPosition(tokenCount: number): number {
